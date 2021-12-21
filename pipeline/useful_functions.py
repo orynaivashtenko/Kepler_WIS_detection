@@ -16,7 +16,7 @@ from astropy.io import fits
 import copy
 from scipy.stats import chi2
 from scipy.optimize import minimize
-sys.path.append('/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Code/template_module')
+sys.path.append(os.getcwd())
 import template_module as tm
 
 

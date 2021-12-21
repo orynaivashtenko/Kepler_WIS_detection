@@ -15,31 +15,18 @@ import os
 import wget
 import requests
 import copy
-# import sys
+import sys
 import warnings
 from scipy.signal import iirnotch
 from scipy.signal import tf2sos
 from scipy.signal import tf2zpk
 from scipy.signal import sosfiltfilt
-# sys.path.append('/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Code/template_module')
-import template_module as tm
-# sys.path.append('/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Code/useful_functions')
-# import useful_functions as uf
 import importlib
 import numba
-importlib.reload(tm)
-
 import time
 
-
-
 #PARAMETERS INITIALIZATION
-data_location = '/Data'
-output_location = '/Output'
-#TODO: write a function to save something there
-# template_module_location = '/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Code/template_module'
-template_bank_file = 'template_bank.txt'
-shifts_template_bank_file = 'shifts_template_bank.txt'
+
 #Masking:
 nsig_outliers_0 = 5
 nsig_outliers_0_pos = None #it is possible to mask positive and negatve outliers differently
@@ -96,9 +83,23 @@ duty_cycle = 0.1
 Pmin = 70
 Pmax = 400
 
+data_location = '/Users/orynaivashtenko/Work/Kepler_Project/Data/llc_trial_2'
+output_location = '/Users/orynaivashtenko/Work/Kepler_Project/Objects_output'
+#TODO: write a function to save something there
+
+location = os.getcwd()
+sys.path.append(location)
+parameters_file = os.path.join(location, 'pipeline_parameters.txt')
 #PARAMETERS CAN BE SPECIFIED IN THE FILE, AND THEY WILL BE READ FROM IT
-#variables_from_file('/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Code/pipeline_parameters.txt')
+#variables_from_file(parameters_file)
+template_module_location = os.path.join(location,'template_module')
+template_bank_file = os.path.join(location, 'template_bank.txt')
+shifts_template_bank_file = os.path.join(location, 'shifts_template_bank.txt')
+import template_module as tm
+importlib.reload(tm)
+
 #TODO: update usege of these parameters in the code
+
 
 class KeplerLightCurve(object):  
     def __init__(self, target_id=None, times=[], fluxes=[], get_data=True, data_location=data_location): #, load_data_from_file=False
