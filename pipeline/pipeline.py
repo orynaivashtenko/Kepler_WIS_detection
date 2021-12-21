@@ -83,6 +83,8 @@ duty_cycle = 0.1
 Pmin = 70
 Pmax = 400
 
+track_process = False
+
 data_location = '/Users/orynaivashtenko/Work/Kepler_Project/Data/llc_trial_2'
 output_location = '/Users/orynaivashtenko/Work/Kepler_Project/Objects_output'
 #TODO: write a function to save something there
@@ -263,164 +265,183 @@ class KeplerLightCurve(object):
         Mean values of the flux are subtracted to have signal centered around zero. 
         Means are saved in self.means:
         """
-        t1 = time.time()
-        t0 = t1
-        print('Subtracting means...', end=' ')
-        self.subtract_means(save_means=True)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Values diverging from the large trend more than by 3 standard deviations are added to the mask 
-        as False (before, mask marked bins containing NaN). psd_masks are also modified, because we don't 
-        want outliers to take part in PSD measurement:
-        """
-        print('Masking outliers...', end=' ')
-        self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Zero padding is needed to apply the whitening filter to avoid crosstalk between ends. 
-        Applying filters in Fourier domain is equivalent to circular convolution, therefore 
-        the ends of the data will influence each other which is unphysical. As well, at this step 
-        the time array is interpolated and extended on the zero-padded region.
-        """
-        # zero padding is needed to apply the whitening filter to avoid crosstalk between ends.
-        # When padding by zeros is done before the interpolation, in the interpolation the padded zeros become non-zeros, 
-        # and due to this the overall trends will not probuce  outliers inside the data at the ends.
-        # REM: the floating mean is subtracted with whitening
-        print('Padding by zeros...', end=' ')
-        self.pad_by_zeros() 
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Will fill all the bad data masked by mask with linear interpolation. Interpolation 
-        is required for whitening, notching and other filters because filtering is making linear 
-        combinations of points in the kernel, and adding bad data or NaN there will spoil all 
-        the data. These points still remain masked for the PSD measurement if there is enough 
-        slices. Otherwise, the masks will not be cleaned from small holes. Therefore data in maskes
-        points will be used only if necessary. Remark: when padding by zeros is done before the 
-        interpolation, in the interpolation the padded zeros become constant values equal to the 
-        last edge data value, and due to this outliers will not be produced in the data at the ends:
-        """
-        # Interpolation is required for whitening, notching etc.
-        # But in the preparation for PSD, the masks will not be cleaned if not needed,
-        # therefore data in holes will be used only if necessary
-        print('Interpolating fluxes...', end=' ')
-        self.interpolate_fluxes()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        In the preparation for PSD, the code is making sure that there is enough slices (npsdsmin) 
-        to ensure the needed precision in PSD measurement. If there is not enough, 
-        clean_small_holes() is used to remove small holes from the PSD mask. They are not 
-        significant, so we easily can take interpolated values in them:
-        """
-        #TODO: maybe define two levels of small holes and two npsds
-        #TODO: maybe define better distribution of pieces in Welch
-        print('Preparing fpr PSD...', end=' ')
-        self.prepare_for_psd(nperseg=nperseg_psd, noverlap=noverlap_psd, 
-                             npsdsmin=npsdsmin, interp_method='linear')
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Use Welch method to measure Power Spectral Density. Split data into multiple slices 
-        of length nperseg_psd, calculate their abs squared of Fourier transform, and average. 
-        The resulting array will have length nperseg_psd, therefore for making whitening filters, 
-        (psd)^{-0.5} is converted to time domain and padded by zeros (finite response filter). 
-        PSD and whitening filters are quarter-specific:
-        """
-        print('Measuring PSD...', end=' ')
-        self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd, subtract_mean=subtract_mean_in_psd, rfft=use_rfft)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Whitening filters are applied to the fluxes to create whitened fluxes. (Remark: the 
-        floating mean is subtracted with whitening):
-        """
-        print('Whitening fluxes...', end=' ')
-        self.whiten_fluxes()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Masking outliers in whitened fluxes. Effectively we are making detection in the whitened
-        data with whitened template, so outliers are unwanted there:
-        """
-        print('Masking outliers...', end=' ')
-        self.mask_flux_outliers(nsig_outliers_w, in_whitened_fluxes=True, modify_psd_masks=True)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Interpolation to cover also new outliers. Note that outliers were masked in the whitened 
-        flux, but interpolation is made in the red flux. It is possible to make interpolation in 
-        the whitened flux and then redden it, but the inverse whitening filter is unstable, so 
-        the red flux changes significantly. As well, in most cases interpolation in the red flux 
-        indeed fixes the outliers because the corresponding point in the red flux has the biggest 
-        impact on the outlier:
-        """
-        # Before notch need to interpolate over mask because holes will not allow to do whitening which is needed in notch,
-        # and need to freshly whiten the fluxes because need whitened_fd for notch
-        print('Interploating fluxes...', end=' ')
-        self.interpolate_fluxes()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        Whiten the interpolated fluxes again before applying the Notch filter because in it, 
-        the whitened fluxes in Fourier domain are needed:
-        """
-        print('Whitening fluxes...', end=' ')
-        self.whiten_fluxes()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        In whitened_fluxes_fd, common peaks in all the quarters are searched, and Notch filters 
-        are designed to suppressed them. They are applied to the fluxes:
-        """
-        print('Notching fluxes...', end=' ')
-        self.notch_fluxes(nsig=nsig_notch)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        #There is an option to remeasure PSD after notch. Usually, it leaves wider notched gaps in the whitened flux,
-        # but removes remnant excess in power around peaks.
-        """
-        After notching, some outliers can appear, they are also added to the mask: 
-        """
-        print('Masking outliers...', end=' ')
-        self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        All the bad points ever masked are filled using the optimal inpainting filter which zeroes 
-        the impact of these point to the statistic. Note: PSD should not be remeasured after 
-        inpainting because the same C^{-1} has to be used for inpainting and for detection: 
-        """
-        print('Inpainting...', end=' ')
-        self.inpaint_fluxes() 
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        """
-        These fluxes will be used for detection:
-        """
-        print('Whitening...', end=' ')
-        self.whiten_fluxes()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Total time: ', t2-t0, ' sec')
-        self.is_fluxes_conditioned=True
-        _ = os.system('clear')
+        if not track_process:
+            self.subtract_means(save_means=True)
+            self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
+            self.pad_by_zeros() 
+            self.interpolate_fluxes()
+            self.prepare_for_psd(nperseg=nperseg_psd, noverlap=noverlap_psd, 
+                                 npsdsmin=npsdsmin, interp_method='linear')
+            self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd, subtract_mean=subtract_mean_in_psd, rfft=use_rfft)
+            self.whiten_fluxes()
+            self.mask_flux_outliers(nsig_outliers_w, in_whitened_fluxes=True, modify_psd_masks=True)
+            self.interpolate_fluxes()
+            self.whiten_fluxes()
+            self.notch_fluxes(nsig=nsig_notch)
+            self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
+            self.inpaint_fluxes() 
+            self.whiten_fluxes()
+            self.is_fluxes_conditioned=True
+            
+        else:    
+            t1 = time.time()
+            t0 = t1
+            print('Subtracting means...', end=' ')
+            self.subtract_means(save_means=True)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Values diverging from the large trend more than by 3 standard deviations are added to the mask 
+            as False (before, mask marked bins containing NaN). psd_masks are also modified, because we don't 
+            want outliers to take part in PSD measurement:
+            """
+            print('Masking outliers...', end=' ')
+            self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Zero padding is needed to apply the whitening filter to avoid crosstalk between ends. 
+            Applying filters in Fourier domain is equivalent to circular convolution, therefore 
+            the ends of the data will influence each other which is unphysical. As well, at this step 
+            the time array is interpolated and extended on the zero-padded region.
+            """
+            # zero padding is needed to apply the whitening filter to avoid crosstalk between ends.
+            # When padding by zeros is done before the interpolation, in the interpolation the padded zeros become non-zeros, 
+            # and due to this the overall trends will not probuce  outliers inside the data at the ends.
+            # REM: the floating mean is subtracted with whitening
+            print('Padding by zeros...', end=' ')
+            self.pad_by_zeros() 
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Will fill all the bad data masked by mask with linear interpolation. Interpolation 
+            is required for whitening, notching and other filters because filtering is making linear 
+            combinations of points in the kernel, and adding bad data or NaN there will spoil all 
+            the data. These points still remain masked for the PSD measurement if there is enough 
+            slices. Otherwise, the masks will not be cleaned from small holes. Therefore data in maskes
+            points will be used only if necessary. Remark: when padding by zeros is done before the 
+            interpolation, in the interpolation the padded zeros become constant values equal to the 
+            last edge data value, and due to this outliers will not be produced in the data at the ends:
+            """
+            # Interpolation is required for whitening, notching etc.
+            # But in the preparation for PSD, the masks will not be cleaned if not needed,
+            # therefore data in holes will be used only if necessary
+            print('Interpolating fluxes...', end=' ')
+            self.interpolate_fluxes()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            In the preparation for PSD, the code is making sure that there is enough slices (npsdsmin) 
+            to ensure the needed precision in PSD measurement. If there is not enough, 
+            clean_small_holes() is used to remove small holes from the PSD mask. They are not 
+            significant, so we easily can take interpolated values in them:
+            """
+            #TODO: maybe define two levels of small holes and two npsds
+            #TODO: maybe define better distribution of pieces in Welch
+            print('Preparing fpr PSD...', end=' ')
+            self.prepare_for_psd(nperseg=nperseg_psd, noverlap=noverlap_psd, 
+                                 npsdsmin=npsdsmin, interp_method='linear')
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Use Welch method to measure Power Spectral Density. Split data into multiple slices 
+            of length nperseg_psd, calculate their abs squared of Fourier transform, and average. 
+            The resulting array will have length nperseg_psd, therefore for making whitening filters, 
+            (psd)^{-0.5} is converted to time domain and padded by zeros (finite response filter). 
+            PSD and whitening filters are quarter-specific:
+            """
+            print('Measuring PSD...', end=' ')
+            self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd, subtract_mean=subtract_mean_in_psd, rfft=use_rfft)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Whitening filters are applied to the fluxes to create whitened fluxes. (Remark: the 
+            floating mean is subtracted with whitening):
+            """
+            print('Whitening fluxes...', end=' ')
+            self.whiten_fluxes()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Masking outliers in whitened fluxes. Effectively we are making detection in the whitened
+            data with whitened template, so outliers are unwanted there:
+            """
+            print('Masking outliers...', end=' ')
+            self.mask_flux_outliers(nsig_outliers_w, in_whitened_fluxes=True, modify_psd_masks=True)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Interpolation to cover also new outliers. Note that outliers were masked in the whitened 
+            flux, but interpolation is made in the red flux. It is possible to make interpolation in 
+            the whitened flux and then redden it, but the inverse whitening filter is unstable, so 
+            the red flux changes significantly. As well, in most cases interpolation in the red flux 
+            indeed fixes the outliers because the corresponding point in the red flux has the biggest 
+            impact on the outlier:
+            """
+            # Before notch need to interpolate over mask because holes will not allow to do whitening which is needed in notch,
+            # and need to freshly whiten the fluxes because need whitened_fd for notch
+            print('Interploating fluxes...', end=' ')
+            self.interpolate_fluxes()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            Whiten the interpolated fluxes again before applying the Notch filter because in it, 
+            the whitened fluxes in Fourier domain are needed:
+            """
+            print('Whitening fluxes...', end=' ')
+            self.whiten_fluxes()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            In whitened_fluxes_fd, common peaks in all the quarters are searched, and Notch filters 
+            are designed to suppressed them. They are applied to the fluxes:
+            """
+            print('Notching fluxes...', end=' ')
+            self.notch_fluxes(nsig=nsig_notch)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            #There is an option to remeasure PSD after notch. Usually, it leaves wider notched gaps in the whitened flux,
+            # but removes remnant excess in power around peaks.
+            """
+            After notching, some outliers can appear, they are also added to the mask: 
+            """
+            print('Masking outliers...', end=' ')
+            self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            All the bad points ever masked are filled using the optimal inpainting filter which zeroes 
+            the impact of these point to the statistic. Note: PSD should not be remeasured after 
+            inpainting because the same C^{-1} has to be used for inpainting and for detection: 
+            """
+            print('Inpainting...', end=' ')
+            self.inpaint_fluxes() 
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            """
+            These fluxes will be used for detection:
+            """
+            print('Whitening...', end=' ')
+            self.whiten_fluxes()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Total time: ', t2-t0, ' sec')
+            self.is_fluxes_conditioned=True
+            _ = os.system('clear')
 
 
     def detect_single_transits(self, template_ind=template_ind_detection, use_rfft=use_rfft,
@@ -455,41 +476,55 @@ class KeplerLightCurve(object):
         None.
 
         """
-        t1 = time.time()
-        t0 = t1
-        print('Initializing templates...', end=' ')
-        self.initialize_templates(templates=None, template_ind=template_ind, template_bank_from_file=True,
-                                  templates_subbin_shift=templates_subbin_shift)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Notching the templates...', end=' ')
-        self.notch_all_templates()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Whitening the templates...', end=' ')
-        self.roll_templates()
-        self.whiten_all_templates(use_rfft=use_rfft)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Matched filtering...', end=' ')
-        self.matched_filtering(template_ind=template_ind, nsig_outliers=nsig_outliers)
-        self.cut_zero_padding_ends()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Vetoing the statistics...', end=' ')
-        self.veto_statistics(margin_snr=margin_snr, template_ind=template_ind,
-                             fn=fn, maxdev=maxdev,
-                         rfft_psd=use_rfft, zero_ends_len_abs=zero_ends_len_abs,
-                         zero_ends_len_rel=zero_ends_len_rel)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Total time: ', t2-t0, ' sec')
-        _ = os.system('clear')
+        if not track_process:
+            self.initialize_templates(templates=None, template_ind=template_ind, template_bank_from_file=True,
+                                      templates_subbin_shift=templates_subbin_shift)
+            self.notch_all_templates()
+            self.roll_templates()
+            self.whiten_all_templates(use_rfft=use_rfft)
+            self.matched_filtering(template_ind=template_ind, nsig_outliers=nsig_outliers)
+            self.cut_zero_padding_ends()
+            self.veto_statistics(margin_snr=margin_snr, template_ind=template_ind,
+                                 fn=fn, maxdev=maxdev,
+                             rfft_psd=use_rfft, zero_ends_len_abs=zero_ends_len_abs,
+                             zero_ends_len_rel=zero_ends_len_rel)
+          
+        else:    
+            t1 = time.time()
+            t0 = t1
+            print('Initializing templates...', end=' ')
+            self.initialize_templates(templates=None, template_ind=template_ind, template_bank_from_file=True,
+                                      templates_subbin_shift=templates_subbin_shift)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Notching the templates...', end=' ')
+            self.notch_all_templates()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Whitening the templates...', end=' ')
+            self.roll_templates()
+            self.whiten_all_templates(use_rfft=use_rfft)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Matched filtering...', end=' ')
+            self.matched_filtering(template_ind=template_ind, nsig_outliers=nsig_outliers)
+            self.cut_zero_padding_ends()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Vetoing the statistics...', end=' ')
+            self.veto_statistics(margin_snr=margin_snr, template_ind=template_ind,
+                                 fn=fn, maxdev=maxdev,
+                             rfft_psd=use_rfft, zero_ends_len_abs=zero_ends_len_abs,
+                             zero_ends_len_rel=zero_ends_len_rel)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Total time: ', t2-t0, ' sec')
+            _ = os.system('clear')
 
 
     def periodicity_search(self, Pmin=Pmin, Pmax=Pmax, dP=None):
@@ -510,32 +545,41 @@ class KeplerLightCurve(object):
         None.
 
         """
-        t1 = time.time()
-        t0 = t1
-        print('Detrending original fluxes...', end=' ')
-        self.find_moving_averages(interpolate=True, detr_length=detr_length, detr_method=detr_method, 
-                             detr_endmethod=detr_endmethod, detr_ends=detr_ends, 
-                             detr_endlen=detr_endlen, keep_overall_level=False)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Connecting quarters...', end=' ')
-        self.connect_quarters()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Interwining shifts...', end=' ')
-        self.interleave_shifts()
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Summing over periods...', end=' ')
-        self.sum_periods(Pmin=Pmin, Pmax=Pmax, duty_cycle=duty_cycle)
-        t2 = time.time()
-        print(np.round(t2-t1,2), 'sec. Done')
-        t1 = t2
-        print('Total time: ', t2-t0, ' sec')
-        _ = os.system('clear')
+        if not track_process:
+            self.find_moving_averages(interpolate=True, detr_length=detr_length, detr_method=detr_method, 
+                                 detr_endmethod=detr_endmethod, detr_ends=detr_ends, 
+                                 detr_endlen=detr_endlen, keep_overall_level=False)
+            self.connect_quarters()
+            self.interleave_shifts()
+            self.sum_periods(Pmin=Pmin, Pmax=Pmax, duty_cycle=duty_cycle)
+            
+        else:
+            t1 = time.time()
+            t0 = t1
+            print('Detrending original fluxes...', end=' ')
+            self.find_moving_averages(interpolate=True, detr_length=detr_length, detr_method=detr_method, 
+                                 detr_endmethod=detr_endmethod, detr_ends=detr_ends, 
+                                 detr_endlen=detr_endlen, keep_overall_level=False)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Connecting quarters...', end=' ')
+            self.connect_quarters()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Interwining shifts...', end=' ')
+            self.interleave_shifts()
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Summing over periods...', end=' ')
+            self.sum_periods(Pmin=Pmin, Pmax=Pmax, duty_cycle=duty_cycle)
+            t2 = time.time()
+            print(np.round(t2-t1,2), 'sec. Done')
+            t1 = t2
+            print('Total time: ', t2-t0, ' sec')
+            _ = os.system('clear')
         
 
 #TODO: make sure you remember that function calls on np.arrays create no copy
