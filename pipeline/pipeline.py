@@ -89,7 +89,8 @@ data_location = '/Users/orynaivashtenko/Work/Kepler_Project/Data/llc_trial_2'
 output_location = '/Users/orynaivashtenko/Work/Kepler_Project/Objects_output'
 #TODO: write a function to save something there
 
-location = os.getcwd()
+# location = os.getcwd()
+location = os.path.dirname(__file__)
 sys.path.append(location)
 parameters_file = os.path.join(location, 'pipeline_parameters.txt')
 #PARAMETERS CAN BE SPECIFIED IN THE FILE, AND THEY WILL BE READ FROM IT
