@@ -1979,7 +1979,7 @@ def get_data_fun(target_id, loc=data_location):
         try:
             os.mkdir(folder)
         except OSError:
-                print ("Creation of the directory failed")
+                warnings.warn("Creation of the directory failed")
                 
         webdir = 'https://archive.stsci.edu/pub/kepler/lightcurves/'
         # webdir = 'https://archive.stsci.edu/missions/kepler/lightcurves/'
@@ -1993,9 +1993,8 @@ def get_data_fun(target_id, loc=data_location):
     times=[]
     fluxes=[]
     files = [f for f in os.listdir(folder)[:] if 'llc.fits' in f]
-    if len(files)!=18:
-            print('warning: number of files is not equal to the number of all quarters')
-            print('available '+str(len(files)) + ' files')
+    if len(files)<17:
+            warnings.warn('Number of files is not equal to the total number quarters. \n available '+str(len(files)) + ' files')
     for f in files:
         filc = fits.open(os.path.join(folder,f))
         times.append(filc[1].data['TIME'])
@@ -2059,6 +2058,11 @@ def moving_var(signal, nperseg=nperseg_moving_var, ngap=ngap_moving_var):
     mov_var : numpy.array 1d of float, len(signal)
         Moving variance estimate at each point of the signal
     """
+    if nperseg>len(signal)/2:
+        nperseg = len(signal)//2 + 1
+        if ngap>=nperseg//2:
+            warnings.warn('Not enough data to calculate moving variance.')
+            ngap=nperseg//2
     mov_var = []
     sum1 = np.cumsum(signal)
     sum1 = np.concatenate(([0], sum1))
@@ -2488,9 +2492,6 @@ def detrend_amat(data, length=128, mask=None, method='median', endmethod='mean',
     if not return_trend: data with subtracted mean, np.array
     if return_trend: data with subtracted mean, np.array; trend (moving mean), np.array
     """
-    if (method!='median'):
-        for i in range(max(len(method), len('median'))):
-            print(method[i], 'median'[i], method[i]=='median'[i])
     assert ((method=='mean') or (method=='median')), 'Incorrect method specified'
     data = np.array(data)
     if mask is None:
@@ -2938,7 +2939,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     inds = np.where(~np.isclose(template, 0))[0]#[[0,-1]]
     assert len(data) - len(inds) >= 4
     if len(data[0:inds[0]])+len(data[inds[-1]+1:]) != len(data)-len(inds):
-        print('Warning: template indices are not together, template is disconnected')
+        warnings.warn('Warning: template indices are not together, template is disconnected')
         
     #subtract linear trend
     inds_outside = np.array([i for i in range(len(data)) if i not in inds])

@@ -10,7 +10,8 @@ import numpy as np
 import sys
 import os
 import importlib
-sys.path.append(os.getcwd())
+location = os.path.dirname(__file__)
+sys.path.append(location)
 import pipeline as pip
 import template_module as tm
 import useful_functions as uf
@@ -83,12 +84,12 @@ def generate_lc_quarters(T=1400, t_min=0., t_max=None, dt=tm.dt_lc, flux0=1e5,
      
     #2)generating ASD of the star    
     if source=='stored_fft' and np.abs((dt-tm.dt_lc)/tm.dt_lc)<0.05:
-        rfft_med = np.array(fop.read_csv_file('/home/orynai/Kepler_Code/pipeline/stored_fft.txt'))
+        rfft_med = np.array(fop.read_csv_file(os.path.join(location, 'stored_fft.txt')))
         fr = np.fft.rfftfreq(2*(len(rfft_med)-1),d=dt)
         freqs = np.fft.rfftfreq(L, d=dt)
         asd=np.abs(np.interp(freqs, fr, rfft_med))
     elif source=='stored_psd' and np.abs((dt-tm.dt_lc)/tm.dt_lc)<0.05:
-        psd_saved = np.array(fop.read_csv_file('/home/orynai/Kepler_Code/pipeline/stored_psd.txt'))
+        psd_saved = np.array(fop.read_csv_file(os.path.join(location, 'stored_psd.txt')))
         fr = np.fft.rfftfreq(2*(len(psd_saved)-1),d=dt)
         freqs = np.fft.rfftfreq(L, d=dt)
         asd=np.abs(np.interp(freqs, fr, psd_saved))**0.5
