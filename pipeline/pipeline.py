@@ -174,7 +174,7 @@ class KeplerLightCurve(object):
             self.orig_fluxes = fluxes
         else:
             assert target_id is not None, 'Please specify target ID!'
-            self.orig_times, self.orig_fluxes = get_data_fun(target_id, loc=data_location)
+            self.orig_times, self.orig_fluxes = get_data_fun(target_id, location=data_location)
         self.times = copy.deepcopy(self.orig_times)
         self.fluxes = copy.deepcopy(self.orig_fluxes)
         self.quarters = range(len(self.fluxes))
@@ -1402,6 +1402,7 @@ class KeplerLightCurve(object):
                     self.statistics_raw[k][q][:self.orig_time_lengths[q]] = stat       
                     #TODO: outliers in moving variance
                     movvar = moving_var(np.array(stat), nperseg=nperseg_moving_var, ngap=ngap_moving_var)
+                    movvar[statmask] = np.inf
                     #TODO: think about the masked regions. Big hole mask.
                     self.stat_moving_vars[k][q][:self.orig_time_lengths[q]] = movvar
                     self.statistics_snr[k][q][:self.orig_time_lengths[q]] = stat/movvar**0.5
@@ -1427,7 +1428,7 @@ class KeplerLightCurve(object):
                 self.statistics_raw[k][q][:self.orig_time_lengths[q]] = stat       
                 #TODO: outliers in moving variance
                 movvar = moving_var(np.array(stat), nperseg=nperseg_moving_var, ngap=ngap_moving_var)
-                #TODO: think about the masked regions. Big hole mask.
+                movvar[statmask] = np.inf
                 self.stat_moving_vars[k][q][:self.orig_time_lengths[q]] = movvar
                 self.statistics_snr[k][q][:self.orig_time_lengths[q]] = stat/movvar**0.5
                 statrawcor = stat/movvar*np.nanmean(movvar)
@@ -1628,12 +1629,13 @@ class KeplerLightCurve(object):
                             veto_bad_trigger_ind[1].append(reason)
                             veto_bad_trigger_ind[2].append(ampl)
                 veto_mask[veto_bad_trigger_ind[0]] = False
-                self.statistics_snr[k][q][~veto_mask] = 0. #ATTENTION! WE DO THIS FOR FAST SUMMATION IN FUTURE TO AVOID EXTRA IF
                 self.veto_masks[k][q] = veto_mask
                 self.stat_masks[k][q] *= veto_mask
                 self.transit_indices[k][q] = copy.deepcopy(transit_indices_quarter)
                 self.transit_amplitudes[k][q] = copy.deepcopy(transit_amplitudes_quarter)
                 self.veto_bad_trigger_inds[k][q] = copy.deepcopy(veto_bad_trigger_ind)
+                self.statistics_snr[k][q][~veto_mask] = 0. 
+                self.statistics_raw_cor[k][q][~self.stat_masks[k][q]] = 0. #ATTENTION! WE DO THIS FOR FAST SUMMATION IN FUTURE TO AVOID EXTRA IF
                 
             
                 
@@ -1951,7 +1953,7 @@ def variables_from_file(filename):
                 globals()[name] = val
                 
                 
-def get_data_fun(target_id, loc=data_location):
+def get_data_fun(target_id, location=data_location):
     """
     Search default directory for prev downloaded data. if not found, download and put there.
     
@@ -1961,9 +1963,9 @@ def get_data_fun(target_id, loc=data_location):
         Kepler ID of the observed star.
         A 9-digit string (first digits can be zero) or integer. May be less than 9
         digits, then will be zero-padded (example: '757280' -> '000757280')
-    loc : str
+    location : str
         Location (full path) of the data in the local storage. Data will be searched for 
-        in loc. There should be a folder named as a 9-digit target_id.
+        in `location`. There should be a folder named as a 9-digit target_id.
         In this folder, fits filed of Kepler data should be stored. 
         If such a folder is not found, it will be created. Data will be then downloaded from
         https://archive.stsci.edu/pub/kepler/lightcurves/ and placed in this folder.
@@ -1973,9 +1975,9 @@ def get_data_fun(target_id, loc=data_location):
     times, fluxes : lists of numpy.arrays 1d (may contain numpy.nan)
     """
     target_id = target_id.rjust(9, "0")
-    folder=os.path.join(loc,target_id)
+    folder=os.path.join(location,target_id)
     
-    if target_id not in os.listdir(loc):
+    if target_id not in os.listdir(location):
         try:
             os.mkdir(folder)
         except OSError:
@@ -1994,7 +1996,7 @@ def get_data_fun(target_id, loc=data_location):
     fluxes=[]
     files = [f for f in os.listdir(folder)[:] if 'llc.fits' in f]
     if len(files)<17:
-            warnings.warn('Number of files is not equal to the total number quarters. \n available '+str(len(files)) + ' files')
+            warnings.warn('Number of files is not equal to the total number quarters. Available '+str(len(files)) + ' files')
     for f in files:
         filc = fits.open(os.path.join(folder,f))
         times.append(filc[1].data['TIME'])

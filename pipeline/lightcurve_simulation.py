@@ -258,7 +258,7 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
         dts.append(np.nanmean((times[q]-np.roll(times[q],1))[1:]))
     dt = np.nanmean(dts)
     times_int = [pip.interpolate_time(times[i]) for i in range(len(times))] 
-    time = np.arange(times_int[0][0], times_int[-1][-1]+dt)*dt
+    # time = np.arange(times_int[0][0], times_int[-1][-1]+dt)*dt
         
     if first_transit_center-times_int[0][0]>=period:
         first_transit_center = times_int[0][0] + (first_transit_center-times_int[0][0])%period
@@ -358,3 +358,121 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
             else:
                 return fluxes
 
+
+
+
+def rangen(pars, L, distx=0, disty=0):
+    """
+    generates random vector from given set of values pars
+    of given length L 
+    with given numerical distribution (distx, disty)
+
+    Parameters
+    ----------
+    pars : TYPE
+        DESCRIPTION.
+    L : TYPE
+        DESCRIPTION.
+    distx : TYPE, optional
+        DESCRIPTION. The default is 0.
+    disty : TYPE, optional
+        DESCRIPTION. The default is 0.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+    if type(distx) == int:
+        distx = pars
+        disty = np.ones(len(pars))/np.sum(pars)
+    if pars[0]<distx[0] or pars[-1]>distx[-1]:
+        print('inconsistent dimensions')
+        return []
+    probdis = np.interp(pars, distx, disty)
+    probdis = probdis/np.sum(probdis)
+    return np.random.choice(pars, L, replace=True, p=probdis)
+
+
+def flgen(t=np.concatenate(((-1)*np.arange(0, T_ban, dt_lc)[:0:-1],np.arange(0, T_ban, dt_lc))), NT=1000, maxdur=9):
+    """
+    Generates random fluxes from a feasible parameter range 
+    Needed for testing the template bank to have good angles
+    returns fluxea and 
+
+    Parameters
+    ----------
+    t : TYPE, optional
+        DESCRIPTION. The default is np.concatenate(((-1)*np.arange(0, T_ban, dt_lc)[:0:-1],np.arange(0, T_ban, dt_lc))).
+    NT : TYPE, optional
+        DESCRIPTION. The default is 1000.
+    maxdur : TYPE, optional
+        DESCRIPTION. The default is 9.
+
+    Returns
+    -------
+    None.
+
+    """
+    per1=50; per2=500 # days #take more to cover extreme cases of other parameters
+    nper = 501
+    pers = np.linspace(per1, per2, nper)
+    rp1 = 0.005; rp2 = 0.05; nrp = 201
+    rps = np.linspace(rp1, rp2, nrp)
+    ecc1 = 0.; ecc2 = 0.9; necc = 201
+    eccs = np.linspace(ecc1, ecc2, necc)
+    w1 = 90.; w2 = w1 + 360.; nw = 401
+    ws = np.linspace(w1, w2, nw)
+    
+    #different variables are taken to be independent
+    #generating uniform distributions of parameters:
+    #(we generate twice more of them because we will then filter them out if they are bad)
+    pergen = rangen(pers, 2*NT)
+    Ms = np.linspace(0.5, 2.5, 201)
+    Mgen = rangen(Ms, 2*NT)
+    #Rs = np.linspace(1,10,10)
+    #Rsgen = rangen(Rs, 2*NT)
+    Rsgen = np.ones(len(Mgen))
+    agen = (pergen/365)**(2/3) * Mgen**(1/3) * 215/Rsgen
+    rpgen = rangen(rps, 2*NT)/Rsgen
+    eccgen = rangen(eccs, 2*NT)
+    wgen = rangen(ws, 2*NT)
+    #generating uniform inclinations from the range that we are able to observe
+    incgen = np.array([])
+#     eccgen = np.array([])
+    for i in range(2*NT):
+#         # the eccentricity is bounded from above by the radius of the star
+#         #Rs-rp < agen * (1 - eccgen) 
+#         #1+rp' < agen' * (1 - eccgen) 
+#         ecc1 = 0.0; ecc2 = np.min([0.9,1-(1+rpgen[i])/agen[i]]); necc = 101
+#         eccs = np.linspace(ecc1, ecc2, necc)
+#         ecc = rangen(eccs, 1)[0]
+#         eccgen = np.append(eccgen, ecc)
+        
+        #the distance from the planet to the star:
+        #R = agen[i] * (1 - eccgen[i]**2)/(1+eccgen[i] * np.cos(np.pi/180*(wgen[i]-90)))
+        ecc=eccgen[i]
+        R = agen[i] * (1 - ecc**2)/(1+ecc * np.cos(np.pi/180*(wgen[i]-90)))
+        inc2 = 90.
+        inc1 = 90. - np.arcsin((1+rpgen[i])/R)/np.pi*180.
+        ninc = int((inc2-inc1)*200)
+        incs = np.linspace(inc1, inc2, ninc)
+        incgen = np.append(incgen, rangen(incs, 1)[0])
+    
+    argen = np.vstack((pergen,rpgen, agen, incgen, eccgen, wgen)).T
+    flgen = np.array(list(map(
+        lambda v: flux_par(t, *v), argen)))
+    
+    #cleaning out the generated fluxes.
+    #we only need symmetric and fitting the time.
+    t1 = t>=-maxdur/2 
+    t2 = t<=maxdur/2
+    ttrun = t[t1 & t2]
+    shapes = np.array(list(map(lambda x: t_shape(ttrun,1-x[t1 & t2]),flgen)))
+    flgen = np.delete(flgen, np.where(shapes.T[0]<=2 * (t[1]-t[0])), axis=0)
+    argen = np.delete(argen, np.where(shapes.T[0]<=2 * (t[1]-t[0])), axis=0)
+    #we filtered out empty or non-symmwtric samples that could have occurred by chance
+    flgen = flgen[0:NT]
+    argen = argen[0:NT]
+    return flgen, argen
