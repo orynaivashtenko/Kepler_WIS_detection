@@ -395,11 +395,11 @@ def rangen(pars, L, distx=0, disty=0):
     return np.random.choice(pars, L, replace=True, p=probdis)
 
 
-def flgen(t=np.concatenate(((-1)*np.arange(0, T_ban, dt_lc)[:0:-1],np.arange(0, T_ban, dt_lc))), NT=1000, maxdur=9):
+def flgen(t=tm.time(), NT=1000, maxdur=9):
     """
     Generates random fluxes from a feasible parameter range 
     Needed for testing the template bank to have good angles
-    returns fluxea and 
+    returns fluxes and 
 
     Parameters
     ----------

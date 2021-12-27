@@ -1634,7 +1634,7 @@ class KeplerLightCurve(object):
                 self.transit_indices[k][q] = copy.deepcopy(transit_indices_quarter)
                 self.transit_amplitudes[k][q] = copy.deepcopy(transit_amplitudes_quarter)
                 self.veto_bad_trigger_inds[k][q] = copy.deepcopy(veto_bad_trigger_ind)
-                self.statistics_snr[k][q][~veto_mask] = 0. 
+                self.statistics_snr[k][q][~self.stat_masks[k][q]] = 0. 
                 self.statistics_raw_cor[k][q][~self.stat_masks[k][q]] = 0. #ATTENTION! WE DO THIS FOR FAST SUMMATION IN FUTURE TO AVOID EXTRA IF
                 
             
@@ -1684,13 +1684,16 @@ class KeplerLightCurve(object):
                                   if ((self.indices_of_templates[i][1]-self.indices_of_templates[i][0])>=2)])
         self.not_interleaved_numbers = np.array([self.indices_of_templates[i][0] for i in range(len(self.indices_of_templates)) 
                                   if ((self.indices_of_templates[i][1]-self.indices_of_templates[i][0])==1)])
+        
+        #for interleaved:
         shift_numbers = np.array([self.indices_of_templates[i][1]-self.indices_of_templates[i][0] for i in self.interleaved_numbers])
+            #number of shifts for all the templates with shifts. need them to be the same
         self.n_shifts = shift_numbers[0]
         assert (shift_numbers/shift_numbers[0]==np.ones(len(shift_numbers))).all(), 'Templates with shifts must have the same number of shifts!'  #make sure they are all the same number of shifts
         self.statistics_interleaved = []
         self.stat_masks_interleaved = []
         self.stat_vars_interleaved = []
-        for t in range(len(shift_numbers)):
+        for t in self.interleaved_numbers:
             self.statistics_interleaved.append((self.statistics_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
             self.stat_masks_interleaved.append((self.stat_masks_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
             self.stat_vars_interleaved.append((self.stat_vars_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
@@ -1701,6 +1704,16 @@ class KeplerLightCurve(object):
             self.trend_orig_flux_full, self.trend_orig_flux_full,
             self.trend_orig_flux_full)).T.flatten()
         self.time_interleaved = np.arange(len(self.trend_orig_flux_interleaved))*self.dt_days/self.n_shifts+self.time_full[0]
+        
+        #for not interleaved:
+        self.statistics_not_interleaved = []
+        self.stat_masks_not_interleaved = []
+        self.stat_vars_not_interleaved = []
+        self.statistics_not_interleaved = np.array(self.statistics_full[self.not_interleaved_numbers])
+        self.stat_masks_not_interleaved = np.array(self.stat_masks_full[self.not_interleaved_numbers])
+        self.stat_vars_not_interleaved = np.array(self.stat_vars_full[self.not_interleaved_numbers])
+        self.trend_orig_flux_not_interleaved = np.array(self.trend_orig_flux_full)
+        self.time_not_interleaved = np.arange(len(self.trend_orig_flux_not_interleaved))*self.dt_days+self.time_full[0]
         
     
         
@@ -1795,13 +1808,13 @@ class KeplerLightCurve(object):
         
         #not interleaved
         # indices = np.array([i for i in range(len(self.statistics_full)) if i not in self.interleaved_numbers])
-        statistics_by_trends = (self.statistics_full[self.not_interleaved_numbers] * self.trend_orig_flux_full)
+        statistics_by_trends = (self.statistics_not_interleaved * self.trend_orig_flux_interleaved)
         statistics_by_trends = np.hstack((statistics_by_trends, np.zeros(
-                        (len(statistics_by_trends),int(np.ceil(Pmax/self.dt_days/self.n_shifts))))))
+                        (len(statistics_by_trends),int(np.ceil(Pmax/self.dt_days))))))
         #pad by zeros to avoid extra if statements in the summation:       
-        trends_sq_by_vars = self.stat_vars_full[self.not_interleaved_numbers] * self.trend_orig_flux_full**2
+        trends_sq_by_vars = self.stat_vars_not_interleaved * self.trend_orig_flux_not_interleaved**2
         trends_sq_by_vars = np.hstack((trends_sq_by_vars, np.zeros(
-                        (len(trends_sq_by_vars),int(np.ceil(Pmax/self.dt_days/self.n_shifts))))))
+                        (len(trends_sq_by_vars),int(np.ceil(Pmax/self.dt_days))))))
                 
         self.statistics_periodic_not_interleaved, denomsq = self.sum_periods_fast(
                         statistics_by_trends, trends_sq_by_vars, self.dt_days, self.tmax, self.tmin, periods)
@@ -1810,6 +1823,308 @@ class KeplerLightCurve(object):
                 self.statistics_periodic_not_interleaved[p][t][denomsq[p][t]==0]=np.nan
                 self.statistics_periodic_not_interleaved[p][t][denomsq[p][t]!=0] /= denomsq[p][t][denomsq[p][t]!=0]**0.5
         
+     
+        
+    def determine_mins(self):
+        pind_min_interleaved = np.nanargmin( # argmin over periods
+                                    [np.nanmin(# min over templates
+                                        [np.nanmin(# min over phases
+                                            self.statistics_periodic_interleaved[pi][ti]) 
+                                        for ti in range(len(self.statistics_periodic_interleaved[pi])) ])
+                                    for pi in range(len(self.statistics_periodic_interleaved)) ])
+        tempind_min_interleaved = np.nanargmin( # argmin over templates
+                                     [np.nanmin( # min over phases
+                                         self.statistics_periodic_interleaved[pind_min_interleaved][ti]) #in the best period
+                                     for ti in range(len(self.statistics_periodic_interleaved[pind_min_interleaved])) ])
+        phasind_min_interleaved = np.nanargmin( # argmin over phases
+                                    self.statistics_periodic_interleaved[pind_min_interleaved][tempind_min_interleaved])
+    
+        pind_min_not_interleaved = np.nanargmin( # argmin over periods
+                                    [np.nanmin(# min over templates
+                                        [np.nanmin(# min over phases
+                                            self.statistics_periodic_not_interleaved[pi][ti]) 
+                                        for ti in range(len(self.statistics_periodic_not_interleaved[pi])) ])
+                                    for pi in range(len(self.statistics_periodic_not_interleaved)) ])
+        tempind_min_not_interleaved = np.nanargmin( # argmin over templates
+                                     [np.nanmin( # min over phases
+                                         self.statistics_periodic_not_interleaved[pind_min_not_interleaved][ti]) #in the best period
+                                     for ti in range(len(self.statistics_periodic_not_interleaved[pind_min_not_interleaved])) ])
+        phasind_min_not_interleaved = np.nanargmin( # argmin over phases
+                                    self.statistics_periodic_not_interleaved[pind_min_not_interleaved][tempind_min_not_interleaved])
+        
+        pind_incorrect = np.nanargmin( # argmin over periods
+                                    [np.nanmin(# min over templates
+                                        [np.nanmin(# min over phases
+                                            np.abs(self.statistics_periodic_not_interleaved[pi][ti])) 
+                                        for ti in range(len(self.statistics_periodic_not_interleaved[pi])) ])
+                                    for pi in range(len(self.statistics_periodic_not_interleaved)) ])
+        tempind_incorrect = np.nanargmin( # argmin over templates
+                                     [np.nanmin( # min over phases
+                                         np.abs(self.statistics_periodic_not_interleaved[pind_min_not_interleaved][ti])) #in the best period
+                                     for ti in range(len(self.statistics_periodic_not_interleaved[pind_min_not_interleaved])) ])
+        
+        if np.nanmin(self.statistics_periodic_not_interleaved)<=np.nanmin(self.statistics_periodic_interleaved):
+            self.is_min_interleaved = False
+            self.snr_measured = np.nanmin(self.statistics_periodic_not_interleaved)
+            self.pind_measured = pind_min_not_interleaved
+            self.phind_measured = phasind_min_not_interleaved
+            self.ph_measured = self.phases_not_interleaved[phasind_min_not_interleaved]
+            self.tempind_min_not_interleaved = tempind_min_not_interleaved
+            self.tempind_measured = self.interleaved_numbers[tempind_min_not_interleaved]
+        else:
+            self.is_min_interleaved = True
+            self.snr_measured = np.nanmin(self.statistics_periodic_interleaved)
+            self.pind_measured = pind_min_interleaved
+            self.phind_measured = phasind_min_interleaved
+            self.ph_measured = self.phases_interleaved[phasind_min_interleaved]
+            self.tempind_min_interleaved = tempind_min_interleaved
+            self.tempind_measured = self.interleaved_numbers[tempind_min_interleaved]
+        self.period_measured = self.periods[self.pind_measured]
+        self.std_free_place = outlier_free_std(self.statistics_periodic_not_interleaved[pind_incorrect][tempind_incorrect])
+        expected_transit_times = [self.tmin + self.Ph_measured + i * self.period_measured 
+                                   for i in range(int(np.ceil(self.tmax - self.tmin - self.Ph_measured)/self.period_measured))]
+        if self.is_min_interleaved:
+            summed_transit_points = [np.argmin(self.time_interleaved - expected_transit_times[i]) for i in range(len(expected_transit_times))  ]
+            self.summed_transit_times = np.array(self.time_interleaved[summed_transit_points])
+            summed_stats = np.array(self.statistics_interleaved[tempind_min_interleaved][summed_transit_points])
+            summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
+            summed_vars = np.array(self.stat_vars_interleaved[tempind_min_interleaved][summed_transit_points])
+        else:
+            summed_transit_points = [np.argmin(self.time_not_interleaved - expected_transit_times[i]) for i in range(len(expected_transit_times))  ]
+            self.summed_transit_times = np.array(self.time_not_interleaved[summed_transit_points])
+            summed_stats = np.array(self.statistics_not_interleaved[tempind_min_not_interleaved][summed_transit_points])
+            summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
+            summed_vars = np.array(self.stat_vars_not_interleaved[tempind_min_not_interleaved][summed_transit_points])
+        denom = np.sum(summed_vars * summed_trends**2)**0.5
+        self.summed_transit_statistics = (summed_stats * summed_trends)/denom
+        
+        
+        
+        
+        # self.summed_statistics_snr_not_corrected = []
+        # for t in expected_transit_times:
+        #     qmin = 0
+        #     imin = 0
+        #     minval = t - self.times[q][0]
+        #     for q in self.quarters:
+        #         if 0<=t - self.times[q][0]<minval:
+        #             qmin = q
+        #             minval = t - self.times[q][0]
+        #     minval = t - self.times[qmin][0]
+        #     for i in range(len(self.times[qmin])):
+        #         if np.abs(t - self.times[qmin][i])<minval:
+        #             imin = i
+        #             minval = np.abs(t - self.times[qmin][i])
+        #     self.summed_statistics_snr_not_corrected.append(self.statis)
+                
+        
+        
+    #plotting methods
+    def plot_results(self, 
+                     plot_all=None,
+                     original_data=True,
+                     psds=True,
+                     whitened_fluxes_td=True,
+                     whitened_fluxes_fd=True,
+                     single_event_statistic_snr_without_mask=False,
+                     single_event_statistic_snr=True,
+                     fluxes_with_veto=True,
+                     histogram_single_event=True,
+                     summed_statistic_minimal_of_phase=True,
+                     summed_statistic_of_phase=False,
+                     histogram_summed_statistic=True,
+                     minimal_statistic_periods=True,
+                     temp_num=8, period=None, per_ind=0, nbins_hist=25, 
+                     figsize=None, edgelist_hist=None, edgemin_hist=None, edgemax_hist=None
+                     ):
+        if figsize is None:
+            width=12
+            height=5
+        else:
+            width=figsize[0]
+            height=figsize[1]
+        
+        if period is None:
+            period = self.periods[per_ind]
+        else:
+            per_ind = np.argmin(np.abs(self.periods-period))
+            period = self.periods[per_ind]
+        
+        if plot_all==True:
+            original_data = True
+            psds = True
+            whitened_fluxes_td = True
+            whitened_fluxes_fd = True
+            single_event_statistic_snr_without_mask = True
+            single_event_statistic_snr = True
+            fluxes_with_veto = True
+            histogram_single_event = True
+            summed_statistic_minimal_of_phase = True
+            summed_statistic_of_phase = True
+            histogram_summed_statistic = True
+            minimal_statistic_periods = True
+        elif plot_all==False:
+            original_data = False
+            psds = False
+            whitened_fluxes_td = False
+            whitened_fluxes_fd = False
+            single_event_statistic_snr_without_mask = False
+            single_event_statistic_snr = False
+            fluxes_with_veto = False
+            histogram_single_event = False
+            summed_statistic_minimal_of_phase = False
+            summed_statistic_of_phase = False
+            histogram_summed_statistic = False
+            minimal_statistic_periods = False
+            
+        
+        if original_data:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                plt.plot(self.orig_times[q], self.orig_fluxes[q])
+            plt.title('Original unprocessed PDS lightcurves')
+            plt.xlabel('time, days')
+            plt.ylabel('flux')
+            plt.show()
+        
+        if psds:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                plt.plot(self.psdfreqs[q], self.psds[q])
+            plt.title('Measured PSDS of all the quarters')
+            plt.xlabel('frequency, Hz')
+            plt.ylabel('PSD')
+            plt.show()
+        
+        if whitened_fluxes_td:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                plt.plot(self.times[q], self.whitened_fluxes_td[q])
+            plt.title('Whitened fluxes in time domain')
+            plt.xlabel('time, days')
+            plt.ylabel('whitened flux')
+            plt.show()
+        
+        if whitened_fluxes_fd:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                plt.plot(self.freqs[q], self.whitened_fluxes_fd[q])
+            plt.title('Whitened fluxes in Fourier domain')
+            plt.xlabel('frequency, Hz')
+            plt.ylabel('whitened flux')
+            plt.show()
+        
+        if single_event_statistic_snr_without_mask:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                plt.plot(self.times[q], self.statistics_snr[temp_num][q])
+            plt.title('Single-event statistic in units of SNR for template #'+str(temp_num))
+            plt.xlabel('time, days')
+            plt.ylabel('statistic [SNR]')
+            plt.show()
+        
+        if single_event_statistic_snr:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                plt.plot(self.times[q], self.statistics_snr[temp_num][q])
+                plt.plot(self.times[q][~self.stat_masks[temp_num][q]], self.statistics_snr[temp_num][q][~self.stat_masks[temp_num][q]],
+                         'o', color='k', label='masked')
+            plt.title('Single-event statistic in units of SNR for template #'+str(temp_num))
+            plt.xlabel('time, days')
+            plt.ylabel('statistic [SNR]')
+            plt.legend()
+            plt.show()
+            
+        if fluxes_with_veto:
+            plt.figure(figsize=(width, height))
+            for q in self.quarters:
+                chi_squared_veto = []
+                maximal_deviation_std_veto = []
+                maximal_deviation_amplitude_veto = []
+                extreme_position_veto = []
+                for ind in range(len(self.veto_bad_trigger_inds[temp_num][q])):
+                    if 'chi_squared' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:
+                        chi_squared_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
+                    elif 'maximal_deviation_std' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:    
+                        maximal_deviation_std_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
+                    elif 'maximal_deviation_amplitude' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:        
+                        maximal_deviation_amplitude_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
+                    elif 'extreme_position' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:           
+                        extreme_position_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
+                plt.plot(self.times[q], self.fluxes[q], color='k', linewidth=2)
+                plt.plot(self.times[q][chi_squared_veto], self.fluxes[q][chi_squared_veto], 'o', color='r', label='chi squared veto')
+                plt.plot(self.times[q][maximal_deviation_std_veto], self.fluxes[q][maximal_deviation_std_veto], 'o', color=(1,0.5,0), label='maximal deviation std veto')
+                plt.plot(self.times[q][maximal_deviation_amplitude_veto], self.fluxes[q][maximal_deviation_amplitude_veto], 'o', color=(0,0.6,0), label='maximal deviation amplitude veto')
+                plt.plot(self.times[q][extreme_position_veto], self.fluxes[q][extreme_position_veto], 'o', color=(0.7,0,1), label='extreme position veto')
+            plt.title('Conditioned fluxes in time domain with vetos for template #'+str(temp_num))
+            plt.xlabel('time, days')
+            plt.ylabel('flux')
+            plt.legend(fontsize=(plt.rcParams['font.size']-3) )
+            plt.show()
+            
+        if histogram_single_event:
+            datstat = np.array([])
+            for q in self.quarters:
+                datstat = np.concatenate((datstat, self.statistics_snr[temp_num][q][self.stat_masks[temp_num][q]]))
+            histogram(datstat, n=nbins_hist, edgelist=edgelist_hist, edgemin=edgemin_hist, edgemax=edgemax_hist, xscale='square', yscale='log',
+                  density=False, normalize=True, ylogshift=True, logzeros='zero', 
+                  return_results=False, plot=True, new_figure=True, ax=None, figsize=(width/3*2,height), show=True,
+                  xlabel='statistic squared', ylabel='log counts', 
+                  title='Histogram of statistic in units of snr (uncorrected) for all the quarters for template #'+str(temp_num), 
+                  xlim=None, ylim=None,
+                  color='b', linestyle='solid', marker='', linewidth=None, alpha=0.9, label=None, 
+                  loc_legend=None, plot_type='bar')
+            
+        if summed_statistic_minimal_of_phase:
+            plt.figure(figsize=(width, height))
+            if self.is_min_interleaved:
+                plt.plot(self.phases_interleaved, self.statistics_periodic_interleaved[self.pind_measured][self.tempind_min_interleaved])
+                plt.plot([self.phases_interleaved[self.phind_measured]], 
+                         [self.statistics_periodic_interleaved[self.pind_measured][self.tempind_min_interleaved][self.phind_measured]], 'o')
+            else:
+                plt.plot(self.phases_not_interleaved, self.statistics_periodic_not_interleaved[self.pind_measured][self.tempind_min_not_interleaved])
+                plt.plot([self.phases_not_interleaved[self.phind_measured]], 
+                         [self.statistics_periodic_not_interleaved[self.pind_measured][self.tempind_min_not_interleaved][self.phind_measured]], 'o')
+            plt.title('Summed statistic as function of phase for minimal parameters: period='+str(self.periods[self.pind_measured])+' days, template #'+str(self.tempind_measured))
+            plt.xlabel('initial phase, days')
+            plt.ylabel('statistic, [SNR]')
+            plt.show()
+            
+        if summed_statistic_of_phase:
+            plt.figure(figsize=(width, height))
+            if temp_num in self.interleaved_numbers:
+                plt.plot(self.phases_interleaved, self.statistics_periodic_interleaved[per_ind][temp_num])
+            else:
+                plt.plot(self.phases_not_interleaved, self.statistics_periodic_not_interleaved[per_ind][temp_num])
+            plt.title('Summed statistic as function of phase for period='+str(period)+' days, template #'+str(temp_num))
+            plt.xlabel('initial phase, days')
+            plt.ylabel('statistic, [SNR]')
+            plt.show()
+            
+        if histogram_summed_statistic:
+            if temp_num in self.interleaved_numbers:
+                datstat = self.statistics_periodic_interleaved[per_ind][temp_num]
+            else:
+                datstat = self.statistics_periodic_not_interleaved[per_ind][temp_num]
+            histogram(datstat, n=nbins_hist, edgelist=edgelist_hist, edgemin=edgemin_hist, edgemax=edgemax_hist, xscale='square', yscale='log',
+                  density=False, normalize=True, ylogshift=True, logzeros='zero', 
+                  return_results=False, plot=True, new_figure=True, ax=None, figsize=(width/3*2,height), show=True,
+                  xlabel='statistic squared', ylabel='log counts', 
+                  title='Histogram of summed statistic for all phases for period='+str(temp_num), 
+                  xlim=None, ylim=None,
+                  color='b', linestyle='solid', marker='', linewidth=None, alpha=0.9, label=None, 
+                  loc_legend=None, plot_type='bar') 
+            
+        if minimal_statistic_periods:
+            mins = []
+            for p in range(len(self.periods)):
+                mins.append(np.nanmin(self.statistics_periodic_not_interleaved[p]))
+            plt.figure(figsize=(width, height))
+            plt.plot(self.periods, mins)
+            plt.title('Minimum of summed statistic as function of period')
+            plt.xlabel('periods, days')
+            plt.ylabel('statistic, [SNR]')
+            plt.show()
                 
 
 def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, dt, tmax, tmin, periods):
@@ -1863,7 +2178,7 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, dt, tmax, tmin, per
     denomsq = np.zeros((len(periods), len(statistics_by_trends),phases_size))
     for P_ind in range(len(periods)):
         P = periods[P_ind]
-        n_transits = int((tmax-tmin)/P)
+        n_transits = int(np.ceil((tmax-tmin)/P))
         phaselen = int(P/dt)
         for n in range(n_transits):      
             time_ind = int(np.round((P*n/dt)))
@@ -2034,7 +2349,7 @@ def unb_var(arr):
     return 1 / (len(arr)-1) * np.sum(np.abs(arr - np.mean(arr))**2)
         
         
-def moving_var(signal, nperseg=nperseg_moving_var, ngap=ngap_moving_var):
+def moving_var(signal, mask=None, nperseg=nperseg_moving_var, ngap=ngap_moving_var):
     """
     Calculates the moving variance of the signal. At every point, takes the window of length
     nperseg symmetrically from the two sides, excludes from the middle the window of length
@@ -2060,37 +2375,47 @@ def moving_var(signal, nperseg=nperseg_moving_var, ngap=ngap_moving_var):
     mov_var : numpy.array 1d of float, len(signal)
         Moving variance estimate at each point of the signal
     """
+    if mask is None:
+        mask = np.ones(signal).astype(bool)
     if nperseg>len(signal)/2:
         nperseg = len(signal)//2 + 1
         if ngap>=nperseg//2:
             warnings.warn('Not enough data to calculate moving variance.')
             ngap=nperseg//2
-    mov_var = []
+    signal[~mask] = 0.
     sum1 = np.cumsum(signal)
     sum1 = np.concatenate(([0], sum1))
     sum2 = np.cumsum(signal**2)
     sum2 = np.concatenate(([0], sum2))
+    summ = np.cumsum(mask)
+    summ = np.concatenate(([0], summ))
+    mov_var = []
     for i in np.arange(0,ngap//2):
-        mov_var.append(((sum2[i+nperseg//2]-sum2[i+ngap//2])/(nperseg//2-ngap//2)-((sum1[i+nperseg//2]-sum1[i+ngap//2])/(nperseg//2-ngap//2))**2)
-                       *(nperseg//2-ngap//2)/(nperseg//2-ngap//2-1))
+        counts = summ[i+nperseg//2]-summ[i+ngap//2]
+        mov_var.append(((sum2[i+nperseg//2]-sum2[i+ngap//2])/counts-((sum1[i+nperseg//2]-sum1[i+ngap//2])/counts)**2)
+                       *counts/(counts-1))
     for i in np.arange(ngap//2,nperseg//2):
-        mov_var.append(((sum2[i-ngap//2]-sum2[0]+sum2[i+nperseg//2]-sum2[i+ngap//2])/(i-ngap//2+nperseg//2-ngap//2)
-                       -((sum1[i-ngap//2]-sum1[0]+sum1[i+nperseg//2]-sum1[i+ngap//2])/(i-ngap//2+nperseg//2-ngap//2))**2)
-                       *(i-ngap//2+nperseg//2-ngap//2)/(i-ngap//2+nperseg//2-ngap//2-1))
+        counts = summ[i-ngap//2]-summ[0]+summ[i+nperseg//2]-summ[i+ngap//2]
+        mov_var.append(((sum2[i-ngap//2]-sum2[0]+sum2[i+nperseg//2]-sum2[i+ngap//2])/counts
+                       -((sum1[i-ngap//2]-sum1[0]+sum1[i+nperseg//2]-sum1[i+ngap//2])/counts)**2)
+                       *counts/(counts-1))
     for i in range(nperseg//2,len(signal)-nperseg//2):
-        mov_var.append(((sum2[i+nperseg//2]-sum2[i+ngap//2]+sum2[i-ngap//2]-sum2[i-nperseg//2])/(nperseg-ngap)
-                      -(((sum1[i+nperseg//2]-sum1[i+ngap//2]+sum1[i-ngap//2]-sum1[i-nperseg//2])/(nperseg-ngap))**2))
-                       *(nperseg-ngap)/(nperseg-ngap-1))
+        counts = summ[i+nperseg//2]-summ[i+ngap//2]+summ[i-ngap//2]-summ[i-nperseg//2]
+        mov_var.append(((sum2[i+nperseg//2]-sum2[i+ngap//2]+sum2[i-ngap//2]-sum2[i-nperseg//2])/counts
+                      -(((sum1[i+nperseg//2]-sum1[i+ngap//2]+sum1[i-ngap//2]-sum1[i-nperseg//2])/counts)**2))
+                       *counts/(counts-1))
     for i in np.arange(len(signal)-nperseg//2, len(signal)-ngap//2):
-        mov_var.append(((sum2[i-ngap//2]-sum2[i-nperseg//2]+sum2[-1]-sum2[i+ngap//2])/(len(signal)-i-ngap//2+nperseg//2-ngap//2)
-                     -((sum1[i-ngap//2]-sum1[i-nperseg//2]+sum1[-1]-sum1[i+ngap//2])/(len(signal)-i-ngap//2+nperseg//2-ngap//2))**2)
-                       *(len(signal)-i-ngap//2+nperseg//2-ngap//2)/(len(signal)-i-ngap//2+nperseg//2-ngap//2-1))
+        counts = summ[i-ngap//2]-summ[i-nperseg//2]+summ[-1]-summ[i+ngap//2]                       
+        mov_var.append(((sum2[i-ngap//2]-sum2[i-nperseg//2]+sum2[-1]-sum2[i+ngap//2])/counts
+                     -((sum1[i-ngap//2]-sum1[i-nperseg//2]+sum1[-1]-sum1[i+ngap//2])/counts)**2)
+                       *counts/(counts-1))
     for i in np.arange(len(signal)-ngap//2, len(signal)):
-        mov_var.append(((sum2[i-ngap//2]-sum2[i-nperseg//2])/(nperseg//2-ngap//2)
-                       -((sum1[i-ngap//2]-sum1[i-nperseg//2])/(nperseg//2-ngap//2))**2)
-                       *(nperseg//2-ngap//2)/(nperseg//2-ngap//2-1))
+        counts = summ[i-ngap//2]-summ[i-nperseg//2]
+        mov_var.append(((sum2[i-ngap//2]-sum2[i-nperseg//2])/counts
+                       -((sum1[i-ngap//2]-sum1[i-nperseg//2])/counts)**2)
+                       *counts/(counts-1))
     return np.abs(np.array(mov_var)) #because small fluctuations around zero can occur   
-    #np.count_nonzero(~np.isnan(data))     
+    
         
 
 def outlier_free_std(data, nsig=3, mask=None, detrend=False, detr_len=128):
@@ -3352,3 +3677,5 @@ def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None
             
     if return_results:
         return bins, counts 
+    
+    
