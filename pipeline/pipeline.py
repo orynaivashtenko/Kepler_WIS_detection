@@ -4,7 +4,7 @@
 Created on Thu Dec 17 15:11:32 2020
 
 @author: orynaivashtenko
-version October 2021
+version December 2021
 
 
 """
@@ -31,8 +31,12 @@ import time
 nsig_outliers_0 = 5
 nsig_outliers_0_pos = None #it is possible to mask positive and negatve outliers differently
 nsig_outliers_0_neg = None
+nsig_outliers_psd = None
 max_small_hole = 3
 nsig_outliers_w = 5
+nsig_outliers_w_pos = None
+nsig_outliers_w_neg = None
+nsig_outliers_stat = 4.
 #Masking. Detrending in outliers detection:
 detr_length_outliers = 128
 detr_method_outliers = 'median'
@@ -75,6 +79,7 @@ Pmin=100 #days
 
 #Processing the statistic
 nperseg_moving_var = 512
+#->make sure it is smallet than period
 ngap_moving_var = 128
 margin_snr_veto = 4.
 
@@ -177,6 +182,7 @@ class KeplerLightCurve(object):
             self.orig_times, self.orig_fluxes = get_data_fun(target_id, location=data_location)
         self.times = copy.deepcopy(self.orig_times)
         self.fluxes = copy.deepcopy(self.orig_fluxes)
+        self.psd_fluxes = None #if we are working with very deep transits, we want to mask them for psd measuring but not to mask them completely
         self.quarters = range(len(self.fluxes))
         self.masks = [~np.isnan(self.fluxes[i]) for i in self.quarters]
         self.psd_masks = copy.deepcopy(self.masks)
@@ -226,9 +232,12 @@ class KeplerLightCurve(object):
         
 
     
-    def condition_data(self, nsig_outliers=nsig_outliers_0, nperseg_psd=nperseg_psd, noverlap_psd=noverlap_psd, 
+    def condition_data(self, nsig_outliers=nsig_outliers_0, nsig_outliers_0_pos=nsig_outliers_0_pos, nsig_outliers_0_neg=nsig_outliers_0_neg,
+                       nsig_outliers_psd=nsig_outliers_psd, nperseg_psd=nperseg_psd, noverlap_psd=noverlap_psd, 
                        window_psd=window_psd, npsdsmin=npsdsmin, subtract_mean_in_psd=subtract_mean_in_psd, 
-                       nsig_notch=nsig_notch, nsig_outliers_w=nsig_outliers_w, use_rfft=use_rfft):
+                       nsig_notch=nsig_notch, use_rfft=use_rfft, 
+                       nsig_outliers_w=nsig_outliers_w, nsig_outliers_w_pos=nsig_outliers_w_pos, nsig_outliers_w_neg=nsig_outliers_w_neg,
+                       max_small_hole=max_small_hole):
         """
         Preparing data for detection. Subtract mean, mask outliers, measure psds,
         padding by zeros, notching, inpainting, whitening.
@@ -268,22 +277,25 @@ class KeplerLightCurve(object):
         """
         if not track_process:
             self.subtract_means(save_means=True)
-            self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
+            self.mask_flux_outliers(nsig_outliers_0, nsig_positive=nsig_outliers_0_pos, nsig_negative=nsig_outliers_0_neg, 
+                                    nsig_psd=nsig_outliers_psd, modify_psd_masks=True)
             self.pad_by_zeros() 
             self.interpolate_fluxes()
             self.prepare_for_psd(nperseg=nperseg_psd, noverlap=noverlap_psd, 
-                                 npsdsmin=npsdsmin, interp_method='linear')
+                                 npsdsmin=npsdsmin, interp_method='linear', nsig_outliers_psd=nsig_outliers_psd)
             self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd, subtract_mean=subtract_mean_in_psd, rfft=use_rfft)
             self.whiten_fluxes()
-            self.mask_flux_outliers(nsig_outliers_w, in_whitened_fluxes=True, modify_psd_masks=True)
+            self.mask_flux_outliers(nsig_outliers_w, nsig_positive=nsig_outliers_w_pos, nsig_negative=nsig_outliers_w_neg, in_whitened_fluxes=True, modify_psd_masks=False)
             self.interpolate_fluxes()
             self.whiten_fluxes()
             self.notch_fluxes(nsig=nsig_notch)
-            self.mask_flux_outliers(nsig_outliers_0, modify_psd_masks=True)
+            self.mask_flux_outliers(nsig_outliers_0, nsig_positive=nsig_outliers_0_pos, nsig_negative=nsig_outliers_0_neg, modify_psd_masks=False,
+                                    make_big_hole_masks=True, max_small_hole=max_small_hole)
             self.inpaint_fluxes() 
             self.whiten_fluxes()
             self.is_fluxes_conditioned=True
             
+        #TODO: update the tracked functions
         else:    
             t1 = time.time()
             t0 = t1
@@ -483,7 +495,7 @@ class KeplerLightCurve(object):
             self.notch_all_templates()
             self.roll_templates()
             self.whiten_all_templates(use_rfft=use_rfft)
-            self.matched_filtering(template_ind=template_ind, nsig_outliers=nsig_outliers)
+            self.matched_filtering(template_ind=template_ind)
             self.cut_zero_padding_ends()
             self.veto_statistics(margin_snr=margin_snr, template_ind=template_ind,
                                  fn=fn, maxdev=maxdev,
@@ -511,7 +523,7 @@ class KeplerLightCurve(object):
             print(np.round(t2-t1,2), 'sec. Done')
             t1 = t2
             print('Matched filtering...', end=' ')
-            self.matched_filtering(template_ind=template_ind, nsig_outliers=nsig_outliers)
+            self.matched_filtering(template_ind=template_ind)
             self.cut_zero_padding_ends()
             t2 = time.time()
             print(np.round(t2-t1,2), 'sec. Done')
@@ -610,7 +622,9 @@ class KeplerLightCurve(object):
 
     
     def mask_flux_outliers(self, nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos, nsig_negative=nsig_outliers_0_neg, 
-                           in_whitened_fluxes=False, modify_psd_masks=True):
+                           nsig_psd=nsig_outliers_psd,
+                           in_whitened_fluxes=False, modify_psd_masks=True, 
+                           make_big_hole_masks=False, max_small_hole=max_small_hole):
         """
         Detects outliers of the flux with respect to the trend. The trend is found by detrending.
         Modifies self.masks by setting False where the outliers were found.
@@ -643,7 +657,15 @@ class KeplerLightCurve(object):
                                                  detr_ends=detr_ends_outliers, detr_endlen=detr_endlen_outliers)
                 self.masks[i] *=  outlier_mask
                 if modify_psd_masks:
-                    self.psd_masks[i] *=  outlier_mask
+                    if nsig_psd is not None:
+                        outlier_psd_mask = mask_outliers_fun(flux, mask=np.array(self.masks[i]), nsig=nsig_psd, 
+                                                 nsig_positive=None, nsig_negative=None,
+                                                 detr_length=detr_length_outliers,
+                                                 detr_method=detr_method_outliers, detr_endmethod=detr_endmethod_outliers,
+                                                 detr_ends=detr_ends_outliers, detr_endlen=detr_endlen_outliers)
+                        self.psd_masks[i] *=  outlier_psd_mask
+                    else:
+                        self.psd_masks[i] *=  outlier_mask
         else:
             if not self.is_fluxes_whitened:
                 self.whiten_fluxes()
@@ -651,10 +673,24 @@ class KeplerLightCurve(object):
                 wflux=copy.deepcopy(self.whitened_fluxes_td[i])
                 #need to calculate mean and variance in not masked region, otherwise they will be too small:
                 indices = np.where(self.masks[i])[0]
-                w_outlier_mask = np.abs(wflux-np.mean(wflux[indices]))<nsig * np.std(wflux[indices])
+                meanwflux = np.mean(wflux[indices])
+                stdwflux = np.std(wflux[indices])
+                if nsig_positive is None:
+                    nsig_positive = nsig
+                if nsig_negative is None:
+                    nsig_negative = nsig
+                w_outlier_mask = ((wflux-meanwflux) < (nsig_positive * stdwflux))
+                w_outlier_mask *= ((wflux-meanwflux) > (- nsig_negative * stdwflux))
                 self.masks[i] *=  w_outlier_mask
                 if modify_psd_masks:
-                    self.psd_masks[i] *=  w_outlier_mask
+                    if nsig_psd is None:
+                        self.psd_masks[i] *=  w_outlier_mask
+                    else:
+                        self.psd_masks[i] *= (np.abs(wflux-meanwflux) < nsig_psd * stdwflux)
+        # if make_big_hole_masks:
+            # self.big_hole_masks = []
+            # for q in self.quarters:
+            #     self.big_hole_masks.append(clean_small_holes(np.array(self.masks[q]), max_hole=max_small_hole))
                 
     
     #TODO: mask_planet
@@ -663,7 +699,8 @@ class KeplerLightCurve(object):
         # flux_par
         pass
     
-    def prepare_for_psd(self, nperseg=nperseg_psd, noverlap=noverlap_psd, npsdsmin=npsdsmin, interp_method='linear'):
+    def prepare_for_psd(self, nperseg=nperseg_psd, noverlap=noverlap_psd, npsdsmin=npsdsmin, interp_method='linear', 
+                        nsig_outliers_psd=nsig_outliers_psd, max_small_hole=max_small_hole):
         """
         Checks whether the number of pieces for the Welch method is enough compare to npsdsmin, and 
         if no, interpolates over mask and updates the psd mask to measure psd for the first time like that.
@@ -690,7 +727,13 @@ class KeplerLightCurve(object):
         self.psd_masks
 
         """
-        if not self.is_holes_interpolated:
+        if nsig_outliers_psd is not None:
+            self.psd_fluxes = copy.deepcopy(self.fluxes)
+            for i in self.quarters:
+                self.psd_fluxes[i] = interpolate_over_mask(self.psd_fluxes[i], self.psd_masks[i], interp_method='linear', ends='continue',
+                                                                mitigate_hole_ends=False, endhole_method='median')
+            
+        elif not self.is_holes_interpolated:
             warnings.warn("Data is not interpolated. Cleaning small holes may cause NaN in the fluxes.")
         if noverlap<1:
             noverlap = int(nperseg*noverlap)
@@ -700,8 +743,7 @@ class KeplerLightCurve(object):
         # over holes will be done first
         self.npsds0 = np.zeros(len(self.fluxes))
         for i in self.quarters:
-            mask_big = clean_small_holes(np.array(self.psd_masks[i])) #mask of only big and edge holes
-            self.big_hole_masks[i] = np.array(mask_big)
+            mask_big = clean_small_holes(np.array(self.psd_masks[i]), max_hole=max_small_hole) #mask of only big and edge holes
             for ind1 in range(0,len(self.fluxes[i]) - nperseg, nperseg - noverlap):
                 if np.sum((~self.psd_masks[i])[ind1 : ind1 + nperseg])==0:
                     self.npsds0[i] += 1
@@ -755,8 +797,8 @@ class KeplerLightCurve(object):
                                                   self.masks[i], np.zeros(zerlen2))).astype(bool)
                 self.psd_masks[i] = np.concatenate((np.zeros(zerlen1), 
                                                   self.psd_masks[i], np.zeros(zerlen2))).astype(bool)
-                self.big_hole_masks[i] = np.concatenate((np.zeros(zerlen1), 
-                                                  self.big_hole_masks[i], np.zeros(zerlen2))).astype(bool)
+                # self.big_hole_masks[i] = np.concatenate((np.zeros(zerlen1), 
+                #                                   self.big_hole_masks[i], np.zeros(zerlen2))).astype(bool)
                 self.times[i] = np.concatenate((np.zeros(zerlen1)+np.nan, 
                                                   self.times[i], np.zeros(zerlen2)+np.nan ))
                 # NaNs are needed for the 'interpolate_time" function to treat these regions
@@ -817,6 +859,9 @@ class KeplerLightCurve(object):
         if not self.is_prepared_for_psd:
             warnings.warn("Data is not prepared for PSD. Use prepare_for_psd method.")
             
+        if self.psd_fluxes is None:
+            self.psd_fluxes = copy.deepcopy(self.fluxes)
+            
         if self.is_fluxes_inpainted:
             warnings.warn("Fluxes have been inpainted, new PSD will make inpainting invalid for detection.")
         
@@ -834,15 +879,15 @@ class KeplerLightCurve(object):
         if subtract_mean:            
             if rfft:
                 for i in self.quarters:
-                    psds.append([np.abs(np.fft.rfft(windowdict[window]*(self.fluxes[i]-np.nanmean(self.fluxes[i]))[ind1:ind1+nperseg])
-                        )**2 for ind1 in range(0,len(self.fluxes[i])-nperseg,nperseg-noverlap
+                    psds.append([np.abs(np.fft.rfft(windowdict[window]*(self.psd_fluxes[i]-np.nanmean(self.psd_fluxes[i]))[ind1:ind1+nperseg])
+                        )**2 for ind1 in range(0,len(self.psd_fluxes[i])-nperseg,nperseg-noverlap
                                 ) if np.sum((~self.psd_masks[i])[ind1:ind1+nperseg])==0])
                 self.freqs = [np.fft.rfftfreq(len(time), d=self.dt_sec) for time in self.times]
                 self.psdfreqs = [np.fft.rfftfreq(nperseg, d=self.dt_sec) for i in self.quarters]
             else:
                 for i in self.quarters:
-                    psds.append([np.abs(np.fft.fft(windowdict[window]*(self.fluxes[i]-np.nanmean(self.fluxes[i]))[ind1:ind1+nperseg])
-                        )**2 for ind1 in range(0,len(self.fluxes[i])-nperseg,nperseg-noverlap
+                    psds.append([np.abs(np.fft.fft(windowdict[window]*(self.psd_fluxes[i]-np.nanmean(self.psd_fluxes[i]))[ind1:ind1+nperseg])
+                        )**2 for ind1 in range(0,len(self.psd_fluxes[i])-nperseg,nperseg-noverlap
                                 ) if np.sum((~self.psd_masks[i])[ind1:ind1+nperseg])==0])
                 self.freqs = [np.fft.fftfreq(len(time), d=self.dt_sec) for time in self.times]
                 self.psdfreqs = [np.fft.fftfreq(nperseg, d=self.dt_sec) for i in self.quarters]
@@ -850,15 +895,15 @@ class KeplerLightCurve(object):
         else:
             if rfft:
                 for i in self.quarters:
-                    psds.append([np.abs(np.fft.rfft(windowdict[window]*(self.fluxes[i])[ind1:ind1+nperseg])
-                        )**2 for ind1 in range(0,len(self.fluxes[i])-nperseg,nperseg-noverlap
+                    psds.append([np.abs(np.fft.rfft(windowdict[window]*(self.psd_fluxes[i])[ind1:ind1+nperseg])
+                        )**2 for ind1 in range(0,len(self.psd_fluxes[i])-nperseg,nperseg-noverlap
                                 ) if np.sum((~self.psd_masks[i])[ind1:ind1+nperseg])==0])
                 self.freqs = [np.fft.rfftfreq(len(time), d=self.dt_sec) for time in self.times]
                 self.psdfreqs = [np.fft.rfftfreq(nperseg, d=self.dt_sec) for i in self.quarters]
             else:
                 for i in self.quarters:
-                    psds.append([np.abs(np.fft.fft(windowdict[window]*(self.fluxes[i])[ind1:ind1+nperseg])
-                        )**2 for ind1 in range(0,len(self.fluxes[i])-nperseg,nperseg-noverlap
+                    psds.append([np.abs(np.fft.fft(windowdict[window]*(self.psd_fluxes[i])[ind1:ind1+nperseg])
+                        )**2 for ind1 in range(0,len(self.psd_fluxes[i])-nperseg,nperseg-noverlap
                                 ) if np.sum((~self.psd_masks[i])[ind1:ind1+nperseg])==0])
                 self.freqs = [np.fft.fftfreq(len(time), d=self.dt_sec) for time in self.times]
                 self.psdfreqs = [np.fft.fftfreq(nperseg, d=self.dt_sec) for i in self.quarters]
@@ -1044,7 +1089,8 @@ class KeplerLightCurve(object):
     
     def find_moving_averages(self, interpolate=True, detr_length=detr_length, detr_method=detr_method, 
                              detr_endmethod=detr_endmethod, detr_ends=detr_ends, 
-                             detr_endlen=detr_endlen, keep_overall_level=False):
+                             detr_endlen=detr_endlen, keep_overall_level=False,
+                             remove_outliers=False, nsig_outliers=nsig_outliers_0):
         """
         Calculates the large trends of the original fluxes by taking the moving average of
         type detr_method ('mean' or 'median') of slices of size detr_length.
@@ -1081,7 +1127,7 @@ class KeplerLightCurve(object):
         None.
             Creates self.detrended_orig_fluxes and self.trends_orig_fluxes
 
-        """
+        """        
         self.detrended_orig_fluxes = []
         self.trends_orig_fluxes = []
         for q in self.quarters:
@@ -1090,10 +1136,12 @@ class KeplerLightCurve(object):
                 o_f = interpolate_over_mask(np.array(self.orig_fluxes[q]), msk, interp_method='linear', ends='continue',
                                                             mitigate_hole_ends=False, endhole_method='median')
                 detr, trend = detrend_amat(np.array(o_f), length=detr_length, mask=None, method=detr_method, 
-                             endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen, return_trend=True, keep_overall_level=False)
+                             endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen, return_trend=True, 
+                             keep_overall_level=False, remove_outliers=remove_outliers, nsig_outliers=nsig_outliers)
             else:
                 detr, trend = detrend_amat(np.array(self.orig_fluxes[q]), length=detr_length, mask=None, method=detr_method, 
-                             endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen, return_trend=True, keep_overall_level=False)
+                             endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen, return_trend=True, 
+                             keep_overall_level=False, remove_outliers=remove_outliers, nsig_outliers=nsig_outliers)
             self.detrended_orig_fluxes.append(detr)
             self.trends_orig_fluxes.append(trend)
             
@@ -1346,7 +1394,9 @@ class KeplerLightCurve(object):
         self.is_template_whitened[:]=True
             
         
-    def matched_filtering(self, template_ind='all', nsig_outliers=nsig_outliers_0):
+    def matched_filtering(self, template_ind='all', max_small_hole=max_small_hole,  
+                          detr_length_outliers=detr_length_outliers, 
+                          nsig_outliers_stat=nsig_outliers_stat):
         """
         Calculates the matched-filtering statistics of data and templates.
         Cuts the statistic from zero padding ends.
@@ -1364,7 +1414,7 @@ class KeplerLightCurve(object):
         ---------
         self.whitened_fluxes_fd : fluxes should be whitened
         self.whitened_templates_fd : templates should be whitened
-        self.big_hole_masks : need masks for std calculation, but ignore small holes
+        self.masks : need masks for std calculation, but will ignore small holes
         self.support : data should be zero-padded
         
         Creates
@@ -1379,7 +1429,12 @@ class KeplerLightCurve(object):
             inner product, and the formulae are written schematically. In reality,
             they are implemented with whitened data and fluxes.
         """
-                    
+        self.big_hole_masks = []
+        for q in self.quarters:
+            bigmask = np.array(self.masks[q][
+                    self.zero_padding_ends[q][0]:len(self.masks[q])-self.zero_padding_ends[q][1]])
+            self.big_hole_masks.append(clean_small_holes(np.array(bigmask), max_hole=max_small_hole).astype(bool))
+                
         if template_ind=='all':
             self.orig_time_lengths = np.array([len(self.orig_fluxes[q]) for q in self.quarters])
             max_time_len = np.max(self.orig_time_lengths)
@@ -1389,28 +1444,31 @@ class KeplerLightCurve(object):
             self.statistics_snr = np.zeros((len(self.templates),len(self.quarters),max_time_len))
             self.statistics_abs = np.zeros((len(self.templates),len(self.quarters),max_time_len))
             self.stat_vars = np.zeros((len(self.templates),len(self.quarters))) #mean of moving variance
+            #TODO: think about outlier free moving variance
             self.stat_masks = np.zeros((len(self.templates),len(self.quarters),max_time_len)).astype(bool)
+            
             if not self.is_template_whitened.all():
                 self.whiten_all_templates()
+            
             for k in range(len(self.whitened_templates_fd)):
                 for q in self.quarters:
                     #statistics not in snr, not in absolute units
                     stat = np.real(np.fft.irfft(np.conjugate(self.whitened_templates_fd[k][q])*self.whitened_fluxes_fd[q]))
                     stat = np.array(stat[self.zero_padding_ends[q][0]:len(stat)-self.zero_padding_ends[q][1]]) #CUT THE STATISTIC
-                    statmask = np.array(self.big_hole_masks[q][
-                        self.zero_padding_ends[q][0]:len(self.big_hole_masks[q])-self.zero_padding_ends[q][1]])
+                    statmask = np.array(self.big_hole_masks[q])
                     self.statistics_raw[k][q][:self.orig_time_lengths[q]] = stat       
                     #TODO: outliers in moving variance
-                    movvar = moving_var(np.array(stat), nperseg=nperseg_moving_var, ngap=ngap_moving_var)
-                    movvar[statmask] = np.inf
+                    movvar = moving_var(np.array(stat), mask=statmask, nperseg=nperseg_moving_var, ngap=ngap_moving_var,
+                                                 remove_outliers=True, detr_length_outliers=detr_length_outliers,
+                                                 nsig_outliers=nsig_outliers_stat, return_mask=False)
+                    movvar[~statmask] = np.inf
                     #TODO: think about the masked regions. Big hole mask.
                     self.stat_moving_vars[k][q][:self.orig_time_lengths[q]] = movvar
                     self.statistics_snr[k][q][:self.orig_time_lengths[q]] = stat/movvar**0.5
-                    statrawcor = stat/movvar*np.nanmean(movvar)
-                    statrawcor[~self.big_hole_masks[q][
-                        self.zero_padding_ends[q][0]:len(self.big_hole_masks[q])-self.zero_padding_ends[q][1]]] = 0
+                    statrawcor = stat/movvar*np.nanmean(movvar[statmask])
+                    statrawcor[~statmask] = 0.
                     self.statistics_raw_cor[k][q][:self.orig_time_lengths[q]] = statrawcor
-                    self.stat_vars[k][q] = np.mean(movvar**0.5)**2
+                    self.stat_vars[k][q] = np.nanmean((movvar[statmask])**0.5)**2
                     self.statistics_abs[k][q][:self.orig_time_lengths[q]] = stat/movvar
                     self.stat_masks[k][q][:self.orig_time_lengths[q]] = statmask
 
@@ -1423,19 +1481,21 @@ class KeplerLightCurve(object):
                 #statistics not in snr, not in absolute units
                 stat = (np.fft.irfft(np.conjugate(self.whitened_templates_fd[k][q])*self.whitened_fluxes_fd[q]))
                 stat = np.array(stat[self.zero_padding_ends[q][0]:len(stat)-self.zero_padding_ends[q][1]]) #CUT THE STATISTIC
-                statmask = np.array(self.big_hole_masks[q][
-                    self.zero_padding_ends[q][0]:len(self.big_hole_masks[q])-self.zero_padding_ends[q][1]])
+                statmask = np.array(self.masks[q][
+                    self.zero_padding_ends[q][0]:len(self.masks[q])-self.zero_padding_ends[q][1]])
+                statmask = clean_small_holes(np.array(statmask), max_hole=max_small_hole)
                 self.statistics_raw[k][q][:self.orig_time_lengths[q]] = stat       
                 #TODO: outliers in moving variance
-                movvar = moving_var(np.array(stat), nperseg=nperseg_moving_var, ngap=ngap_moving_var)
+                movvar = moving_var(np.array(stat), mask=statmask,  nperseg=nperseg_moving_var, ngap=ngap_moving_var,
+                                    remove_outliers=True, detr_length_outliers=detr_length_outliers,
+                                                 nsig_outliers=nsig_outliers_stat, return_mask=False)
                 movvar[statmask] = np.inf
                 self.stat_moving_vars[k][q][:self.orig_time_lengths[q]] = movvar
                 self.statistics_snr[k][q][:self.orig_time_lengths[q]] = stat/movvar**0.5
-                statrawcor = stat/movvar*np.nanmean(movvar)
-                statrawcor[~self.big_hole_masks[q][
-                    self.zero_padding_ends[q][0]:len(self.big_hole_masks[q])-self.zero_padding_ends[q][1]]] = 0.
+                statrawcor = stat/movvar*np.nanmean(movvar[statmask])
+                statrawcor[~statmask] = 0.
                 self.statistics_raw_cor[k][q][:self.orig_time_lengths[q]] = statrawcor
-                self.stat_vars[k][q] = np.mean(movvar**0.5)**2
+                self.stat_vars[k][q] = np.nanmean((movvar[statmask])**0.5)**2
                 self.statistics_abs[k][q][:self.orig_time_lengths[q]] = stat/movvar
                 self.stat_masks[k][q][:self.orig_time_lengths[q]] = statmask
     
@@ -1456,6 +1516,7 @@ class KeplerLightCurve(object):
             fluxes = []
             times = []
             masks = []
+            stat_masks = []
             # big_hole_masks = []
             whitened_fluxes_td = []
             for q in self.quarters:
@@ -1466,7 +1527,7 @@ class KeplerLightCurve(object):
                 masks.append(np.array(self.masks[q][
                     self.zero_padding_ends[q][0]:len(self.masks[q])-self.zero_padding_ends[q][-1]]))
                 # big_hole_masks.append(np.array(self.big_hole_masks[q][
-                    # self.zero_padding_ends[q][0]:len(self.big_hole_masks[q])-self.zero_padding_ends[q][-1]]))
+                #     self.zero_padding_ends[q][0]:len(self.big_hole_masks[q])-self.zero_padding_ends[q][-1]]))
                 whitened_fluxes_td.append(np.array(
                     self.whitened_fluxes_td[q][
                         self.zero_padding_ends[q][0]:len(self.whitened_fluxes_td[q])-self.zero_padding_ends[q][-1]]))
@@ -1484,6 +1545,10 @@ class KeplerLightCurve(object):
             statistics_snr = []
             statistics_raw_cor = []
             statistics_masks = []
+            big_hole_masks = []
+            for q in self.quarters:
+                big_hole_masks.append(self.big_hole_masks[q][:self.orig_time_lengths[q]])
+            self.big_hole_masks = big_hole_masks
             for k in range(len(self.statistics_snr)):
                 stat_snr = []
                 stat_raw_cor = []
@@ -1554,12 +1619,12 @@ class KeplerLightCurve(object):
             
         Modifies
         --------------
-        self.transit_indices : 
+        self.trigger_indices : 
             Adds to dict list of len(#quarters) of numpy.arrays 1d.
             Indices at each quarter where the verified significant triggers happened.                                 
-        self.transit_amplitudes : 
+        self.trigger_amplitudes : 
             Adds to dict list of len(#quarters) of numpy.arrays 1d, 
-            corresponfing to self.transit_indices.
+            corresponfing to self.trigger_indices.
             Amplitudes in absolute units (quarter-specific) determined from fitting
         self.veto_masks : 
             Adds to dict list of len(#quarters) of numpy.arrays 1d of len support.
@@ -1576,16 +1641,16 @@ class KeplerLightCurve(object):
         if self.is_zero_padded:
             self.cut_zero_padding_ends()
         
-        self.transit_indices = [[[] for q in self.quarters] for k in range(len(self.templates))]
-        self.transit_amplitudes = [[[] for q in self.quarters] for k in range(len(self.templates))]
+        self.trigger_indices = [[[] for q in self.quarters] for k in range(len(self.templates))]
+        self.trigger_amplitudes = [[[] for q in self.quarters] for k in range(len(self.templates))]
         self.veto_masks = [[np.ones(len(self.stat_masks[k][q])).astype(bool) for q in self.quarters] for k in range(len(self.stat_masks))]
         self.veto_bad_trigger_inds = [[[] for q in self.quarters] for k in range(len(self.templates))]
         for k in temp_indices:
             template = self.initial_templates[k]
             halflen=len(template)//2
             for q in self.quarters: #over quarters
-                transit_indices_quarter = []
-                transit_amplitudes_quarter = []
+                trigger_indices_quarter = []
+                trigger_amplitudes_quarter = []
                 statistic = np.array(self.statistics_snr[k][q])
                 mask = np.array(self.stat_masks[k][q]) #allow small holes to be in the transit
                 veto_mask = np.ones(len(statistic)).astype(bool)
@@ -1622,8 +1687,8 @@ class KeplerLightCurve(object):
                                 zero_ends_len_abs=zero_ends_len_abs, zero_ends_len_rel=zero_ends_len_rel, 
                                 return_amplitude=True, return_reason=True)
                         if isgood:
-                            transit_indices_quarter.append(i)
-                            transit_amplitudes_quarter.append(ampl)
+                            trigger_indices_quarter.append(i)
+                            trigger_amplitudes_quarter.append(ampl)
                         else:
                             veto_bad_trigger_ind[0].append(i)
                             veto_bad_trigger_ind[1].append(reason)
@@ -1631,8 +1696,8 @@ class KeplerLightCurve(object):
                 veto_mask[veto_bad_trigger_ind[0]] = False
                 self.veto_masks[k][q] = veto_mask
                 self.stat_masks[k][q] *= veto_mask
-                self.transit_indices[k][q] = copy.deepcopy(transit_indices_quarter)
-                self.transit_amplitudes[k][q] = copy.deepcopy(transit_amplitudes_quarter)
+                self.trigger_indices[k][q] = copy.deepcopy(trigger_indices_quarter)
+                self.trigger_amplitudes[k][q] = copy.deepcopy(trigger_amplitudes_quarter)
                 self.veto_bad_trigger_inds[k][q] = copy.deepcopy(veto_bad_trigger_ind)
                 self.statistics_snr[k][q][~self.stat_masks[k][q]] = 0. 
                 self.statistics_raw_cor[k][q][~self.stat_masks[k][q]] = 0. #ATTENTION! WE DO THIS FOR FAST SUMMATION IN FUTURE TO AVOID EXTRA IF
@@ -1682,8 +1747,10 @@ class KeplerLightCurve(object):
         """
         self.interleaved_numbers = np.array([i for i in range(len(self.indices_of_templates)) 
                                   if ((self.indices_of_templates[i][1]-self.indices_of_templates[i][0])>=2)])
-        self.not_interleaved_numbers = np.array([self.indices_of_templates[i][0] for i in range(len(self.indices_of_templates)) 
+        self.not_interleaved_numbers = np.array([i for i in range(len(self.indices_of_templates)) 
                                   if ((self.indices_of_templates[i][1]-self.indices_of_templates[i][0])==1)])
+        # self.not_interleaved_numbers = np.array([self.indices_of_templates[i][0] for i in range(len(self.indices_of_templates)) 
+        #                           if ((self.indices_of_templates[i][1]-self.indices_of_templates[i][0])==1)])
         
         #for interleaved:
         shift_numbers = np.array([self.indices_of_templates[i][1]-self.indices_of_templates[i][0] for i in self.interleaved_numbers])
@@ -1709,9 +1776,10 @@ class KeplerLightCurve(object):
         self.statistics_not_interleaved = []
         self.stat_masks_not_interleaved = []
         self.stat_vars_not_interleaved = []
-        self.statistics_not_interleaved = np.array(self.statistics_full[self.not_interleaved_numbers])
-        self.stat_masks_not_interleaved = np.array(self.stat_masks_full[self.not_interleaved_numbers])
-        self.stat_vars_not_interleaved = np.array(self.stat_vars_full[self.not_interleaved_numbers])
+        indices_for_not_interleaved = [self.indices_of_templates[i][0] for i in self.not_interleaved_numbers]
+        self.statistics_not_interleaved = np.array(self.statistics_full[indices_for_not_interleaved])
+        self.stat_masks_not_interleaved = np.array(self.stat_masks_full[indices_for_not_interleaved])
+        self.stat_vars_not_interleaved = np.array(self.stat_vars_full[indices_for_not_interleaved])
         self.trend_orig_flux_not_interleaved = np.array(self.trend_orig_flux_full)
         self.time_not_interleaved = np.arange(len(self.trend_orig_flux_not_interleaved))*self.dt_days+self.time_full[0]
         
@@ -1807,8 +1875,7 @@ class KeplerLightCurve(object):
         
         
         #not interleaved
-        # indices = np.array([i for i in range(len(self.statistics_full)) if i not in self.interleaved_numbers])
-        statistics_by_trends = (self.statistics_not_interleaved * self.trend_orig_flux_interleaved)
+        statistics_by_trends = (self.statistics_not_interleaved * self.trend_orig_flux_not_interleaved)
         statistics_by_trends = np.hstack((statistics_by_trends, np.zeros(
                         (len(statistics_by_trends),int(np.ceil(Pmax/self.dt_days))))))
         #pad by zeros to avoid extra if statements in the summation:       
@@ -1825,7 +1892,7 @@ class KeplerLightCurve(object):
         
      
         
-    def determine_mins(self):
+    def determine_mins(self, ngap_moving_var=ngap_moving_var):
         pind_min_interleaved = np.nanargmin( # argmin over periods
                                     [np.nanmin(# min over templates
                                         [np.nanmin(# min over phases
@@ -1863,15 +1930,7 @@ class KeplerLightCurve(object):
                                          np.abs(self.statistics_periodic_not_interleaved[pind_min_not_interleaved][ti])) #in the best period
                                      for ti in range(len(self.statistics_periodic_not_interleaved[pind_min_not_interleaved])) ])
         
-        if np.nanmin(self.statistics_periodic_not_interleaved)<=np.nanmin(self.statistics_periodic_interleaved):
-            self.is_min_interleaved = False
-            self.snr_measured = np.nanmin(self.statistics_periodic_not_interleaved)
-            self.pind_measured = pind_min_not_interleaved
-            self.phind_measured = phasind_min_not_interleaved
-            self.ph_measured = self.phases_not_interleaved[phasind_min_not_interleaved]
-            self.tempind_min_not_interleaved = tempind_min_not_interleaved
-            self.tempind_measured = self.interleaved_numbers[tempind_min_not_interleaved]
-        else:
+        if np.nanmin(self.statistics_periodic_interleaved)<np.nanmin(self.statistics_periodic_not_interleaved):
             self.is_min_interleaved = True
             self.snr_measured = np.nanmin(self.statistics_periodic_interleaved)
             self.pind_measured = pind_min_interleaved
@@ -1879,61 +1938,76 @@ class KeplerLightCurve(object):
             self.ph_measured = self.phases_interleaved[phasind_min_interleaved]
             self.tempind_min_interleaved = tempind_min_interleaved
             self.tempind_measured = self.interleaved_numbers[tempind_min_interleaved]
+            self.std_around_min = outlier_free_std(np.concatenate((
+                self.statistics_periodic_interleaved[self.pind_measured][tempind_min_interleaved][:self.phind_measured - ngap_moving_var//2 * self.n_shifts],
+                self.statistics_periodic_interleaved[self.pind_measured][tempind_min_interleaved][self.phind_measured + ngap_moving_var//2 * self.n_shifts:])))
+        else:
+            self.is_min_interleaved = False
+            self.snr_measured = np.nanmin(self.statistics_periodic_not_interleaved)
+            self.pind_measured = pind_min_not_interleaved
+            self.phind_measured = phasind_min_not_interleaved
+            self.ph_measured = self.phases_not_interleaved[phasind_min_not_interleaved]
+            self.tempind_min_not_interleaved = tempind_min_not_interleaved
+            self.tempind_measured = self.not_interleaved_numbers[tempind_min_not_interleaved]
+            self.std_around_min = outlier_free_std(np.concatenate((
+                self.statistics_periodic_not_interleaved[self.pind_measured][tempind_min_not_interleaved][:self.phind_measured - ngap_moving_var//2],
+                self.statistics_periodic_not_interleaved[self.pind_measured][tempind_min_not_interleaved][self.phind_measured + ngap_moving_var//2:])))
+            
         self.period_measured = self.periods[self.pind_measured]
         self.std_free_place = outlier_free_std(self.statistics_periodic_not_interleaved[pind_incorrect][tempind_incorrect])
-        expected_transit_times = [self.tmin + self.Ph_measured + i * self.period_measured 
-                                   for i in range(int(np.ceil(self.tmax - self.tmin - self.Ph_measured)/self.period_measured))]
+        
+        
+        
+        expected_transit_times = [self.tmin + self.ph_measured + i * self.period_measured 
+                                   for i in range(int(np.ceil((self.tmax - self.tmin - self.ph_measured)/self.period_measured) ))]
+        self.expected_transit_times = expected_transit_times
         if self.is_min_interleaved:
-            summed_transit_points = [np.argmin(self.time_interleaved - expected_transit_times[i]) for i in range(len(expected_transit_times))  ]
+            summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
             self.summed_transit_times = np.array(self.time_interleaved[summed_transit_points])
             summed_stats = np.array(self.statistics_interleaved[tempind_min_interleaved][summed_transit_points])
             summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
             summed_vars = np.array(self.stat_vars_interleaved[tempind_min_interleaved][summed_transit_points])
         else:
-            summed_transit_points = [np.argmin(self.time_not_interleaved - expected_transit_times[i]) for i in range(len(expected_transit_times))  ]
+            summed_transit_points = [np.argmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
             self.summed_transit_times = np.array(self.time_not_interleaved[summed_transit_points])
             summed_stats = np.array(self.statistics_not_interleaved[tempind_min_not_interleaved][summed_transit_points])
             summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
             summed_vars = np.array(self.stat_vars_not_interleaved[tempind_min_not_interleaved][summed_transit_points])
         denom = np.sum(summed_vars * summed_trends**2)**0.5
         self.summed_transit_statistics = (summed_stats * summed_trends)/denom
-        
-        
-        
-        
-        # self.summed_statistics_snr_not_corrected = []
-        # for t in expected_transit_times:
-        #     qmin = 0
-        #     imin = 0
-        #     minval = t - self.times[q][0]
-        #     for q in self.quarters:
-        #         if 0<=t - self.times[q][0]<minval:
-        #             qmin = q
-        #             minval = t - self.times[q][0]
-        #     minval = t - self.times[qmin][0]
-        #     for i in range(len(self.times[qmin])):
-        #         if np.abs(t - self.times[qmin][i])<minval:
-        #             imin = i
-        #             minval = np.abs(t - self.times[qmin][i])
-        #     self.summed_statistics_snr_not_corrected.append(self.statis)
+        self.origrnal_transit_indices = [[] for q in self.quarters]
+        for t in self.expected_transit_times:
+            qmin = 0
+            imin = 0
+            minval = np.abs(t - self.times[0][0])
+            for q in self.quarters:
+                if (((t - self.times[q][0])>=0) and (np.abs(t - self.times[q][0])<minval)):
+                    qmin = q
+                    minval = np.abs(t - self.times[q][0])
+            minval = t - self.times[qmin][0]
+            for i in range(len(self.times[qmin])):
+                if np.abs(t - self.times[qmin][i])<minval:
+                    imin = i
+                    minval = np.abs(t - self.times[qmin][i])
+            self.origrnal_transit_indices[qmin].append(imin)
                 
         
         
     #plotting methods
     def plot_results(self, 
                      plot_all=None,
-                     original_data=True,
-                     psds=True,
-                     whitened_fluxes_td=True,
-                     whitened_fluxes_fd=True,
-                     single_event_statistic_snr_without_mask=False,
-                     single_event_statistic_snr=True,
-                     fluxes_with_veto=True,
-                     histogram_single_event=True,
-                     summed_statistic_minimal_of_phase=True,
-                     summed_statistic_of_phase=False,
-                     histogram_summed_statistic=True,
-                     minimal_statistic_periods=True,
+                     original_data=None,
+                     psds=None,
+                     whitened_fluxes_td=None,
+                     whitened_fluxes_fd=None,
+                     single_event_statistic_snr_without_mask=None,
+                     single_event_statistic_snr=None,
+                     fluxes_with_veto=None,
+                     histogram_single_event=None,
+                     summed_statistic_minimal_of_phase=None,
+                     summed_statistic_of_phase=None,
+                     histogram_summed_statistic=None,
+                     minimal_statistic_periods=None,
                      temp_num=8, period=None, per_ind=0, nbins_hist=25, 
                      figsize=None, edgelist_hist=None, edgemin_hist=None, edgemax_hist=None
                      ):
@@ -1951,31 +2025,80 @@ class KeplerLightCurve(object):
             period = self.periods[per_ind]
         
         if plot_all==True:
-            original_data = True
-            psds = True
-            whitened_fluxes_td = True
-            whitened_fluxes_fd = True
-            single_event_statistic_snr_without_mask = True
-            single_event_statistic_snr = True
-            fluxes_with_veto = True
-            histogram_single_event = True
-            summed_statistic_minimal_of_phase = True
-            summed_statistic_of_phase = True
-            histogram_summed_statistic = True
-            minimal_statistic_periods = True
+            if original_data is None:
+                original_data = True
+            if psds is None:
+                psds = True
+            if whitened_fluxes_td is None:
+                whitened_fluxes_td = True
+            if whitened_fluxes_fd is None:
+                whitened_fluxes_fd = True
+            if single_event_statistic_snr_without_mask is None:
+                single_event_statistic_snr_without_mask = True
+            if single_event_statistic_snr is None:
+                single_event_statistic_snr = True
+            if fluxes_with_veto is None:
+                fluxes_with_veto = True
+            if histogram_single_event is None:
+                histogram_single_event = True
+            if summed_statistic_minimal_of_phase is None:
+                summed_statistic_minimal_of_phase = True
+            if summed_statistic_of_phase is None:
+                summed_statistic_of_phase = True
+            if histogram_summed_statistic is None:
+                histogram_summed_statistic = True
+            if minimal_statistic_periods is None:
+                minimal_statistic_periods = True
         elif plot_all==False:
-            original_data = False
-            psds = False
-            whitened_fluxes_td = False
-            whitened_fluxes_fd = False
-            single_event_statistic_snr_without_mask = False
-            single_event_statistic_snr = False
-            fluxes_with_veto = False
-            histogram_single_event = False
-            summed_statistic_minimal_of_phase = False
-            summed_statistic_of_phase = False
-            histogram_summed_statistic = False
-            minimal_statistic_periods = False
+            if original_data is None:
+                original_data = False
+            if psds is None:
+                psds = False
+            if whitened_fluxes_td is None:
+                whitened_fluxes_td = False
+            if whitened_fluxes_fd is None:
+                whitened_fluxes_fd = False
+            if single_event_statistic_snr_without_mask is None:
+                single_event_statistic_snr_without_mask = False
+            if single_event_statistic_snr is None:
+                single_event_statistic_snr = False
+            if fluxes_with_veto is None:
+                fluxes_with_veto = False
+            if histogram_single_event is None:
+                histogram_single_event = False
+            if summed_statistic_minimal_of_phase is None:
+                summed_statistic_minimal_of_phase = False
+            if summed_statistic_of_phase is None:
+                summed_statistic_of_phase = False
+            if histogram_summed_statistic is None:
+                histogram_summed_statistic = False
+            if minimal_statistic_periods is None:
+                minimal_statistic_periods = False
+        elif plot_all==None:
+            if original_data is None:
+                original_data = True
+            if psds is None:
+                psds = True
+            if whitened_fluxes_td is None:
+                whitened_fluxes_td = True
+            if whitened_fluxes_fd is None:
+                whitened_fluxes_fd = True
+            if single_event_statistic_snr_without_mask is None:
+                single_event_statistic_snr_without_mask = False
+            if single_event_statistic_snr is None:
+                single_event_statistic_snr = True
+            if fluxes_with_veto is None:
+                fluxes_with_veto = True
+            if histogram_single_event is None:
+                histogram_single_event = True
+            if summed_statistic_minimal_of_phase is None:
+                summed_statistic_minimal_of_phase = True
+            if summed_statistic_of_phase is None:
+                summed_statistic_of_phase = False
+            if histogram_summed_statistic is None:
+                histogram_summed_statistic = True
+            if minimal_statistic_periods is None:
+                minimal_statistic_periods = True
             
         
         if original_data:
@@ -2008,7 +2131,7 @@ class KeplerLightCurve(object):
         if whitened_fluxes_fd:
             plt.figure(figsize=(width, height))
             for q in self.quarters:
-                plt.plot(self.freqs[q], self.whitened_fluxes_fd[q])
+                plt.plot(self.freqs[q], np.real(self.whitened_fluxes_fd[q]))
             plt.title('Whitened fluxes in Fourier domain')
             plt.xlabel('frequency, Hz')
             plt.ylabel('whitened flux')
@@ -2026,9 +2149,42 @@ class KeplerLightCurve(object):
         if single_event_statistic_snr:
             plt.figure(figsize=(width, height))
             for q in self.quarters:
-                plt.plot(self.times[q], self.statistics_snr[temp_num][q])
-                plt.plot(self.times[q][~self.stat_masks[temp_num][q]], self.statistics_snr[temp_num][q][~self.stat_masks[temp_num][q]],
-                         'o', color='k', label='masked')
+                if q%2==0:
+                    clr = (0.2, 0.5,0.8)
+                else:
+                    clr = (0.2, 0.7,0.4)
+                clr
+                plt.plot(self.times[q], self.statistics_snr[temp_num][q], color=clr)
+            #plot what was masked in statistic masks
+            label_made=False
+            for q in self.quarters:
+                if not label_made:
+                    if (~self.stat_masks[temp_num][q]).any():
+                        label_made=True
+                        plt.plot(self.times[q][~self.stat_masks[temp_num][q]], self.statistics_snr[temp_num][q][~self.stat_masks[temp_num][q]],
+                                 'o', color=(0.7,0.5,0), label='masked statistic', markersize=3)
+                else:
+                    plt.plot(self.times[q][~self.stat_masks[temp_num][q]], self.statistics_snr[temp_num][q][~self.stat_masks[temp_num][q]],
+                             'o', color=(0.7,0.5,0), markersize=3)
+            #plot what from this was masked in conditioning
+            label_made=False
+            for q in self.quarters:
+                if not label_made:
+                    if (~self.stat_masks[temp_num][q]).any():
+                        label_made=True
+                        plt.plot(self.times[q][~self.big_hole_masks[q]], self.statistics_snr[temp_num][q][~self.big_hole_masks[q]],
+                                 'o', color='k', label='masked in conditioning')
+                else:
+                    plt.plot(self.times[q][~self.big_hole_masks[q]], self.statistics_snr[temp_num][q][~self.big_hole_masks[q]],
+                             'o', color='k')
+            
+            times_with_transits = np.array([])
+            stat_with_transits = np.array([])
+            for q in self.quarters:
+                times_with_transits = np.concatenate((times_with_transits, self.times[q][self.origrnal_transit_indices[q]]))
+                stat_with_transits = np.concatenate((stat_with_transits, self.statistics_snr[temp_num][q][self.origrnal_transit_indices[q]]))
+            plt.plot(times_with_transits, stat_with_transits, 'o', color=(0.8,0,0), label='transits', markersize=4)
+            
             plt.title('Single-event statistic in units of SNR for template #'+str(temp_num))
             plt.xlabel('time, days')
             plt.ylabel('statistic [SNR]')
@@ -2037,25 +2193,65 @@ class KeplerLightCurve(object):
             
         if fluxes_with_veto:
             plt.figure(figsize=(width, height))
+            labeled_chi_squared_veto = False
+            labeled_maximal_deviation_std_veto = False
+            labeled_maximal_deviation_amplitude_veto = False
+            labeled_extreme_position_veto = False
+            labeled=False
+            for q in self.quarters:
+                plt.plot(self.times[q], self.fluxes[q], color='k', linewidth=2)
+                if not labeled:
+                    plt.plot(self.times[q][~self.big_hole_masks[q]], self.fluxes[q][~self.big_hole_masks[q]], 'o', 
+                             color=(0,0.5,1), markersize=5, label='big inpainted holes')
+                    labeled=True
+                else:
+                    plt.plot(self.times[q][~self.big_hole_masks[q]], self.fluxes[q][~self.big_hole_masks[q]], 'o', 
+                             color=(0,0.5,1), markersize=5)
             for q in self.quarters:
                 chi_squared_veto = []
                 maximal_deviation_std_veto = []
                 maximal_deviation_amplitude_veto = []
                 extreme_position_veto = []
-                for ind in range(len(self.veto_bad_trigger_inds[temp_num][q])):
-                    if 'chi_squared' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:
-                        chi_squared_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
-                    elif 'maximal_deviation_std' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:    
-                        maximal_deviation_std_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
-                    elif 'maximal_deviation_amplitude' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:        
-                        maximal_deviation_amplitude_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
-                    elif 'extreme_position' in self.veto_bad_trigger_inds[temp_num][q][ind][1]:           
-                        extreme_position_veto.append(self.veto_bad_trigger_inds[temp_num][q][ind][0])
-                plt.plot(self.times[q], self.fluxes[q], color='k', linewidth=2)
-                plt.plot(self.times[q][chi_squared_veto], self.fluxes[q][chi_squared_veto], 'o', color='r', label='chi squared veto')
-                plt.plot(self.times[q][maximal_deviation_std_veto], self.fluxes[q][maximal_deviation_std_veto], 'o', color=(1,0.5,0), label='maximal deviation std veto')
-                plt.plot(self.times[q][maximal_deviation_amplitude_veto], self.fluxes[q][maximal_deviation_amplitude_veto], 'o', color=(0,0.6,0), label='maximal deviation amplitude veto')
-                plt.plot(self.times[q][extreme_position_veto], self.fluxes[q][extreme_position_veto], 'o', color=(0.7,0,1), label='extreme position veto')
+                for ind in range(len(self.veto_bad_trigger_inds[temp_num][q][0])):
+                    if self.veto_bad_trigger_inds[temp_num][q] != [[], [], []]:
+                        if 'chi_squared' in self.veto_bad_trigger_inds[temp_num][q][1][ind]:
+                            chi_squared_veto.append(self.veto_bad_trigger_inds[temp_num][q][0][ind])
+                        elif 'maximal_deviation_std' in self.veto_bad_trigger_inds[temp_num][q][1][ind]:    
+                            maximal_deviation_std_veto.append(self.veto_bad_trigger_inds[temp_num][q][0][ind])
+                        elif 'maximal_deviation_amplitude' in self.veto_bad_trigger_inds[temp_num][q][1][ind]:        
+                            maximal_deviation_amplitude_veto.append(self.veto_bad_trigger_inds[temp_num][q][0][ind])
+                        elif 'extreme_position' in self.veto_bad_trigger_inds[temp_num][q][1][ind]:           
+                            extreme_position_veto.append(self.veto_bad_trigger_inds[temp_num][q][0][ind])
+                if len(chi_squared_veto)>0:
+                    if not labeled_chi_squared_veto:
+                        plt.plot(self.times[q][chi_squared_veto], self.fluxes[q][chi_squared_veto], 'o', color='r', markersize=4, label='chi squared veto')
+                        labeled_chi_squared_veto = True
+                    else:
+                        plt.plot(self.times[q][chi_squared_veto], self.fluxes[q][chi_squared_veto], 'o', color='r', markersize=4)
+                if len(maximal_deviation_std_veto)>0:
+                    if not labeled_maximal_deviation_std_veto:
+                        plt.plot(self.times[q][maximal_deviation_std_veto], self.fluxes[q][maximal_deviation_std_veto], 'o', color=(1,0.5,0), markersize=4, label='maximal deviation std veto')
+                        labeled_maximal_deviation_std_veto = True
+                    else:
+                        plt.plot(self.times[q][maximal_deviation_std_veto], self.fluxes[q][maximal_deviation_std_veto], 'o', color=(1,0.5,0), markersize=4)
+                if len(maximal_deviation_amplitude_veto)>0:
+                    if not labeled_maximal_deviation_amplitude_veto :
+                        plt.plot(self.times[q][maximal_deviation_amplitude_veto], self.fluxes[q][maximal_deviation_amplitude_veto], 'o', color=(0.6,0.4,0), markersize=4, label='maximal deviation amplitude veto')
+                        labeled_maximal_deviation_amplitude_veto = True
+                    else:
+                        plt.plot(self.times[q][maximal_deviation_amplitude_veto], self.fluxes[q][maximal_deviation_amplitude_veto], 'o', color=(0.6,0.4,0), markersize=4)
+                if len(extreme_position_veto)>0:
+                    if not labeled_extreme_position_veto:
+                        plt.plot(self.times[q][extreme_position_veto], self.fluxes[q][extreme_position_veto], 'o', color=(0.7,0,1), markersize=4, label='extreme position veto')
+                        labeled_extreme_position_veto = True
+                    else:
+                        plt.plot(self.times[q][extreme_position_veto], self.fluxes[q][extreme_position_veto], 'o', color=(0.7,0,1), markersize=4)
+            times_with_transits = np.array([])
+            fluxes_with_transits = np.array([])
+            for q in self.quarters:
+                times_with_transits = np.concatenate((times_with_transits, self.times[q][self.origrnal_transit_indices[q]]))
+                fluxes_with_transits = np.concatenate((fluxes_with_transits, self.fluxes[q][self.origrnal_transit_indices[q]]))
+            plt.plot(times_with_transits, fluxes_with_transits, 'o', color=(0,0.7,0), markersize=3, label='transits')
             plt.title('Conditioned fluxes in time domain with vetos for template #'+str(temp_num))
             plt.xlabel('time, days')
             plt.ylabel('flux')
@@ -2080,14 +2276,18 @@ class KeplerLightCurve(object):
             if self.is_min_interleaved:
                 plt.plot(self.phases_interleaved, self.statistics_periodic_interleaved[self.pind_measured][self.tempind_min_interleaved])
                 plt.plot([self.phases_interleaved[self.phind_measured]], 
-                         [self.statistics_periodic_interleaved[self.pind_measured][self.tempind_min_interleaved][self.phind_measured]], 'o')
+                         [self.statistics_periodic_interleaved[self.pind_measured][self.tempind_min_interleaved][self.phind_measured]], 'o',
+                         label='minimal value determined')
             else:
                 plt.plot(self.phases_not_interleaved, self.statistics_periodic_not_interleaved[self.pind_measured][self.tempind_min_not_interleaved])
                 plt.plot([self.phases_not_interleaved[self.phind_measured]], 
-                         [self.statistics_periodic_not_interleaved[self.pind_measured][self.tempind_min_not_interleaved][self.phind_measured]], 'o')
-            plt.title('Summed statistic as function of phase for minimal parameters: period='+str(self.periods[self.pind_measured])+' days, template #'+str(self.tempind_measured))
+                         [self.statistics_periodic_not_interleaved[self.pind_measured][self.tempind_min_not_interleaved][self.phind_measured]], 'o',
+                         label='minimal value determined')
+            plt.title('Summed statistic as function of phase for minimal parameters: period='
+                      +str(np.round(self.periods[self.pind_measured],2))+' days, template #'+str(self.tempind_measured))
             plt.xlabel('initial phase, days')
             plt.ylabel('statistic, [SNR]')
+            plt.legend()
             plt.show()
             
         if summed_statistic_of_phase:
@@ -2106,7 +2306,7 @@ class KeplerLightCurve(object):
                 datstat = self.statistics_periodic_interleaved[per_ind][temp_num]
             else:
                 datstat = self.statistics_periodic_not_interleaved[per_ind][temp_num]
-            histogram(datstat, n=nbins_hist, edgelist=edgelist_hist, edgemin=edgemin_hist, edgemax=edgemax_hist, xscale='square', yscale='log',
+            histogram(datstat[~np.isnan(datstat)], n=nbins_hist, edgelist=edgelist_hist, edgemin=edgemin_hist, edgemax=edgemax_hist, xscale='square', yscale='log',
                   density=False, normalize=True, ylogshift=True, logzeros='zero', 
                   return_results=False, plot=True, new_figure=True, ax=None, figsize=(width/3*2,height), show=True,
                   xlabel='statistic squared', ylabel='log counts', 
@@ -2349,7 +2549,9 @@ def unb_var(arr):
     return 1 / (len(arr)-1) * np.sum(np.abs(arr - np.mean(arr))**2)
         
         
-def moving_var(signal, mask=None, nperseg=nperseg_moving_var, ngap=ngap_moving_var):
+def moving_var(signal, mask=None, nperseg=nperseg_moving_var, ngap=ngap_moving_var,
+               remove_outliers=False, detr_length_outliers=detr_length_outliers,
+               nsig_outliers=nsig_outliers_stat, return_mask=False):
     """
     Calculates the moving variance of the signal. At every point, takes the window of length
     nperseg symmetrically from the two sides, excludes from the middle the window of length
@@ -2375,12 +2577,27 @@ def moving_var(signal, mask=None, nperseg=nperseg_moving_var, ngap=ngap_moving_v
     mov_var : numpy.array 1d of float, len(signal)
         Moving variance estimate at each point of the signal
     """
+    signal = np.array(signal)
+    mask = np.array(mask)
     if mask is None:
-        mask = np.ones(signal).astype(bool)
+        mask = np.ones(len(signal)).astype(bool)
+        
+    if remove_outliers:
+        # data1 = detrend_amat(np.array(signal), length=detr_length_outliers, mask=mask, 
+        #                          method='median', endmethod='mean', ends='symmetric', endlen=None, 
+        #                          return_trend=False, keep_overall_level=False, remove_outliers=True, nsig_outliers=nsig_outliers)
+        # outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
+        # mask *= outlier_mask
+        outlier_mask = np.abs(signal - np.nanmean(signal[mask])) < nsig_outliers * np.nanstd(signal[mask])
+        mask *= outlier_mask
+        outlier_mask = np.abs(signal - np.nanmean(signal[mask])) < nsig_outliers * np.nanstd(signal[mask])
+        mask *= outlier_mask
+        
+        
     if nperseg>len(signal)/2:
         nperseg = len(signal)//2 + 1
+        warnings.warn('Not enough data to calculate moving variance.')
         if ngap>=nperseg//2:
-            warnings.warn('Not enough data to calculate moving variance.')
             ngap=nperseg//2
     signal[~mask] = 0.
     sum1 = np.cumsum(signal)
@@ -2392,29 +2609,42 @@ def moving_var(signal, mask=None, nperseg=nperseg_moving_var, ngap=ngap_moving_v
     mov_var = []
     for i in np.arange(0,ngap//2):
         counts = summ[i+nperseg//2]-summ[i+ngap//2]
+        if counts==0:
+            warnings.warn('COUNTS=0!. 1st')
         mov_var.append(((sum2[i+nperseg//2]-sum2[i+ngap//2])/counts-((sum1[i+nperseg//2]-sum1[i+ngap//2])/counts)**2)
                        *counts/(counts-1))
     for i in np.arange(ngap//2,nperseg//2):
         counts = summ[i-ngap//2]-summ[0]+summ[i+nperseg//2]-summ[i+ngap//2]
+        if counts==0:
+            warnings.warn('COUNTS=0!. 2nd')
         mov_var.append(((sum2[i-ngap//2]-sum2[0]+sum2[i+nperseg//2]-sum2[i+ngap//2])/counts
                        -((sum1[i-ngap//2]-sum1[0]+sum1[i+nperseg//2]-sum1[i+ngap//2])/counts)**2)
                        *counts/(counts-1))
     for i in range(nperseg//2,len(signal)-nperseg//2):
         counts = summ[i+nperseg//2]-summ[i+ngap//2]+summ[i-ngap//2]-summ[i-nperseg//2]
+        if counts==0:
+            warnings.warn('COUNTS=0!. 3rd')
         mov_var.append(((sum2[i+nperseg//2]-sum2[i+ngap//2]+sum2[i-ngap//2]-sum2[i-nperseg//2])/counts
                       -(((sum1[i+nperseg//2]-sum1[i+ngap//2]+sum1[i-ngap//2]-sum1[i-nperseg//2])/counts)**2))
                        *counts/(counts-1))
     for i in np.arange(len(signal)-nperseg//2, len(signal)-ngap//2):
-        counts = summ[i-ngap//2]-summ[i-nperseg//2]+summ[-1]-summ[i+ngap//2]                       
+        counts = summ[i-ngap//2]-summ[i-nperseg//2]+summ[-1]-summ[i+ngap//2] 
+        if counts==0:
+            warnings.warn('COUNTS=0!. 4th')
         mov_var.append(((sum2[i-ngap//2]-sum2[i-nperseg//2]+sum2[-1]-sum2[i+ngap//2])/counts
                      -((sum1[i-ngap//2]-sum1[i-nperseg//2]+sum1[-1]-sum1[i+ngap//2])/counts)**2)
                        *counts/(counts-1))
     for i in np.arange(len(signal)-ngap//2, len(signal)):
         counts = summ[i-ngap//2]-summ[i-nperseg//2]
+        if counts==0:
+            warnings.warn('COUNTS=0!. 5th')
         mov_var.append(((sum2[i-ngap//2]-sum2[i-nperseg//2])/counts
                        -((sum1[i-ngap//2]-sum1[i-nperseg//2])/counts)**2)
                        *counts/(counts-1))
-    return np.abs(np.array(mov_var)) #because small fluctuations around zero can occur   
+    if not return_mask:
+        return np.abs(np.array(mov_var)) #because small fluctuations around zero can occur  
+    else:
+        return np.abs(np.array(mov_var)), mask
     
         
 
@@ -2783,7 +3013,9 @@ def interpolate_time(time, mask=None):
 
     
 
-def detrend_amat(data, length=128, mask=None, method='median', endmethod='mean', ends='symmetric', endlen=None, return_trend=True, keep_overall_level=False):
+def detrend_amat(data, length=128, mask=None, method='median', endmethod='mean', ends='symmetric', endlen=None, 
+                 return_trend=True, keep_overall_level=False, remove_outliers=False, nsig_outliers=nsig_outliers_0,
+                 detr_length_outliers=detr_length_outliers):
     """
     Amateur detrending function. Subtracting the moving mean or median from the data.
     
@@ -2821,8 +3053,16 @@ def detrend_amat(data, length=128, mask=None, method='median', endmethod='mean',
     """
     assert ((method=='mean') or (method=='median')), 'Incorrect method specified'
     data = np.array(data)
+    mask = np.array(mask)
     if mask is None:
         mask=~np.isnan(data)
+        
+    if remove_outliers:
+        data1 = detrend_amat(np.array(data), length=detr_length_outliers, mask=mask, method='median', endmethod='mean', 
+                                 ends='symmetric', endlen=None, return_trend=False, keep_overall_level=False, remove_outliers=False)
+        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
+        mask *= outlier_mask
+    
     if ends=='asymmetric':
         trend = []
         res = []
@@ -3511,7 +3751,8 @@ def read_quarters_from_file(name, location=None, dimension=2, to_array=True):
     return res
 
 
-def plot_many(list_times, list_values=None, first_index=0, prefix='quarter', legend=True, xlabel='', ylabel='',title='', separate=False, first_quarter=0):
+def plot_many(list_times, list_values=None, first_index=0, prefix='quarter', 
+              legend=True, xlabel='', ylabel='',title='', separate=False, first_quarter=0):
     """
     Plots a list of values as function of a list of arguments. If they overlap, can 
     separate them from each other. Is designed to plot different quarters of
@@ -3610,7 +3851,6 @@ def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None
         if edgemax is None:
             edgemax = np.max(data)
         edgelist = [edgemin+(edgemax-edgemin)/n * i for i in range(n+1)]
-    binwid = (edgelist[-1]-edgelist[0])/(len(edgelist)-1)
     
     counts, bins = np.histogram(data, bins=edgelist, density=density)
     bins=np.delete(bins,-1)+(bins[1]-bins[0])/2
@@ -3655,7 +3895,10 @@ def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None
         if plot_type=='plot':
             ax.plot(bins, counts ,color=color, linestyle=linestyle, marker=marker, linewidth=linewidth, alpha=alpha, label=label)
         elif plot_type=='bar':
-            ax.bar(bins, counts, binwid ,color=color, alpha=alpha, label=label)
+            # binwids = (edgelist[-1]-edgelist[0])/(len(edgelist)-1)
+            # ax.bar(bins, counts, width=binwids ,color=color, alpha=alpha, label=label)
+            # plt.step(bins, counts, where='mid', color=color, alpha=alpha, label=label)
+            plt.fill_between(bins, counts, step="mid", color=color, alpha=alpha)
 
         if label is not None:
             if loc_legend is not None:

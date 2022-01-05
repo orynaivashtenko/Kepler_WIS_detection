@@ -809,6 +809,18 @@ def write_template_bank_to_file(name='template_bank', var=None, location=None):
     file.close()
 
 
+def generate_files_for_pipeline(location=None, number_of_templates=25):
+    tb, shifts = template_bank_subbin_shift(dt=dt_lc, dP=None, T_mission=1400., Pmin=per1, 
+                               n_points_int_min=50, return_ordered=True, shifts_num=3,
+                               return_shifts=True)
+    tb = tb[:number_of_templates]
+    shifts = shifts[:number_of_templates]
+    if location is None:
+        location = os.getcwd() 
+    write_template_bank_to_file(name='template_bank', var=tb, location=location)
+    write_template_bank_to_file(name='shifts_template_bank', var=shifts, location=location)
+    
+
 #Function for plotting with smoothly changing colors from red to blue
 #s is the smoothness parameter
 #returns the dictionary of your varying parameter and the color
