@@ -21,7 +21,6 @@ import template_module as tm
 
 
 
-
 def unb_var(arr): #unbiased variance estimate (numpy.var is biased!)
     arr1 = np.array(arr[~np.isnan(arr)])
     if len(arr1)==1:
@@ -702,7 +701,7 @@ def interpolate_over_mask(data, mask=None, interp_method='linear', ends='continu
     return data
 
 
-def is_bad_fft(fftdat, amp_max=500, rfft=True):
+def is_bad_fft(fftdat, amp_max=400, rfft=True):
     """
     
     If there are too narrow peaks that cannot be eliminated with measured psd, the star is bad
@@ -1242,3 +1241,99 @@ def pad_by_zeros(data, support=None, minimal_extension=0, return_zero_padding_en
         return data_padded, (zerlen1, zerlen2)
     else:
         return data_padded
+    
+    
+    
+    
+    
+    
+    
+def fold(data, P, Nb, time=None, return_time=False):
+    """
+    Folds data naively by period P with the number of bins Nb.
+    
+    data : 1d array
+    p : float, period
+        if time is None, P must be given in units of time steps
+    Nb : float, N_bins, number of bins in the output array
+    time : 1d array of the size of data, time values corresponding to the data points
+        Default is none. If none, will be replaced by np.arange(len(data))
+    """
+    res = np.zeros(Nb)
+    counts = np.zeros(Nb)
+    if time is None:
+        time = np.arange(len(data))
+    for i in range(len(data)):
+        b = int(np.round((time[i]%P) / P * Nb))
+        if b==Nb:
+            b=0
+        res[b] += data[i]
+        counts[b] += 1
+    foldind_time = np.arange(Nb)*P/Nb
+    if not return_time:
+        return res, counts
+    else:
+        return foldind_time, res, counts
+
+
+def folding(data, Pmax, Pmin=1., dP=None, Nb=None, time=None):
+    """
+    Naive folding algorithm
+    """
+    if time is None:
+        time = np.arange(len(data))
+    if dP is None: 
+        dP = 1.*(time[1]-time[0]) * Pmin / time[-1]
+    if Nb is None:
+        Nb = np.argmin(np.abs(time-Pmin))-1
+    periods = np.arange(Pmin, Pmax, dP)
+    Spb = np.zeros((len(periods), 2, Nb))
+    for i in np.arange(len(periods)):
+        score, counts = fold(data, periods[i], Nb, time=time)
+        Spb[i,0,:] = score
+        Spb[i,1,:] = counts
+    return Spb, periods    
+    
+    
+     
+def plot_folded(times, fluxes, period, masks=None, N_bins=100, 
+                phase_expected=None, adjust_limits=True,
+                markersize=3):
+    fluxes_all = np.array([])
+    times_all = np.array([])
+    
+    if masks is None:
+        masks = []
+        for q in range(len(times)):
+            masks.append((~np.isnan(fluxes[q]))&(~np.isnan(times[q])))
+    
+    timemin = (times[0][masks[0]])[0]
+    for q in range(len(fluxes)):
+        times[q] = np.array(times[q]) - timemin
+        times_all = np.concatenate((times_all, times[q][masks[q]]))
+        flx = np.array(fluxes[q][masks[q]])
+        flx -= np.nanmean(flx)
+        flx[np.isnan(flx)] = 0.
+        flx[flx>np.std(flx)*4] = 0.
+        fluxes_all = np.concatenate((fluxes_all, flx))
+
+    tim, fld, cnts = fold(data=fluxes_all, P=period, time=times_all, Nb=N_bins, return_time=True)
+
+    plt.figure(figsize=(10,5))
+    for q in range(len(fluxes)):
+        plt.plot(times[q][masks[q]]%period, fluxes[q][masks[q]]-np.nanmean(fluxes[q][masks[q]]), 'o', markersize=2, color=(0.7,0.7,0.7))
+    plt.plot(tim, fld/cnts, label='binned and divided by counts')
+    if phase_expected is not None:
+        plt.plot([phase_expected], [0.], 'o', label='phase of expected planet', markersize=markersize)
+    plt.xlabel('time, days')
+    plt.ylabel('folded flux')
+    plt.title('folding for period '+str(np.round(period,2))+' days')
+    plt.legend()
+    if adjust_limits:
+        sigma = np.nanstd(fluxes_all)
+        plt.ylim(-7*sigma, 7*sigma)
+    plt.show()
+    
+
+def notnan(data):
+    return(data[~np.isnan(data)])
