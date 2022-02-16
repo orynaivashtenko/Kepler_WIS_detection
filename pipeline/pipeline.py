@@ -26,6 +26,9 @@ import numba
 import time
 from scipy.optimize import minimize
 from scipy.stats import median_abs_deviation as mad
+from scipy.stats import chi2
+from scipy.special import erfinv
+from scipy.interpolate import interp1d
 
 #from scipy.signal import savgol_filter
 
@@ -55,6 +58,7 @@ window_psd = 'hann'
 npsdsmin = 40
 use_rfft = True
 subtract_mean_in_psd = True
+smoothen_psds = True
 
 #Notch:
 nsig_notch = 5.
@@ -75,23 +79,29 @@ detr_keep_overall_level = False
 template_bank_from_file = True
 templates_subbin_shift = True
 template_ind_detection = 'all'
-fn_fit_veto=0.001
+margin_snr_veto = 4.
+fn_fit_veto=0.01
 maxdev_fit_veto=4.0
-zero_ends_len_abs_fit_veto=3
-zero_ends_len_rel_fit_veto=0.1
+zero_ends_len_abs_fit_veto = None # this means that zero_ends_len_rel_fit_veto will be used
+zero_ends_len_rel_fit_veto = 1 # this means that it will be equal to the 1 transit (template) duration
 threshold_mes_veto = 5.
-veto_threshold_for_mes = 0.45
+veto_threshold_for_mes = 2.05 #false alarm 5%
+n_parts_veto_snr = 4
+n_parts_veto_len = 6
+inn_prod_min_veto = 0.2
+delta_snr2_wide_templ_veto = 2.
+
+apply_score_correction = True
 
 #Processing the statistic
 nperseg_moving_var = 512
 #->make sure it is smallet than period
 ngap_moving_var = 192
 nsamples_min_moving_var = 128
-margin_snr_veto = 4.
 
 duty_cycle = 0.1
 
-Pmin = 70 #days
+Pmin = 70  #days
 Pmax = 400
 
 std_time_scrambling = 5. #days
@@ -248,20 +258,19 @@ class KeplerLightCurve(object):
         self.inpaint_fluxes_fast = numba.njit(inpaint_fluxes_fun)
         # initialization of the numba function on some small data in order  not to
         # spend time on big data:
-        _ = self.inpaint_fluxes_fast(fluxes = np.random.normal(0,1,(2,32)),
-                                      masks = np.random.choice([0,1],(2,32)).astype(bool),
-                                      wf_tds = np.array([np.concatenate((np.zeros(32//2-2),
+        _ = self.inpaint_fluxes_fast(fluxes=np.random.normal(0,1,(2,32)),
+                                     masks=np.random.choice([0,1],(2,32)).astype(bool),
+                                     wf_tds=np.array([np.concatenate((np.zeros(32//2-2),
                                         [-0.5,1,1,-0.5],np.zeros(32//2-2))) for i in range(2)]))
         
         self.sum_periods_fast = numba.njit(sum_periods_fun, parallel=False, fastmath=False)
         # initialization of the numba function on some small data in order  not to
         # spend time on big data:        
-        _ = self.sum_periods_fast(statistics_by_trends=np.ones((2,192)), 
-                                   trends_sq_by_vars=np.ones((2,192)) , dt=0.02, 
-                                   tmax=3., tmin=0., periods=np.arange(1., 2., 0.5))
+        _ = self.sum_periods_fast(statistics_by_trends=np.ones((2, 192)),
+                                  trends_sq_by_vars=np.ones((2, 192)) , dt=0.02,
+                                  tmax=3., tmin=0., periods=np.arange(1., 2., 0.5))
         
 
-    
     def condition_data(self, nsig_outliers_0=nsig_outliers_0, nsig_outliers_0_pos=nsig_outliers_0_pos, nsig_outliers_0_neg=nsig_outliers_0_neg,
                        nsig_outliers_psd=nsig_outliers_psd, nperseg_psd=nperseg_psd, noverlap_psd=noverlap_psd, 
                        window_psd=window_psd, npsdsmin=npsdsmin, subtract_mean_in_psd=subtract_mean_in_psd, 
@@ -313,9 +322,12 @@ class KeplerLightCurve(object):
             self.make_big_hole_masks(max_small_hole=max_small_hole, exclude_individual_points=True)
             self.interpolate_fluxes()
             self.subtract_low_trends(nperseg=nperseg_psd)
+            self.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos, nsig_negative=nsig_outliers_0_neg, 
+                                    nsig_clean=nsig_outliers_psd, in_whitened_fluxes=False, modify_clean_masks=True)
             self.interpolate_fluxes(interpolate_clean_fluxes=False) #need to do this again after piecewise detrending
             self.prepare_for_psd(nperseg=nperseg_psd, noverlap=noverlap_psd, npsdsmin=npsdsmin)
-            self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd, subtract_mean=subtract_mean_in_psd, rfft=use_rfft)
+            self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd, subtract_mean=subtract_mean_in_psd, 
+                              rfft=use_rfft, smoothen_psds=smoothen_psds)
             self.whiten_fluxes(whiten_clean_fluxes=True)
             self.mask_flux_outliers(nsig=nsig_outliers_w, nsig_positive=nsig_outliers_w_pos, nsig_negative=nsig_outliers_w_neg, 
                                     nsig_clean=nsig_outliers_psd, in_whitened_fluxes=True, modify_clean_masks=True)
@@ -498,7 +510,8 @@ class KeplerLightCurve(object):
                          nsig_outliers_stat=nsig_outliers_stat, margin_snr=margin_snr_veto, 
                          fn=fn_fit_veto, maxdev=maxdev_fit_veto,
                          zero_ends_len_abs=zero_ends_len_abs_fit_veto,
-                         zero_ends_len_rel=zero_ends_len_rel_fit_veto, track_process=track_process):
+                         zero_ends_len_rel=zero_ends_len_rel_fit_veto, track_process=track_process,
+                         apply_score_correction=apply_score_correction):
         """
         TODO: write this. For now, please consult descriptions of all the methods, as well as "Short user documentation"
 
@@ -534,7 +547,10 @@ class KeplerLightCurve(object):
             self.cut_zero_padding_ends()
             self.veto_statistics(margin_snr=margin_snr, fn=fn, maxdev=maxdev,
                              rfft_psd=use_rfft, zero_ends_len_abs=zero_ends_len_abs,
-                             zero_ends_len_rel=zero_ends_len_rel)
+                             zero_ends_len_rel=zero_ends_len_rel, 
+                             n_parts_veto_snr=n_parts_veto_snr, n_parts_veto_len=n_parts_veto_len)
+            if apply_score_correction:
+                self.correct_score()
           
         else:    
             t1 = time.time()
@@ -965,12 +981,12 @@ class KeplerLightCurve(object):
                 
                 fs_high = fs_high[not_outl]
                 psd_high = psd_high[not_outl]
-                p1 = np.abs(np.nanmedian(psd_high[-5:]))
+                p1 = np.median(np.sort(psd_high)[:3])
                 # sol = minimize(lambda x: np.sum((psd_high-x[1]*(fs_high-x[0]))**2), [np.mean(psd_high), 0])
                 # trend =  sol.x[1]*(fs - sol.x[0])
                 
                 # constructing fit in such a way that we avoid negative psds and increasing psds
-                sol = minimize(lambda x: np.sum((psd_high - ( -np.abs(x[1])*(fs_high-fs_high[-1]) + (np.abs(x[0])+p1))  )**2), [np.mean(psd_high), 0])
+                sol = minimize(lambda x: np.sum((psd_high - ( -np.abs(x[1])*(fs_high-fs_high[-1]) + (np.abs(x[0])+p1))  )**2), [0., 0.])
                 trend = ( -np.abs(sol.x[1])*(fs-fs_high[-1]) + (np.abs(sol.x[0])+p1) ) 
                 
                 residuals = self.orig_psds[q] - trend
@@ -1091,7 +1107,7 @@ class KeplerLightCurve(object):
                 if len(self.orig_fluxes[q])-1<=nperseg*4:
                     endlen = len(self.orig_fluxes[q])//4-1
                 else:
-                    endlen = nperseg*2
+                    endlen = nperseg
                 detrended, trend_low = detrend_piecewise(self.clean_fluxes[q], mask=self.big_hole_masks[q], 
                                                          nperseg=nperseg, endlen=endlen, return_trend=True)
                 self.trends_low.append(trend_low)
@@ -1102,7 +1118,7 @@ class KeplerLightCurve(object):
                 if len(self.orig_fluxes[q])-1<=nperseg*4:
                     endlen = len(self.orig_fluxes[q])//4-1
                 else:
-                    endlen = nperseg*2
+                    endlen = nperseg
                 detrended, trend_low = detrend_piecewise(self.clean_fluxes[q][
                     self.zero_padding_ends[q][0]:len(self.clean_fluxes[q])-self.zero_padding_ends[q][-1]], 
                     mask=self.big_hole_masks[q][
@@ -1513,6 +1529,7 @@ class KeplerLightCurve(object):
             clean_masks = []
             big_hole_masks = []
             whitened_fluxes_td = []
+            whitened_templates_td = []
             for q in self.quarters:
                 fluxes.append(np.array(self.fluxes[q][
                     self.zero_padding_ends[q][0]:len(self.fluxes[q])-self.zero_padding_ends[q][-1]]))
@@ -1533,6 +1550,15 @@ class KeplerLightCurve(object):
                     #self.zero_padding_ends[q][0]:len(self.detrended_fluxes[q])-self.zero_padding_ends[q][-1]])
                 # self.trends_fluxes[q] = np.array(self.trends_fluxes[q][
                     #self.zero_padding_ends[q][0]:len(self.trends_fluxes[q])-self.zero_padding_ends[q][-1]])
+            for k in range(len(self.whitened_templates_td)):
+                whitened_templates_td_template = []
+                for q in self.quarters:
+                    wt_td = np.roll(self.whitened_templates_td[k][q], 
+                                                 ((len(self.whitened_templates_td[k][q])-1)//2))  
+                    wt_td = np.array(
+                        wt_td[self.zero_padding_ends[q][0]:len(wt_td) - self.zero_padding_ends[q][-1]])
+                    whitened_templates_td_template.append(np.roll(wt_td, -((len(wt_td)-1)//2)))
+                whitened_templates_td.append(whitened_templates_td_template)
             self.fluxes = fluxes
             self.clean_fluxes = clean_fluxes
             self.times = times
@@ -1540,12 +1566,15 @@ class KeplerLightCurve(object):
             self.clean_masks = clean_masks
             self.big_hole_masks = big_hole_masks
             self.whitened_fluxes_td = whitened_fluxes_td
+            self.whitened_templates_td = whitened_templates_td
             self.is_zero_padded = False
          
             
     def veto_statistics(self, margin_snr=margin_snr_veto, fn=fn_fit_veto, maxdev=maxdev_fit_veto,
-                     rfft_psd=use_rfft, zero_ends_len_abs=zero_ends_len_abs_fit_veto,
-                     zero_ends_len_rel=zero_ends_len_rel_fit_veto):
+                        rfft_psd=use_rfft, zero_ends_len_abs=zero_ends_len_abs_fit_veto,
+                        zero_ends_len_rel=zero_ends_len_rel_fit_veto, nsig_outliers_var=nsig_outliers_stat,
+                        n_parts_veto_snr=n_parts_veto_snr, n_parts_veto_len=n_parts_veto_len, inn_prod_min_veto=inn_prod_min_veto,
+                        delta_snr2_wide_templ=delta_snr2_wide_templ_veto):
         #TODO: decide about detrending. What to detrend (initial flux or final), to detrend or not
         #are the long transits important?
         #if the transit is near the edge and is big, it is better not to use detrending.
@@ -1611,26 +1640,26 @@ class KeplerLightCurve(object):
         assert not self.is_zero_padded, 'Zero padding ends have to be removed bevore vetting!'
         
         self.trigger_indices = [[[] for q in self.quarters] for k in range(len(self.templates))]
-        self.trigger_amplitudes = [[[] for q in self.quarters] for k in range(len(self.templates))]
+        #self.trigger_amplitudes = [[[] for q in self.quarters] for k in range(len(self.templates))]
         self.veto_masks = [[np.ones(len(self.stat_masks[k][q])).astype(bool) for q in self.quarters] for k in range(len(self.stat_masks))]
         self.veto_bad_trigger_inds = [[[] for q in self.quarters] for k in range(len(self.templates))]
         for k in range(len(self.templates)):
             template = self.initial_templates[k]
             halflen=len(template)//2
             for q in self.quarters: #over quarters
-                trigger_indices_quarter = []
-                trigger_amplitudes_quarter = []
+                trigger_indices_quarter_0 = []
+                #trigger_amplitudes_quarter_0 = []
                 statistic = np.array(self.statistics_snr[k][q])
                 mask = np.array(self.stat_masks[k][q]) #allow small holes to be in the transit
                 veto_mask = np.ones(len(statistic)).astype(bool)
                 
-                #masking the positive-amplitude triggers:
-                positive_trigger_indices = np.where((statistic>0)&(np.abs(statistic)>=margin_snr)&(mask))[0]
-                self.stat_masks[k][q][positive_trigger_indices] = False
+                ##masking the positive-amplitude triggers:
+                # positive_trigger_indices = np.where((statistic>0)&(np.abs(statistic)>=margin_snr)&(mask))[0]
+                # self.stat_masks[k][q][positive_trigger_indices] = False
                 
                 #vetoing bad-fitting (negative-amplitude) template triggers:
                 trigger_indices = np.where((statistic<=0)&(np.abs(statistic)>=margin_snr)&(mask)&(veto_mask))[0]
-                veto_bad_trigger_ind = [[],[],[]]
+                veto_bad_trigger_ind = [[],[]] #[[],[],[]]
                 for i in trigger_indices:
                     to_veto_combined = True #to process to put data to the vetoing function
                     if ((i-halflen>=0) and (i+len(template)-halflen<=len(self.fluxes[q]))):
@@ -1648,31 +1677,148 @@ class KeplerLightCurve(object):
                     else:
                         veto_bad_trigger_ind[0].append(i)
                         veto_bad_trigger_ind[1].append('extreme_position ')
-                        veto_bad_trigger_ind[2].append(np.nan)
+                        #veto_bad_trigger_ind[2].append(np.nan)
                         to_veto_combined = False #Already marked inappropriate, will not be treated with veto_combined
                     if to_veto_combined:
                         isgood, ampl, reason = veto_combined(data=data_cut, template=template_cut, 
                                 fn=fn, maxdev_std=maxdev, maxdev_ampl=None,
                                 zero_ends_len_abs=zero_ends_len_abs, zero_ends_len_rel=zero_ends_len_rel, 
-                                return_amplitude=True, return_reason=True)
+                                return_amplitude=True, return_reason=True, inn_prod_min=inn_prod_min_veto)
                         if isgood:
-                            trigger_indices_quarter.append(i)
-                            trigger_amplitudes_quarter.append(ampl)
+                            trigger_indices_quarter_0.append(i)
+                            #trigger_amplitudes_quarter_0.append(ampl)
                         else:
                             veto_bad_trigger_ind[0].append(i)
                             veto_bad_trigger_ind[1].append(reason)
-                            veto_bad_trigger_ind[2].append(ampl)
+                            #veto_bad_trigger_ind[2].append(ampl)
+                
+                # VETO OF INCONSISTENT PARTS OF TEMPLATE FITTING (SPLITTING BY SNR)
+                
+                isgood_parts, amplitudes_parts = veto_parts(np.array(self.whitened_fluxes_td[q]), np.array(self.whitened_templates_td[k][q]),
+                                          indices=trigger_indices_quarter_0, mask=np.array(self.big_hole_masks[q]), tlen=None, fn=fn,
+                                          n_parts=n_parts_veto_snr, nsig_outliers_var=nsig_outliers_var,
+                                          return_amplitudes=True, return_scores=False)
+                trigger_indices_quarter = []
+                #trigger_amplitudes_quarter = []
+                for j in range(len(trigger_indices_quarter_0)):
+                    if isgood_parts[j]:
+                        trigger_indices_quarter.append(trigger_indices_quarter_0[j])
+                        #trigger_amplitudes_quarter.append(amplitudes_parts[j])
+                    else:
+                        veto_bad_trigger_ind[0].append(trigger_indices_quarter_0[j])
+                        veto_bad_trigger_ind[1].append('inconsistent_parts ')
+                        #veto_bad_trigger_ind[2].append(amplitudes_parts[j])
+                
+                isgood_parts, amplitudes_parts = veto_parts(np.array(self.whitened_fluxes_td[q]), np.array(self.whitened_templates_td[k][q]),
+                                          indices=veto_bad_trigger_ind[0], mask=np.array(self.big_hole_masks[q]), tlen=None, fn=fn_fit_veto,
+                                          n_parts=n_parts_veto_snr, nsig_outliers_var=nsig_outliers_var,
+                                          return_amplitudes=True, return_scores=False)
+                
+                for j in range(len(veto_bad_trigger_ind[0])):
+                    if not isgood_parts[j]:
+                        veto_bad_trigger_ind[0].append(veto_bad_trigger_ind[0][j])
+                        veto_bad_trigger_ind[1].append('inconsistent_parts ')
+                        #veto_bad_trigger_ind[2].append(amplitudes_parts[j])
+                        
+                        
+                        
+                # VETO OF INCONSISTENT PARTS OF TEMPLATE FITTING (SPLITTING BY LENGTH)
+                trigger_indices_quarter_0 = copy.deepcopy(trigger_indices_quarter)
+                trigger_indices_quarter = []
+                isgood_parts, amplitudes_parts = veto_parts(np.array(self.whitened_fluxes_td[q]), np.array(self.whitened_templates_td[k][q]),
+                                          indices=trigger_indices_quarter_0, mask=np.array(self.big_hole_masks[q]), tlen=None, fn=fn,
+                                          n_parts=n_parts_veto_len, nsig_outliers_var=nsig_outliers_var,
+                                          return_amplitudes=True, return_scores=False)
+                trigger_indices_quarter = []
+                #trigger_amplitudes_quarter = []
+                for j in range(len(trigger_indices_quarter_0)):
+                    if isgood_parts[j]:
+                        trigger_indices_quarter.append(trigger_indices_quarter_0[j])
+                        #trigger_amplitudes_quarter.append(amplitudes_parts[j])
+                    else:
+                        veto_bad_trigger_ind[0].append(trigger_indices_quarter_0[j])
+                        veto_bad_trigger_ind[1].append('inconsistent_parts ')
+                        #veto_bad_trigger_ind[2].append(amplitudes_parts[j])
+                
+                isgood_parts, amplitudes_parts = veto_parts(np.array(self.whitened_fluxes_td[q]), np.array(self.whitened_templates_td[k][q]),
+                                          indices=veto_bad_trigger_ind[0], mask=np.array(self.big_hole_masks[q]), tlen=None, fn=fn_fit_veto,
+                                          n_parts=n_parts_veto_len, nsig_outliers_var=nsig_outliers_var,
+                                          return_amplitudes=True, return_scores=False)
+                
+                for j in range(len(veto_bad_trigger_ind[0])):
+                    if not isgood_parts[j]:
+                        veto_bad_trigger_ind[0].append(veto_bad_trigger_ind[0][j])
+                        veto_bad_trigger_ind[1].append('inconsistent_parts ')
+                        #veto_bad_trigger_ind[2].append(amplitudes_parts[j])        
+
                 veto_mask[veto_bad_trigger_ind[0]] = False
                 self.veto_masks[k][q] = veto_mask
                 self.stat_masks[k][q] *= veto_mask
                 self.trigger_indices[k][q] = copy.deepcopy(trigger_indices_quarter)
-                self.trigger_amplitudes[k][q] = copy.deepcopy(trigger_amplitudes_quarter)
+                #self.trigger_amplitudes[k][q] = copy.deepcopy(trigger_amplitudes_quarter)
                 self.veto_bad_trigger_inds[k][q] = copy.deepcopy(veto_bad_trigger_ind)
+             
+                
+        # VETO OF NARROW TEMPLATES TRIGGERING ON WIDER TRANSITS
+        self.templates_of_indices = [k for k in range(len(self.indices_of_templates)) for i in 
+                                      range(self.indices_of_templates[k][0], self.indices_of_templates[k][1])] #opposite to self.indices_of_templates
+
+        quarters_trigger_indices_templates_snr = [{} for q in self.quarters]
+        for k in range(len(self.trigger_indices)):
+            for q in self.quarters:
+                if self.trigger_indices[k][q]!=[]:
+                    for i in range(len(self.trigger_indices[k][q])):
+                        ind = self.trigger_indices[k][q][i]
+                        if ind not in quarters_trigger_indices_templates_snr[q].keys():
+                            quarters_trigger_indices_templates_snr[q][ind] = [[self.templates_of_indices[k]], [self.statistics_snr[k][q][ind]]]
+                        else:
+                            if self.templates_of_indices[k] not in quarters_trigger_indices_templates_snr[q][ind][0]:
+                                quarters_trigger_indices_templates_snr[q][ind][0].append(self.templates_of_indices[k])
+                                quarters_trigger_indices_templates_snr[q][ind][1].append(self.statistics_snr[k][q][ind])
+                            else:
+                                if self.statistics_snr[k][q][ind]**2 > quarters_trigger_indices_templates_snr[q][ind][1][-1]**2:
+                                    quarters_trigger_indices_templates_snr[q][ind][1][-1] = self.statistics_snr[k][q][ind]
+        
+        self.trigger_indices = [[[] for q in self.quarters] for k in range(len(self.templates))]
+        for q in self.quarters:
+            for ind in quarters_trigger_indices_templates_snr[q].keys():
+                templates = quarters_trigger_indices_templates_snr[q][ind][0]
+                snrs = quarters_trigger_indices_templates_snr[q][ind][1]
+                #ampls = quarters_trigger_indices_templates_snr[q][ind][2]
+                timax = np.argmax(np.abs(snrs)) #snr is negative
+                tmax = templates[timax]
+                snrmax2 = snrs[timax]**2
+                for j in range(len(templates)):
+                    if (templates[j] < tmax) and (snrs[j]**2<snrmax2-delta_snr2_wide_templ):
+                        for ts in self.indices_of_templates[templates[j]]:
+                            self.veto_bad_trigger_inds[k][q][0].append(ind)
+                            self.veto_bad_trigger_inds[k][q][1].append('template_widths ')
+                    else:
+                        for ts in range(self.indices_of_templates[templates[j]][0], self.indices_of_templates[templates[j]][1]): 
+                            self.trigger_indices[ts][q].append(ind)
+        
+        for k in range(len(self.templates)):
+            for q in self.quarters:
+                self.veto_masks[k][q][self.veto_bad_trigger_inds[k][q][0]] = False
+                self.stat_masks[k][q][self.veto_bad_trigger_inds[k][q][0]] = False
                 self.statistics_snr[k][q][~self.stat_masks[k][q]] = 0. 
-                self.statistics_raw_cor[k][q][~self.stat_masks[k][q]] = 0. #ATTENTION! WE DO THIS FOR FAST SUMMATION IN FUTURE TO AVOID EXTRA IF
-                
+                self.statistics_raw_cor[k][q][~self.stat_masks[k][q]] = 0.
             
-                
+    
+    
+    def correct_score(self):
+        all_stat = np.array([])
+        for k in range(len(self.statistics_snr)):
+            for q in range(len(self.statistics_snr[k])):
+                all_stat = np.concatenate((all_stat, self.statistics_snr[k][q][self.stat_masks[k][q]]))
+        all_stat_c, transform = score_correction(all_stat, return_function=True, negative_values=True)
+        for k in range(len(self.statistics_snr)):
+            for q in range(len(self.statistics_snr[k])):
+                self.statistics_snr[k][q][self.stat_masks[k][q]] = transform(self.statistics_snr[k][q][self.stat_masks[k][q]])
+                self.statistics_raw_cor[k][q][self.stat_masks[k][q]] = (self.statistics_snr[k][q][
+                    self.stat_masks[k][q]]/self.stat_moving_vars[k][q][self.stat_masks[k][q]] **0.5 
+                    * np.nanmean(self.stat_moving_vars[k][q][self.stat_masks[k][q]]))
+            
                 
     
     def connect_quarters(self):
@@ -1773,7 +1919,7 @@ class KeplerLightCurve(object):
         del self.zero_padding_ends
         del self.notch_mask
         del self.trigger_indices
-        del self.trigger_amplitudes
+        #del self.trigger_amplitudes
         
         del self.npsds0
         del self.npsds
@@ -1896,56 +2042,79 @@ class KeplerLightCurve(object):
     
     def veto_mes(self, mes_threshold=threshold_mes_veto, veto_threshold=veto_threshold_for_mes):
         self.mes_veto_masks_interleaved = np.ones(np.shape(self.statistics_periodic_interleaved)).astype(bool)
-        for pi in range(len(self.statistics_periodic_interleaved)):
-            for ti in range(len(self.statistics_periodic_interleaved[pi])):
-                for phi in range(len(self.statistics_periodic_interleaved[pi][ti])):
-                    if self.statistics_periodic_interleaved[pi][ti][phi] < -np.abs(mes_threshold):
-                        expected_transit_times = [self.tmin + self.phases_interleaved[phi] + i * self.periods[pi] 
-                                   for i in range(int(np.ceil((self.tmax - self.tmin - self.phases_interleaved[phi])/self.periods[pi]) ))]
-    
-                        summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
-                        summed_stats = np.array(self.statistics_interleaved[ti][summed_transit_points]) #raw
-                        summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
-                        summed_vars = np.array(self.stat_vars_interleaved[ti][summed_transit_points])
-                        amplitude_vars = []
-                        amplitudes_normalized = []
-                        for si in range(len(summed_vars)):
-                            if not np.isclose(summed_stats[si], 0):
-                                amplitude_vars.append(1/summed_vars[si])
-                                amplitudes_normalized.append(summed_stats[si]/summed_vars[si]/summed_trends[si]*self.mean_total)
-                            else:
-                                amplitude_vars.append(np.inf)
-                                amplitudes_normalized.append(0.)
-                        veto_score = unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
-                        if veto_score > veto_threshold:
-                            self.statistics_periodic_interleaved[pi][ti][phi] = 0.
-                            self.mes_veto_masks_interleaved[pi][ti][phi] = False
-    
+        indices = np.array(np.where(self.statistics_periodic_interleaved<-np.abs(mes_threshold))).T
+        for pi, ti, phi in indices:
+            expected_transit_times = [self.tmin + self.phases_interleaved[phi] + i * self.periods[pi] 
+                       for i in range(int(np.ceil((self.tmax - self.tmin - self.phases_interleaved[phi])/self.periods[pi]) ))]
+
+            summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
+            summed_stats = np.array(self.statistics_interleaved[ti][summed_transit_points]) #raw
+            summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
+            summed_vars = np.array(self.stat_vars_interleaved[ti][summed_transit_points])
+            amplitude_vars = []
+            amplitudes_normalized = []
+            for si in range(len(summed_vars)):
+                if not np.isclose(summed_stats[si], 0):
+                    amplitude_vars.append(1/summed_vars[si])
+                    amplitudes_normalized.append(summed_stats[si]/summed_vars[si]/summed_trends[si]*self.mean_total)
+                else:
+                    amplitude_vars.append(np.inf)
+                    amplitudes_normalized.append(0.)
+            veto_score = unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
+            if veto_score > veto_threshold:
+                self.statistics_periodic_interleaved[pi][ti][phi] = 0.
+                self.mes_veto_masks_interleaved[pi][ti][phi] = False
+                
         self.mes_veto_masks_not_interleaved = np.ones(np.shape(self.statistics_periodic_not_interleaved)).astype(bool)
-        for pi in range(len(self.statistics_periodic_not_interleaved)):
-            for ti in range(len(self.statistics_periodic_not_interleaved[pi])):
-                for phi in range(len(self.statistics_periodic_not_interleaved[pi][ti])):
-                    if self.statistics_periodic_not_interleaved[pi][ti][phi] < -np.abs(mes_threshold):
-                        expected_transit_times = [self.tmin + self.phases_not_interleaved[phi] + i * self.periods[pi] 
-                                   for i in range(int(np.ceil((self.tmax - self.tmin - self.phases_not_interleaved[phi])/self.periods[pi]) ))]
+        indices = np.array(np.where(self.statistics_periodic_not_interleaved<-np.abs(mes_threshold))).T
+        for pi, ti, phi in indices:
+            expected_transit_times = [self.tmin + self.phases_not_interleaved[phi] + i * self.periods[pi] 
+                       for i in range(int(np.ceil((self.tmax - self.tmin - self.phases_not_interleaved[phi])/self.periods[pi]) ))]
+
+            summed_transit_points = [np.argmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
+            summed_stats = np.array(self.statistics_not_interleaved[ti][summed_transit_points]) #raw
+            summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
+            summed_vars = np.array(self.stat_vars_not_interleaved[ti][summed_transit_points])
+            amplitude_vars = []
+            amplitudes_normalized = []
+            for si in range(len(summed_vars)):
+                if (not np.isclose(summed_stats[si], 0) and not np.isinf(summed_vars[si])):
+                    amplitude_vars.append(1/summed_vars[si])
+                    amplitudes_normalized.append(summed_stats[si]/summed_vars[si]/summed_trends[si]*self.mean_total)
+                else:
+                    amplitude_vars.append(np.inf)
+                    amplitudes_normalized.append(0.)
+            veto_score = unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
+            if veto_score > veto_threshold:
+                self.statistics_periodic_not_interleaved[pi][ti][phi] = 0.
+                self.mes_veto_masks_not_interleaved[pi][ti][phi] = False
+                            
+        # for pi in range(len(self.statistics_periodic_interleaved)):
+        #     for ti in range(len(self.statistics_periodic_interleaved[pi])):
+        #         for phi in range(len(self.statistics_periodic_interleaved[pi][ti])):
+        #             if self.statistics_periodic_interleaved[pi][ti][phi] < -np.abs(mes_threshold):
+        #                 expected_transit_times = [self.tmin + self.phases_interleaved[phi] + i * self.periods[pi] 
+        #                            for i in range(int(np.ceil((self.tmax - self.tmin - self.phases_interleaved[phi])/self.periods[pi]) ))]
     
-                        summed_transit_points = [np.argmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
-                        summed_stats = np.array(self.statistics_not_interleaved[ti][summed_transit_points]) #raw
-                        summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
-                        summed_vars = np.array(self.stat_vars_not_interleaved[ti][summed_transit_points])
-                        amplitude_vars = []
-                        amplitudes_normalized = []
-                        for si in range(len(summed_vars)):
-                            if not np.isclose(summed_stats[si], 0):
-                                amplitude_vars.append(1/summed_vars[si])
-                                amplitudes_normalized.append(summed_stats[si]/summed_vars[si]/summed_trends[si]*self.mean_total)
-                            else:
-                                amplitude_vars.append(np.inf)
-                                amplitudes_normalized.append(0.)
-                        veto_score = unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
-                        if veto_score > veto_threshold:
-                            self.statistics_periodic_not_interleaved[pi][ti][phi] = 0.
-                            self.mes_veto_masks_not_interleaved[pi][ti][phi] = False
+        #                 summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in range(len(expected_transit_times))  ]
+        #                 summed_stats = np.array(self.statistics_interleaved[ti][summed_transit_points]) #raw
+        #                 summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
+        #                 summed_vars = np.array(self.stat_vars_interleaved[ti][summed_transit_points])
+        #                 amplitude_vars = []
+        #                 amplitudes_normalized = []
+        #                 for si in range(len(summed_vars)):
+        #                     if not np.isclose(summed_stats[si], 0):
+        #                         amplitude_vars.append(1/summed_vars[si])
+        #                         amplitudes_normalized.append(summed_stats[si]/summed_vars[si]/summed_trends[si]*self.mean_total)
+        #                     else:
+        #                         amplitude_vars.append(np.inf)
+        #                         amplitudes_normalized.append(0.)
+        #                 veto_score = unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
+        #                 if veto_score > veto_threshold:
+        #                     self.statistics_periodic_interleaved[pi][ti][phi] = 0.
+        #                     self.mes_veto_masks_interleaved[pi][ti][phi] = False
+    
+        
                             
     
      
@@ -2331,7 +2500,7 @@ class KeplerLightCurve(object):
                                  'o', color='k', label='masked in conditioning', markersize=3)
                 else:
                     plt.plot(self.times[q][~self.big_hole_masks[q]], self.statistics_snr[self.indices_of_templates[temp_num][0]][q][~self.big_hole_masks[q]],
-                             'o', color='k')
+                             'o', color='k', markersize=3)
             
             times_with_transits = np.array([])
             stat_with_transits = np.array([])
@@ -4075,7 +4244,7 @@ def mask_outliers_fun(data, mask=None, nsig0=nsig_outliers_0, nsig1=nsig_outlier
 
 def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None, 
                   zero_ends_len_abs=3, zero_ends_len_rel=0.1, 
-                  return_amplitude=True, return_reason=True):
+                  return_amplitude=True, return_reason=True, inn_prod_min=inn_prod_min_veto):
     """
     Checks the goodness of fit of data by the template by chi squared and maximum deviation. 
     Fits the best amplitude for the template. Performs a chi squared test with this 
@@ -4125,7 +4294,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     """
     from scipy.stats import chi2
     from scipy.optimize import minimize
-    result= True
+    is_good= True
     reason = '' #if the signal will be vetoed, the reason will be reported
     inds = np.where(~np.isclose(template, 0))[0]#[[0,-1]]
     assert len(data) - len(inds) >= 4
@@ -4142,7 +4311,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     if np.abs(np.mean(data_left) - np.mean(data_rignt)) >= 2*((np.var(data_left)*len(data_left) 
                                 + np.var(data_rignt)*len(data_rignt))/((len(data_left)+len(data_rignt))))**0.5:
         reason += 'step '
-        result = False #check that it is not a step instead of transit
+        is_good = False #check that it is not a step instead of transit
     data_outside = np.array(data[inds_outside])
     std_dat = np.std(data_outside)
     
@@ -4166,7 +4335,12 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
         dat = dat - np.mean(dat[0:spare_ind_left]) #although we detrended, we subtract local median
     elif spare_ind_right>0:
         dat = dat - np.mean(dat[len(dat)-spare_ind_right:]) #although we detrended, we subtract local median   
-     
+    
+    inn_prod = dat @ temp / ((dat@dat)*(temp@temp))**0.5
+    if np.abs(inn_prod)<inn_prod_min:
+        reason += 'inner_product '
+        is_good = False
+        
     df = len(temp)
     x0 = chi2.ppf(1-fn, df)
     sol = minimize(lambda x: np.sum((dat-temp*x)**2), np.max(np.abs(dat))*np.sign(np.max(np.abs(dat))))
@@ -4179,27 +4353,271 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
         
     if xi2>x0:
         reason += 'chi_squared '
-        result = False
+        is_good = False
     if maxdev_std_dat>maxdev_std:
         reason += 'maximal_deviation_std '
-        result = False
+        is_good = False
     if ((maxdev_ampl is not None) and (maxdev_ampl_dat>maxdev_ampl)):
         reason += 'maximal_deviation_amplitude '
-        result = False
+        is_good = False
         
     if return_amplitude:
         if return_reason:
-            return result, ampl, reason
+            return is_good, ampl, reason
         else:
-            return result, ampl
+            return is_good, ampl
     else:
         if return_reason:
-            return result, reason
+            return is_good, reason
         else:
-            return result
+            return is_good
+
+
+def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None, 
+               fn=0.01, n_parts=4, nsig_outliers_var=3., return_amplitudes=False, 
+               return_scores=False, splitting='snr'):
+    """
+    Parameters:
+    ---------------------------
+    data_wh_full : numpy.array of float
+        Whitened data for the entire quarter with cut zero padding ends.
+    template_wh_full : 
+        Whitened template rolled in such a way that the center of the transit is at zero index
+    indices : array-like 1d of bool
+        The position where the transit center is located
+    tlen : int or None
+        Length of the non-zero part of the template (usually set by the whitening filter, can be
+        also affected by the nothc filter). If None, will be measured.
+    fn : float
+        False negative rate that is needed to ve achieved in the veto. Calculated from chi2 distribution
+    n_parts : int
+        Number of parts to which the template should be split (expecting to have the same SNR in them)
+    nsig_outliers_var : float
+        deviation from the mean in units of STD to be considered as outlier in statistic when measuring variance
+    return_scores : bool
+        Whether to return also the chi2 scores or only the veto result
+    splitting : str : 'snr' or 'len'
+        According to what to split the template: equal parts in snr or in length.
+        
+    Returns
+    ---------------------------
+    
+    If return_scores:
+        If return_amplitudes:
+            is_goods : list of bool
+                Veto result. If True, then the signal is good.
+            amplitudes : list of float,
+                Estimated amplitudes of transith at every index.
+            chi2_scores : list of lists of float
+                Values of chi square for every index for all the parts ans the total (the last value)
+        Else:
+            is_goods, chi2_scores
+    Else:
+        If return_amplitudes:
+            is_goods, amplitudes
+        Eles:
+            is_goods
+    """   
+    assert (splitting=='snr' or splitting=='len') , "`splitting` must be 'snr' or 'len'!"
+    data_wh_full = np.array(data_wh_full)
+    template_wh_full = np.array(template_wh_full)
+    if tlen is None:
+        temp_smthnd = np.abs(template_wh_full)
+        temp_smthnd = (temp_smthnd + np.roll(temp_smthnd,1)+np.roll(temp_smthnd,-1))/3
+        inds_small = np.where((temp_smthnd/np.max(temp_smthnd)<0.001))[0]
+        tlen = inds_small[0] + (len(temp_smthnd) - inds_small[-1])
+    
+    if mask is None:
+        mask = ~np.isnan(data_wh_full).astype(bool)
+        
+    local_th = chi2.ppf(1-fn/(n_parts+1), df=1)
+    total_th = chi2.ppf(1-fn/(n_parts+1), df=4)   
+    
+    template_cut_centered = np.roll(template_wh_full, tlen//2)[:tlen]
+    stat_for_var = np.convolve(template_cut_centered,data_wh_full, mode='valid')
+    stat_for_var = stat_for_var[(np.abs(stat_for_var)<nsig_outliers_var*np.nanstd(stat_for_var))&mask[tlen//2:len(mask)-((tlen-1)//2)]]
+    #quarter std correction so that the SNR of matched filtering the template is in units.
+    var_stat_global = np.nanvar(stat_for_var)
+    if splitting=='snr':
+        chi2_temp_indices = [0] + list(np.searchsorted(np.cumsum(template_cut_centered**2) / np.dot(template_cut_centered,template_cut_centered),
+                                                   (np.arange(n_parts)/n_parts)[1:])) + [len(template_cut_centered)]  
+    else:
+        chi2_temp_indices = list((len(template_cut_centered) * np.arange(n_parts)/n_parts).astype(int)) + [len(template_cut_centered)]
+    chi2_temp_indices = list(set(chi2_temp_indices)) #remove repetitions
+    chi2_temp_indices.sort()
+    n_parts = len(chi2_temp_indices)-1
+    while ((chi2_temp_indices-np.roll(chi2_temp_indices, 1))[1:]<4).any():
+        n_parts -= 1
+        if splitting=='snr':
+            chi2_temp_indices = [0] + list(np.searchsorted(np.cumsum(template_cut_centered**2) / np.dot(template_cut_centered,template_cut_centered),
+                                                   (np.arange(n_parts)/n_parts)[1:])) + [len(template_cut_centered)]  
+        else:
+            chi2_temp_indices = list((len(template_cut_centered) * np.arange(n_parts)/n_parts).astype(int)) + [len(template_cut_centered)]  
+    
+#     if len(chi2_temp_indices)>2:
+#         ii = 1
+#         while ii <len(chi2_temp_indices)-1:
+#             if chi2_temp_indices[ii]-chi2_temp_indices[ii-1]<3:
+#                 chi2_temp_indices.pop(ii)
+#             else:
+#                 ii += 1
+#         if len(chi2_temp_indices)>2:
+#             if chi2_temp_indices[-1]-chi2_temp_indices[-2]<3:
+#                 chi2_temp_indices.pop(-2)
+    if len(chi2_temp_indices)<=2:
+        if return_scores:
+            if return_amplitudes:
+                return np.ones(len(indices)).astype(bool), np.ones(len(indices))*np.nan, np.ones(len(indices))*np.nan
+            else:
+                return np.ones(len(indices)).astype(bool), np.ones(len(indices))*np.nan
+        else:
+            if return_amplitudes:
+                return np.ones(len(indices)).astype(bool), np.ones(len(indices))*np.nan
+            else:
+                return np.ones(len(indices)).astype(bool)
+            
+        
+    n_parts = len(chi2_temp_indices)-1
+    templates_wh_local = []
+    vars_stat_local = []
+    actual_Vs = []
+    for i in range(1,len(chi2_temp_indices)):
+        i1 = chi2_temp_indices[i-1]
+        i2 = chi2_temp_indices[i]
+        template_wh_local = np.array(template_cut_centered[i1:i2])
+        stat_for_var = np.convolve(template_wh_local, data_wh_full, mode='valid')
+        stat_for_var = stat_for_var[(np.abs(stat_for_var)<nsig_outliers_var*np.nanstd(stat_for_var))&mask[
+                                                                len(template_wh_local)//2 : len(mask)-((len(template_wh_local)-1)//2)]]
+        #quarter std correction so that the SNR of matched filtering the template is in units.
+        var_stat_local = np.nanvar(stat_for_var)
+        templates_wh_local.append(template_wh_local)
+        vars_stat_local.append(var_stat_local)
+        actual_Vs.append(1/var_stat_local - 1/var_stat_global)
+    
+    is_goods = []
+    chi2_scores = []
+    amplitudes = []
+    for index in indices:
+        if (index >= tlen//2) and (index < len(data_wh_full) - (tlen+1)//2):
+            data_wh = data_wh_full[index-tlen//2:index+(tlen+1)//2]
+            A_global = np.dot(template_cut_centered,data_wh) / var_stat_global #global amplitude
+            amplitudes.append(A_global)
+            chi2_total = 0
+            is_good = True
+            chi2_scores_index = []
+            for i in range(len(chi2_temp_indices)-1):
+                i1 = chi2_temp_indices[i]
+                i2 = chi2_temp_indices[i+1]
+                template_wh_local = np.array(template_cut_centered[i1:i2])
+                A_local = np.dot(template_wh_local,data_wh[i1:i2]) / vars_stat_local[i]#np.dot(template_wh[i1:i2],template_wh[i1:i2])
+                chi2_local = (A_local - A_global)**2 / (actual_Vs[i])
+                chi2_scores_index.append(chi2_local)
+                if chi2_local > local_th:
+                    is_good = False
+                chi2_total += chi2_local
+            chi2_scores_index.append(chi2_total)
+            if chi2_total > total_th:
+                is_good = False
+        
+        elif (index >= tlen//2) or (index < len(data_wh_full) - (tlen+1)//2):
+            if index < len(data_wh_full) - (tlen+1)//2: # it is in the beginning
+                data_wh = data_wh_full[:index+(tlen+1)//2]
+                template_not_full = template_cut_centered[:index+(tlen+1)//2]
+            else: # it is in the end
+                data_wh = data_wh_full[index-tlen//2:]
+                template_not_full = template_cut_centered[len(template_cut_centered) - (len(data_wh_full) - index) - tlen//2:]
+            stat_for_var = np.convolve(template_not_full,data_wh_full, mode='valid')
+            stat_for_var = stat_for_var[(np.abs(stat_for_var)<nsig_outliers_var*np.nanstd(stat_for_var))&mask[
+                                     len(template_not_full)//2:len(mask)-((len(template_not_full)-1)//2)]]
+            #quarter std correction so that the SNR of matched filtering the template is in units.
+            var_stat_global_not_full = np.nanvar(stat_for_var)
+            A_global_not_full = np.dot(template_not_full,data_wh) / var_stat_global_not_full #global amplitude
+            amplitudes.append(A_global_not_full)
+            n_parts_not_full = int(np.round(n_parts / tlen * len(template_not_full) ))
+            if splitting=='snr':
+                chi2_temp_indices_not_full = [0] + list(np.searchsorted(np.cumsum(template_not_full**2) / var_stat_global_not_full,
+                                                   (np.arange(n_parts_not_full)/n_parts_not_full)[1:])) + [len(template_not_full)]  
+            else:
+                chi2_temp_indices_not_full = list((len(template_not_full) * np.arange(n_parts_not_full)/n_parts_not_full).astype(int)) + [len(template_not_full)]
+            chi2_temp_indices_not_full = list(set(chi2_temp_indices_not_full)) #remove repetitions
+            chi2_temp_indices_not_full.sort()
+            n_parts_not_full = len(chi2_temp_indices_not_full)-1
+            
+            while ((chi2_temp_indices_not_full-np.roll(chi2_temp_indices_not_full, 1))[1:]<4).any():
+                n_parts_not_full -= 1
+                if splitting=='snr':
+                    chi2_temp_indices_not_full = [0] + list(np.searchsorted(np.cumsum(template_not_full**2) / np.dot(template_not_full,template_not_full),
+                                                           (np.arange(n_parts_not_full)/n_parts_not_full)[1:])) + [len(template_not_full)] 
+                else:
+                    chi2_temp_indices_not_full = list((len(template_not_full) * np.arange(n_parts_not_full)/n_parts_not_full).astype(int)) + [len(template_not_full)]
+
+            if n_parts_not_full<2:# or ((chi2_temp_indices_not_full-np.roll(chi2_temp_indices_not_full, 1))[1:]<3).any():
+                is_good = True
+                chi2_scores_index = [np.nan, np.nan]
+            else:
+                chi2_total = 0
+                is_good = True
+                chi2_scores_index = []
+                for i in range(1,len(chi2_temp_indices_not_full)):
+                    i1 = chi2_temp_indices_not_full[i-1]
+                    i2 = chi2_temp_indices_not_full[i]
+                    template_wh_local = np.array(template_not_full[i1:i2])
+                    stat_for_var = np.convolve(template_wh_local, data_wh_full, mode='valid')
+                    stat_for_var = stat_for_var[(np.abs(stat_for_var)<nsig_outliers_var*np.nanstd(stat_for_var))&mask[
+                                                                            len(template_wh_local)//2:len(mask)-((len(template_wh_local)-1)//2)]]
+                    #quarter std correction so that the SNR of matched filtering the template is in units.
+                    var_stat_local = np.nanvar(stat_for_var)
+                    actual_V = 1/var_stat_local - 1/var_stat_global_not_full
+                    A_local = np.dot(template_wh_local,data_wh[i1:i2]) / var_stat_local#np.dot(template_wh[i1:i2],template_wh[i1:i2])
+                    chi2_local = (A_local - A_global_not_full)**2 / (actual_V)
+                    chi2_scores_index.append(chi2_local)
+                    if chi2_local > local_th:
+                        is_good = False
+                    chi2_total += chi2_local
+                if chi2_total > total_th:
+                    is_good = False
+        else:
+            raise ValueError('Invalid template size!')    
+        chi2_scores.append(chi2_scores_index)   
+        is_goods.append(is_good)
+        
+    if return_scores:
+        if return_amplitudes:
+            return is_goods, amplitudes, chi2_scores
+        else:
+            return is_goods, chi2_scores
+    else:
+        if return_amplitudes:
+            return is_goods, amplitudes
+        else:
+            return is_goods
+
+
+def score_correction(scores_i, return_function=False, negative_values=False):
+    scores_i = np.array(scores_i)
+    argsorted = np.argsort(scores_i)
+    argargsorted = np.argsort(argsorted)
+    sorted_scores = scores_i[argsorted]
+    if negative_values is None:
+        if (scores_i<0).any():
+            negative_values = True
+        else:
+            negative_values = False
+    if negative_values==True:
+        scores_c = 2**0.5 * erfinv(2*(np.arange(len(sorted_scores))+0.5)/len(sorted_scores) - 1)
+    elif negative_values==False:
+        scores_c = 2**0.5 * erfinv((np.arange(len(sorted_scores))+0.5)/len(sorted_scores))
+    if return_function:
+        # indices = ~np.isinf(scores_c)
+        # funct = interp1d(sorted_scores[indices], scores_c[indices])
+        funct = interp1d(sorted_scores, scores_c)
+    if not return_function:
+        return scores_c[argargsorted]
+    else:
+        return scores_c[argargsorted], funct
             
 
-def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=None):
+def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=None, units_of_snr=True):
     values = np.array(values)
     if variances is None:
         variances = np.ones(len(values))
@@ -4215,7 +4633,11 @@ def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=
     expected_mean_H_all = sum(A_all**2/variances) - A_1 * A_all / variances[indmax]
     expected_variance_H_all = np.abs(sum(A_all**2/variances) - 2 * A_1 * A_all / variances[indmax] + A_1**2 / variances[indmax])
     statistic = -(A_all * sum(values/variances) - A_1 * values[indmax]/variances[indmax] - expected_mean_H_all)
-    return statistic/expected_variance_H_all
+    if units_of_snr:
+        statistic = statistic/expected_variance_H_all**0.5
+    else:
+        statistic = statistic/expected_variance_H_all
+    return statistic
 
 
 def connect_quarters_fun(time_quarters, data_quarters, zero_padding_ends=None, is_data_cut=False,
