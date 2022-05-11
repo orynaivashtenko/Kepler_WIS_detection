@@ -39,60 +39,57 @@ global per2
 per2 = 500.
 
 
-def time(T=2*T_ban, dt=dt_lc, Tbins=0, parity='odd', fromzero=False):
+def time(T=2*T_ban, dt=dt_lc, Tbins=None, parity='odd', fromzero=False):
     """
-    generates time from -T/2 to T/2 (not exactly) with interval dt
+    generates time from -T/2 to T/2 (not exactly, rounding down) with interval dt
     can have t=0 (parity=odd) or not have (parity=even)
     Tbins is number of bins that we want to have with spacing dt. Tbins overwrites T
     ATTENTION Tbins is the overall number, so not (-Tbins, Tbins)!
 
     Parameters
     ----------
-    T : TYPE, optional
-        DESCRIPTION. The default is 2*T_ban.
-    dt : TYPE, optional
-        DESCRIPTION. The default is dt_lc.
-    Tbins : TYPE, optional
-        DESCRIPTION. The default is 0.
-    parity : TYPE, optional
-        DESCRIPTION. The default is 'odd'.
-    fromzero : TYPE, optional
-        DESCRIPTION. The default is False.
+    T : float
+        The full duratin of the time sample in some units (the same as `dt`). 
+        The default is 2*`T_ban`.
+    dt : float
+        The time step in the same units as T. The default is `dt_lc`.
+    Tbins : int or None
+        The number of time steps dt to be in the result. If None, then `Tbins` 
+        will not be used, and T will be used instead. The default is None.
+    parity : str : 'even' or 'odd'
+        Whether there should be an even number of bins or not. The default is 'odd'.
+    fromzero : bool
+        Whether the time semple should start from zero or be symmetric around zero. 
+        The default is False.
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    numpy.array 1d of float
+        Time array with step `dt`
 
     """
     if not fromzero:
-        if Tbins==0:
+        if Tbins is None:
             if parity == 'odd':
                 return np.concatenate(((-1)*np.arange(0, T/2, dt)[:0:-1],np.arange(0, T/2, dt)))
             elif parity == 'even':
                 return np.concatenate(((-1)*np.arange(dt/2, T/2, dt)[::-1],np.arange(dt/2, T/2, dt)))
             else:
-                print('not recognized parity value')
-                return -1
+                raise AssertionError('not recognized parity value')
         else:
-            if type(Tbins)!= int:
-                print('Tbins shouls be int')
-                return -1
-            elif Tbins%2 != 0:
+            assert type(Tbins)==int, '`Tbins` should be int'
+            if Tbins%2 != 0:
                 Tamp = (Tbins+1)//2
                 return np.concatenate(((-dt)*np.arange(Tamp)[:0:-1],dt * np.arange(Tamp)))
             else:
                 Tamp = Tbins//2
                 return np.concatenate(((-dt)*(np.arange(Tamp)[::-1]+0.5), dt*(np.arange(Tamp)+0.5) ))
     else:
-        if Tbins==0:
+        if Tbins is None:
             return np.arange(0, T, dt)
         else:
-            if type(Tbins)!= int:
-                print('Tbins shouls be int')
-                return -1
-            else: 
-                return dt * np.arange(Tbins)
+            assert type(Tbins)==int, '`Tbins` should be int'
+            return dt * np.arange(Tbins)
 
 
 def transit_shape(t, templ):
@@ -145,7 +142,7 @@ def transit_shape(t, templ):
 
 def template_bank(dt=dt_lc, return_parlist=False, return_ordered=True, T=T_ban):
     """
-    TEMPLATE BANK
+    TEMPLATE BANK for the Kepler project (blue planets around yellow stars)
     The bank contains groups of templates:
     
     1) Big eccentricity (0.9), aphelion position, long period (500 days), varying star radii. Covers the longest transits. (10 templates)
@@ -171,7 +168,14 @@ def template_bank(dt=dt_lc, return_parlist=False, return_ordered=True, T=T_ban):
 
     Returns
     -------
-    None.
+    if return_parlist:
+        templates : list of numpy.arrays 1d of float
+            template bank
+        parlist : list of int
+            Integer characterizing the parametric famuly of the templates.
+            Was used for plotting. Now I do not remember exactly how. Probably not useful.
+    else:
+        parlist
 
     """
     # T = T_ban
@@ -326,6 +330,9 @@ def template_bank_subbin_shift(dt=dt_lc, dP=None, T_mission=1400., Pmin=per1,
                                n_points_int_min=20, return_ordered=True,
                                shifts_num=3, return_shifts=True):
     """
+    The same as `template_bank`, see the description above, but with subbin shifts 
+    of the templates which are important when the integration time is bigger
+    than the characteristic times of the template change.
     The number of needed shifts is determined so that the inner product of the 
     shifted templates >0.9, but <0.995
 
@@ -436,7 +443,7 @@ def template_bank_subbin_shift(dt=dt_lc, dP=None, T_mission=1400., Pmin=per1,
 
 def template_bank_parameters(return_ordered=True, dt=dt_lc, T=T_ban):  
     """
-    Generate the light curve parameters that were used in the template bank
+    Generate the light curve parameters that were used in the `template_bank`
     (without generating actual templates in order not to spend time.)
     Parameters are the object of the class batman.TransitParams().
     The order of the parameters in the list is the same as of the templates
@@ -639,27 +646,116 @@ def integ_interp(x1, x0, y0):
     return x1, y1
 
 
-def durations(t=None, templates=None):
+def durations(t=None, templates=None, dt=dt_lc):
+    """
+    Durations of the templates in `template_bank` in units of dt.
+    Duration includes the places where the template deviates from zero (the 
+    base flux of the star is assumed to be zero)
+
+    Parameters
+    ----------
+    t : numpy.array of float
+        Time array corresponding to the templates.
+        If None, the `time` function will be used. The default is None.
+    templates : list of numpy.arrays of float
+        Time array corresponding to the templates.
+        If None, the `template_bank` function will be used. The default is None.
+    dt : float
+        Time step of the `t`
+
+    Returns
+    -------
+    numpy.array of float
+        Durations of the transits generated by the `template_bank` in units of `dt`.
+
+    """
     if t is None and templates is None:
-        t = time()
-        templates = template_bank()
+        t = time(dt=dt_lc)
+        templates = template_bank(dt=dt_lc)
     return np.array(list(map(lambda tem: transit_shape(t, tem)[0], templates)))        
 
-def depths(t=None, templates=None):
+
+def depths(t=None, templates=None, dt=dt_lc):
+    """
+    Depths of the templates in `template_bank` in absolute units (templates are
+    assumed to be normalized). Depth is calculated in point of absolute minimum.
+
+    Parameters
+    ----------
+    t : numpy.array of float
+        Time array corresponding to the templates.
+        If None, the `time` function will be used. The default is None.
+    templates : list of numpy.arrays of float
+        Time array corresponding to the templates.
+        If None, the `template_bank` function will be used. The default is None.
+    dt : float
+        Time step of the `t`
+    Returns
+    -------
+    numpy.array of float
+        Depths of the transits generated by the `template_bank` in units of `dt`.
+
+    """
     if t is None and templates is None:
-        t = time()
-        templates = template_bank()
+        t = time(dt=dt_lc)
+        templates = template_bank(dt=dt_lc)
     return np.array(list(map(lambda tem: transit_shape(t, tem)[1], templates)))
 
-def fwhms(t=None, templates=None):
+
+def fwhms(t=None, templates=None, dt=dt_lc):
+    """
+    Full widths at half maxima of the templates in `template_bank` in units of dt.
+    Duration of transit includes the places where the template deviates from zero (the 
+    base flux of the star is assumed to be zero)
+
+    Parameters
+    ----------
+    t : numpy.array of float
+        Time array corresponding to the templates.
+        If None, the `time` function will be used. The default is None.
+    templates : list of numpy.arrays of float
+        Time array corresponding to the templates.
+        If None, the `template_bank` function will be used. The default is None.
+    dt : float
+        Time step of the `t`
+
+    Returns
+    -------
+    numpy.array of float
+        Durations of the transits generated by the `template_bank` in units of `dt`.
+
+    """
     if t is None and templates is None:
-        t = time()
-        templates = template_bank()
+        t = time(dt=dt_lc)
+        templates = template_bank(dt=dt_lc)
     return np.array(list(map(lambda tem: transit_shape(t, tem)[2], templates))) 
 
-def transit_lengths(templates=None):
+
+def transit_lengths(templates=None, dt=dt_lc):
+    """
+    Durations of the templates in `template_bank` in bins.
+    Duration includes the places where the template deviates from zero (the 
+    base flux of the star is assumed to be zero)
+
+    Parameters
+    ----------
+    t : numpy.array of float
+        Time array corresponding to the templates.
+        If None, the `time` function will be used. The default is None.
+    templates : list of numpy.arrays of float
+        Time array corresponding to the templates.
+        If None, the `template_bank` function will be used. The default is None.
+    dt : float
+        Time step of used for the `template_bank`.
+
+    Returns
+    -------
+    numpy.array of int
+        Durations of the transits generated by the `template_bank` in units of `dt`.
+
+    """
     if templates is None:
-        templates = template_bank()
+        templates = template_bank(dt=dt_lc)
     return np.array(list(map(lambda tem: len(np.nonzero(tem)[0]), templates)))        
 
 
@@ -718,7 +814,7 @@ def normalize(x, t=0, bymax=False, bysum=False):
 def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=90., u1=0.47, u2=0.23, t0=0,
              supersample_factor=None, exp_time=None):
     """
-    
+    Generates a light curve with batman package from the specified parameters.
 
     Parameters
     ----------
@@ -745,7 +841,7 @@ def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=
 
     Returns
     -------
-    flux : np.array
+    flux : numpy.array 1d of float
         flux (periodic) at corresponding times with max at 1 and dimmings on transits.
     #returns the flux as function of given physical parameters
 
@@ -810,6 +906,26 @@ def write_template_bank_to_file(name='template_bank', var=None, location=None):
 
 
 def generate_files_for_pipeline(location=None, number_of_templates=25):
+    """
+    Generates the template bank with subbin shifts using `template_bank` function.
+    Takes the first `number_of_templates` templates.
+    Saves the templates and the shifts to the two .txt files.
+    The files can be read by the corresponding function in the pipeline.
+
+    Parameters
+    ----------
+    location : str
+        Local directory where the files will be saved. If None, the current working
+        directory will be used. The default is None.
+    number_of_templates : int
+        The number of templates from the generated template bank that will be saved.
+        The too long templates are discarded. The default is 25.
+
+    Returns
+    -------
+    None.
+
+    """
     tb, shifts = template_bank_subbin_shift(dt=dt_lc, dP=None, T_mission=1400., Pmin=per1, 
                                n_points_int_min=50, return_ordered=True, shifts_num=3,
                                return_shifts=True)
@@ -825,6 +941,22 @@ def generate_files_for_pipeline(location=None, number_of_templates=25):
 #s is the smoothness parameter
 #returns the dictionary of your varying parameter and the color
 def colordict(x, s=0):
+    """
+    Generates the RGB colors for plotting. Do not remember exactly how to use it.
+
+    Parameters
+    ----------
+    x : TYPE
+        DESCRIPTION.
+    s : TYPE, optional
+        DESCRIPTION. The default is 0.
+
+    Returns
+    -------
+    dict
+        DESCRIPTION.
+
+    """
     m = min(x)
     M = max(x)
     if s==0:
