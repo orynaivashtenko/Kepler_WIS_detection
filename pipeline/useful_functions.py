@@ -157,7 +157,7 @@ def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None
         
     
 def measure_psd(x, mask=None, nperseg=64, noverlap=-1, window='hann', dt=1.,
-                      subtract_mean=True, rfft=True):
+                      subtract_mean=True, rfft=True, return_psds=False):
     """
     Function for measuring psd of the signal with Welch method. 
     
@@ -215,7 +215,7 @@ def measure_psd(x, mask=None, nperseg=64, noverlap=-1, window='hann', dt=1.,
             0.5 * (1-np.cos(2*np.pi*np.arange(nperseg)/(nperseg))))}
     
     if subtract_mean:
-        x = x-np.nanmean(x)
+        x = x-np.nanmean(x[mask])
         
     if rfft:
         #measuring psds for x:
@@ -232,7 +232,10 @@ def measure_psd(x, mask=None, nperseg=64, noverlap=-1, window='hann', dt=1.,
                         ) if np.sum((~mask)[ind1:ind1+nperseg])==0]
         psd = np.mean(np.array(psds), axis=0)
         freqs = np.fft.fftfreq(nperseg, d=dt)
-    return freqs, psd
+    if not return_psds:
+        return freqs, psd
+    else:
+        return freqs, psd, psds
 
 
 def psd2wf(psd, support=None, rfft=True):
@@ -701,34 +704,64 @@ def interpolate_over_mask(data, mask=None, interp_method='linear', ends='continu
     return data
 
 
-def is_bad_fft(fftdat, amp_max=400, rfft=True):
+# def is_bad_fft(fftdat, amp_max=400, rfft=True):
+#     """
+    
+#     If there are too narrow peaks that cannot be eliminated with measured psd, the star is bad
+#     ----------------------
+#     fftdat : np.array
+#     amp_peak : float, in units of sigma_tail limit amplitude of the peak (above it the peak is bad)
+#     width_peak : width of what is called a peak
+#     edge_per : limit value of periods allowed for peaks (if lower or equal, the peak is bad)
+#     dt : time stap of the data
+#     nperseg : length (in samples) of piece for psd measurement in Welch
+#     rfft : 
+#     """
+    
+#     fftdat = np.array(np.abs(fftdat))
+#     if rfft:
+#         tail_var = np.nanmedian(fftdat[len(fftdat)//2:])
+#         flag = False
+#         for i in range(0, len(fftdat)-2):
+#             if ((fftdat[i+1]/fftdat[i]>2.) and (fftdat[i+1]/fftdat[i+2]>2.) and (fftdat[i+1]/tail_var)>amp_max*(len(fftdat)/4/(i+len(fftdat)/4)-0.18)/0.8):
+#                 flag = True
+#                 # this amp_max*(...) is the function cheching that the peak is too high. The function (...) is a decaying powet law. The peaks
+#                 # decay at big frequencies, therefore the threshold for a too big peak is lower.
+#                 break
+#         return flag
+#     else:
+#         raise AssertionError('Please finish the code for rfft=False !')
+
+
+def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
     """
     
     If there are too narrow peaks that cannot be eliminated with measured psd, the star is bad
     ----------------------
     fftdat : np.array
-    amp_peak : float, in units of sigma_tail limit amplitude of the peak (above it the peak is bad)
-    width_peak : width of what is called a peak
-    edge_per : limit value of periods allowed for peaks (if lower or equal, the peak is bad)
-    dt : time stap of the data
-    nperseg : length (in samples) of piece for psd measurement in Welch
-    rfft : 
+    amp_max : float, in units of sigma_tail 
+        limit amplitude of the fft maximum (above it the maximum is bad)
+    dif_max : float, unitless
+        maximal difference between the value at point and the surrounding. Bigger is bad.
+    rfft : bool
+        Whether to use rfft. The signals are real, so we just always use it.
     """
-    
     fftdat = np.array(np.abs(fftdat))
     if rfft:
-        tail_var = np.nanmedian(fftdat[len(fftdat)//2:])
+        tail_sig = np.nanmedian(fftdat[len(fftdat)//2:])
         flag = False
-        for i in range(0, len(fftdat)-2):
-            if ((fftdat[i+1]/fftdat[i]>2.) and (fftdat[i+1]/fftdat[i+2]>2.) and (fftdat[i+1]/tail_var)>amp_max*(len(fftdat)/4/(i+len(fftdat)/4)-0.18)/0.8):
-                flag = True
-                # this amp_max*(...) is the function cheching that the peak is too high. The function (...) is a decaying powet law. The peaks
-                # decay at big frequencies, therefore the threshold for a too big peak is lower.
-                break
+        if np.mean(np.sort(fftdat[8:])[-4:])/tail_sig>amp_max:
+            flag = True
+        else:
+            for i in range(8, len(fftdat)-6):
+                if ((fftdat[i]/np.mean(np.concatenate((fftdat[i-5:i-2], fftdat[i+3:i+6]))))>(35*(8-1)/(i-1) - 35*(8-1)/(50-1) + dif_max)
+                    and (fftdat[i]>(3.5*(8-1)/(i-1) - 3.5*(8-1)/(50-1) + 1)*100*tail_sig)):
+                    flag = True
+                    break
         return flag
     else:
         raise AssertionError('Please finish the code for rfft=False !')
-
+        
 
         
 def veto_combined(data, template, fn=0.01, maxdev=2.8):

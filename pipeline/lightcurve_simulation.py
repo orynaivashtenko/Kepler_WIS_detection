@@ -88,6 +88,11 @@ def generate_lc_quarters(T=1400, t_min=0., t_max=None, dt=tm.dt_lc, flux0=1e5,
         fr = np.fft.rfftfreq(2*(len(rfft_med)-1),d=dt)
         freqs = np.fft.rfftfreq(L, d=dt)
         asd=np.abs(np.interp(freqs, fr, rfft_med))
+    elif source=='stored_psd_fft_fit' and np.abs((dt-tm.dt_lc)/tm.dt_lc)<0.05:
+        rfft_psd = np.array(fop.read_csv_file(os.path.join(location, 'stored_psd_fft_fit.txt')))
+        fr = np.fft.rfftfreq(2*(len(rfft_psd)-1),d=dt)
+        freqs = np.fft.rfftfreq(L, d=dt)
+        asd=np.abs(np.interp(freqs, fr, rfft_psd**0.5))
     elif source=='stored_psd' and np.abs((dt-tm.dt_lc)/tm.dt_lc)<0.05:
         psd_saved = np.array(fop.read_csv_file(os.path.join(location, 'stored_psd.txt')))
         fr = np.fft.rfftfreq(2*(len(psd_saved)-1),d=dt)
@@ -250,9 +255,12 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
     n_quarters=17
     ----------------------
     RETURNS:
-    pixel_data : np.ndarray of the shape (T, N, N)
+    fluxes and more, see description
     
     """
+    if get_data:
+        assert target_id is not None, 'Please specify target ID!'
+        times, fluxes = pip.get_data_fun(target_id, location=data_location)
     dts = []
     for q in range(len(times)):
         dts.append(np.nanmean((times[q]-np.roll(times[q],1))[1:]))
@@ -333,7 +341,7 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
     
     #WARNING:
     #The PSD used for injection is measured -> there will be no loss due to error in measurement!
-    #It means thst the injected SNR is not exactly the stated.
+    #It means that the injected SNR is not exactly the stated.
     #As well, the mean levels are measured, so the same issue.
     if return_zero_padding_ends:
         if return_template:
