@@ -468,6 +468,11 @@ def template_bank_parameters(return_ordered=True, dt=dt_lc, T=T_ban):
         Needed for single templates generation.
 
     """
+    params = batman.TransitParams()
+    params.t0 = 0.                       #time of inferior conjunction
+    params.limb_dark = "quadratic"       #limb darkening model
+    params.u = [0.47, 0.23]                #limb darkening coefficients [u1, u2]
+    
     parameter_list = []
     params.per = 500.
     params.ecc = 0.9
@@ -829,7 +834,7 @@ def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=
     inc : float, optional
         inclination in degrees. The default is 90., it means there is no inclination, a straight transit.
     ecc : float, optional
-        eccentricity. The default is 0..
+        eccentricity. The default is 0.
     w : float, optional
         periapsis argument, degraee. The default is 90., which is perihelion towards us
     u1 : float, optional
