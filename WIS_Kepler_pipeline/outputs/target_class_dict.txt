@@ -1,0 +1,15 @@
+target_id : 005342061
+data_location : /Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/WIS_Kepler_pipeline/light_curves
+output_location : /Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/WIS_Kepler_pipeline/outputs
+gaia_kepler_file : /Users/orynaivashtenko/Work/Kepler_Project/kepler_dr3_good.fits
+targets_info_file : /Users/orynaivashtenko/Work/Kepler_Project/input_stars_R2_and_R3_mass.txt
+stellar_radius : 0.783
+stellar_mass : 0.814
+kepmag : 15.341
+phot_g_mean_mag : 15.314558
+parallax : 0.8006511371604088
+gaia_abs_gmag : 4.831774653232237
+gaia_b_r : 0.97096634
+teff : 5691
+ra : 284.1197440520212
+dec : 40.524237899200656
