@@ -29,6 +29,8 @@ class KeplerTCE(target_class.KeplerTarget):
                          villanova_dict_file=villanova_dict_file,
                          overwrite_parameters_by_unpickle=overwrite_parameters_by_unpickle)
 
+        data_location = af.get_correct_tid_folder(target_id, data_location)
+        output_location = af.get_correct_tid_folder(target_id, output_location)
         target_pixels_location = af.get_correct_tid_folder(target_id, target_pixels_location)
 
         self.target_pixels_location = target_pixels_location
@@ -39,6 +41,21 @@ class KeplerTCE(target_class.KeplerTarget):
         self.centroid_snrs_transits = None
         self.centroid_stds_transits = None
         self.centroid_templs_transits = None
+        self.target_pixels_stats = None
+        self.target_pixels_means = None
+        self.target_pixels_ppms = None
+        self.target_pixels_stds_of_ppms = None
+
+        if load_pickled_attributes:
+            self.unpickle_small_attributes()
+            if not overwrite_parameters_by_unpickle:
+                self.data_location = data_location
+                self.output_location = output_location
+                self.gaia_kepler_file = gaia_kepler_file_path
+                self.koi_dict_file = koi_dict_file
+                self.ttv_dict_file = ttv_dict_file
+                self.villanova_dict_file = villanova_dict_file
+                self.target_pixels_location = target_pixels_location
 
     def pickle_small_attributes(self, output_location=None,
                                 pickle_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix,
@@ -88,6 +105,33 @@ class KeplerTCE(target_class.KeplerTarget):
             dict1 = pickle.load(pickle_file)
             self.__dict__.update(dict1.items())
 
+    def pickle_all_attributes(self, output_location=None,
+                              pickle_all_attributes_filename_postfix=Pickle_tce_all_attributes_filename_postfix):
+        """
+        Pickles all attributes which are of type str, float, int, np.float, np.integer, np.ndarray, list, dict
+        TODO: we should avoid pickling too long arrays
+
+        :param pickle_all_attributes_filename_postfix:
+        :type pickle_all_attributes_filename_postfix:
+        :param output_location:
+        :type output_location
+        :return:
+        """
+        if output_location is None:
+            output_location = self.output_location
+        dict_to_pickle = self.__dict__
+
+        with open(os.path.join(output_location, self.target_id + '_' + pickle_all_attributes_filename_postfix), 'wb') as pickle_file:
+            pickle.dump(dict_to_pickle, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def unpickle_all_attributes(self, output_location=None,
+                                pickle_all_attributes_filename_postfix=Pickle_tce_all_attributes_filename_postfix):
+        if output_location is None:
+            output_location = self.output_location
+        with open(os.path.join(output_location, self.target_id + '_' + pickle_all_attributes_filename_postfix), 'rb') as pickle_file:
+            dict1 = pickle.load(pickle_file)
+            self.__dict__.update(dict1.items())
+
     def print_dict_file(self, output_location=None, dict_txt_filename_postfix=Dict_tce_txt_filename_postfix):
         """
 
@@ -121,8 +165,10 @@ class KeplerTCE(target_class.KeplerTarget):
             for key in dict_to_print:
                 print(key, ":", dict_to_print[key], file=fil)
 
-    def get_trigger_star_bg_ppms(self, target_pixels_folder=pp.Target_pixels_location,
+    def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
                                  number_of_pixels_cut=None, part_of_cumsum_2=0.85, part_of_light=None):
+        if target_pixels_folder is None:
+            target_pixels_folder = self.target_pixels_location
         return af.get_trigger_star_bg_ppms(target_id=self.target_id,
                                            best_first_transit_time=self.best_first_transit_time,
                                            best_per=self.best_per, best_temp=self.best_temp,
@@ -132,8 +178,8 @@ class KeplerTCE(target_class.KeplerTarget):
 
     def test_target_pixels_amplitudes(self):
         star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = self.get_trigger_star_bg_ppms(
-                            target_pixels_folder=self.target_pixels_location,
-                            number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix, part_of_light=None)
+            target_pixels_folder=self.target_pixels_location,
+            number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix, part_of_light=None)
         self.star_part_ppms = star_part_ppms
         self.star_part_stds_of_ppms = star_part_stds_of_ppms
         self.bg_part_ppms = bg_part_ppms
@@ -157,3 +203,35 @@ class KeplerTCE(target_class.KeplerTarget):
         self.centroid_snrs_transits = np.array([[cent_stats_x[i], cent_stats_y[i]] for i in range(len(cent_stats_x))])
         self.centroid_stds_transits = np.array([[cent_stds_x[i], cent_stds_y[i]] for i in range(len(cent_stds_x))])
         self.centroid_templs_transits = np.array([[cent_templs_x[i], cent_templs_y[i]] for i in range(len(cent_templs_x))])
+
+    def test_single_pixels(self):
+        """
+        Takes every pixel in the optimal aperture and checks the statistics at the transit times
+        :return:
+        :rtype:
+        """
+        pixel_times, target_pixel_fluxes, bit_aperture_masks = af.get_target_pixel_data_fun(target_id=self.target_id,
+                                                                                            data_folder=self.target_pixels_location,
+                                                                                            remove_zeroth_quarter=True,
+                                                                                            remove_quarter_17=True,
+                                                                                            return_aperture_masks=True)
+
+        target_pixels_stats, target_pixels_means, \
+            target_pixels_ppms, target_pixels_stds_of_ppms = af.get_single_pixels_stats(times=pixel_times,
+                                                                                        target_pixel_fluxes=target_pixel_fluxes,
+                                                                                        bit_aperture_masks=bit_aperture_masks,
+                                                                                        summed_transit_times=self.summed_transit_times,
+                                                                                        best_temp=self.best_temp)
+        self.target_pixels_stats = target_pixels_stats
+        self.target_pixels_means = target_pixels_means
+        self.target_pixels_ppms = target_pixels_ppms
+        self.target_pixels_stds_of_ppms = target_pixels_stds_of_ppms
+
+    def check_quality_flags(self):
+        """
+        Opens the fits data and accesses the quality flag series. looks in the vicinity of every summed transit point
+        and records all that was there.
+        :return:
+        :rtype:
+        """
+        pass

@@ -2,6 +2,7 @@
 
 import os
 import sys
+import pickle
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -24,9 +25,20 @@ Target_id = args.target_id[0]
 
 tce = tce_class.KeplerTCE(target_id=Target_id, load_pickled_attributes=True)
 
-tce.test_target_pixels_amplitudes()
+# tce.test_target_pixels_amplitudes()
 tce.find_centroid_transits_snr()
 tce.estimate_rp()
+# tce.test_single_pixels()
 
 tce.pickle_small_attributes(pickle_target_attributes=False)
 tce.print_dict_file()
+
+output_location = tce.output_location
+dict_to_pickle = {}
+for key in ['centroid_snrs_transits', 'centroid_stds_transits', 'centroid_templs_transits']:
+    value = tce.__dict__[key]
+    dict_to_pickle[key] = value
+
+with open(os.path.join(output_location, tce.target_id + '_' + 'centroid_attributes.pickle'), 'wb') as pickle_file:
+    pickle.dump(dict_to_pickle, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
+

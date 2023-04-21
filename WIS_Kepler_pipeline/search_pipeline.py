@@ -49,9 +49,13 @@ klc1.detect_single_transits()
 """
 ##############################################################################
 
-# TODO: update usat things:
-# not full number of quarters
+# TODO: update things:
 # what if the template is not symmetric
+
+# TODO discussion:
+# we are saving one best thing per star. Then, we are vetting it, and it might not pass.
+# But the same star could have a trigger which was slightly smaller but passing the veto.
+# Maybe we need to save all the scores of one star which are higher than a certain threshold.
 
 
 class KeplerLightCurve(object):
@@ -755,7 +759,11 @@ class KeplerLightCurve(object):
         self.connect_quarters()
         self.interleave_shifts()
         self.sum_periods(pmin=pmin, pmax=pmax, dp=dp, duty_cycle=duty_cycle)
-        self.veto_mes(mes_threshold=threshold_mes_veto, veto_threshold=veto_threshold_for_mes)
+        # self.veto_mes(mes_threshold=threshold_mes_veto, veto_threshold=veto_threshold_for_mes)
+        # -> WARNING: this veto, if done after the periodicity search on the score-corrected data, will destroy the
+        # distribution. Therefore, we are removing this veto from the search and will do it after the search and after
+        # the time-slides and p_periodic estimation as a post-processing veto. Also, we make sure to do it on the
+        # non-score-corrected data.
 
     def subtract_means(self, save_means=True, method='mean', make_trends=True):
         """
@@ -2168,7 +2176,7 @@ class KeplerLightCurve(object):
             ind_last += self.support
 
     def connect_quarters(self):
-        # TODO: is it legite to connect quarters with such a shift?
+        # TODO: is it legite to connect quarters with such a shift? ( what??)
         """
         Takes data saved by quarter and connects them together to the common time axis.
         The new time array is generated, assuming that data is equally sampled.
@@ -2437,6 +2445,10 @@ class KeplerLightCurve(object):
                                                                                               denomsq[p][t] != 0] ** 0.5
 
     def veto_mes(self, mes_threshold=Threshold_mes_veto, veto_threshold=Veto_threshold_for_mes):
+        # WARNING: this veto, if done after the periodicity search on the score-corrected data, will destroy the
+        # distribution. Therefore, we are removing this veto from the search and will do it after the search and after
+        # the time-slides and p_periodic estimation as a post-processing veto. Also, we make sure to do it on the
+        # non-score-corrected data.
         if len(self.interleaved_numbers) > 0:
             self.mes_veto_masks_interleaved = np.ones(np.shape(self.statistics_periodic_interleaved)).astype(bool)
             indices = np.array(np.where(self.statistics_periodic_interleaved < -np.abs(mes_threshold))).T
@@ -2461,7 +2473,7 @@ class KeplerLightCurve(object):
                         amplitude_vars.append(np.inf)
                         amplitudes_normalized.append(0.)
                 veto_score = ut.unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars,
-                                                    A_all=None, indmax=None, A_1=None)
+                                                       A_all=None, indmax=None, A_1=None)
                 if veto_score > veto_threshold:
                     self.statistics_periodic_interleaved[pi][ti][phi] = 0.
                     self.mes_veto_masks_interleaved[pi][ti][phi] = False

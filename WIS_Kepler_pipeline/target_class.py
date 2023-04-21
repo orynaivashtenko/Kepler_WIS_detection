@@ -64,7 +64,7 @@ if not os.path.isdir(Output_location):
 
 
 class KeplerTarget(object):
-    star_attributes = ['stellar_radius', 'stellar_mass', 'kepmag', 'phot_g_mean_mag', 'parallax', 'phot_g_mean_mag',
+    star_attributes = ['stellar_radius', 'stellar_mass', 'kepmag', 'phot_g_mean_mag', 'parallax',
                        'gaia_abs_gmag', 'gaia_b_r', 'teff', 'ra', 'dec']
 
     def __init__(self, target_id='003097222', data_location=Data_location, output_location=Output_location,
@@ -230,6 +230,21 @@ class KeplerTarget(object):
         self.prob_density_planet_not_noise = None
 
         # Elements of estimations:
+        # Non-score-corrected values:
+        self.ncor_raw_stats = None
+        self.ncor_stat_denoms = None
+        self.ncor_trends = None
+        self.ncor_ampls = None
+        self.ncor_ampls_stds = None
+        self.ncor_ampl = None
+        self.ncor_norm_ampls = None
+        self.ncor_norm_ampls_stds = None
+        self.ncor_ppms = None
+        self.ncor_ppm = None
+        self.ncor_ppms_stds = None
+        self.best_temp_depth = None
+
+        # Things with freedom for ttvs and templates, probably useless:
         self.optim_raw_stats = None
         self.optim_stat_denoms = None
         self.optim_trends = None
@@ -245,6 +260,7 @@ class KeplerTarget(object):
         self.rp_to_r_earth_std = None
 
         self.failures = ''  # if something bad happens, we will write it here
+        # TODO: this field did not work in the catalog!!!
         self.is_good_for_processing = True
 
         if load_pickled_attributes:
@@ -452,7 +468,8 @@ class KeplerTarget(object):
                     if hasattr(value, '__len__'):
                         if isinstance(value, dict) and hasattr(value[list(value.keys())[0]], '__len__'):
                             ok_to_print = False  # TODO: maybe make the selection process look at all the dict keys
-                        elif (not isinstance(value, dict)) and (len(value) > 0 and hasattr(value[0], '__len__')):
+                        elif ((not isinstance(value, dict)) and (not isinstance(value, str))
+                              and (len(value) > 0 and hasattr(value[0], '__len__'))):
                             ok_to_print = False  # not printing nested lists
                         elif (not isinstance(value, str)) and len(value) > 50:
                             # roughly to be able to set summed values for planets with period 30
@@ -1468,12 +1485,22 @@ class KeplerTarget(object):
                            nsig_outliers_0_neg=nsig_outliers_0_neg,
                            nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
                            nsig_outliers_w_neg=nsig_outliers_0_neg)
-
         klc.condition_templates()
         klc.detect_single_transits(apply_score_correction=False, apply_veto=False)
         return klc
 
-    def get_summed_values_no_filters(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15, ttv_hours_allowed=5):
+    def get_summed_values_no_filters_freedom(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15, ttv_hours_allowed=5):
+        """
+        similar to `get_summed_values_no_filters`, but allow for ttv and template variation
+        :param nsig_outliers_0_pos:
+        :type nsig_outliers_0_pos:
+        :param nsig_outliers_0_neg:
+        :type nsig_outliers_0_neg:
+        :param ttv_hours_allowed:
+        :type ttv_hours_allowed:
+        :return:
+        :rtype:
+        """
         klc = self.get_ses_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos, nsig_outliers_0_neg=nsig_outliers_0_neg)
         ttv_half_bins_allowed = int(np.round(ttv_hours_allowed / klc.dt_days))
         best_temp_sh_inds = []
@@ -1552,7 +1579,87 @@ class KeplerTarget(object):
         self.optim_ppms = (self.optim_raw_stats / self.optim_stat_denoms / self.optim_trends * optim_templ_depths * 1e6)
         self.optim_ppm = np.abs(np.nanmean(self.optim_ppms[not_missed_transit_mask]))
 
-    def estimate_rp(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15, ttv_hours_allowed=5):
+    def get_summed_values_no_filters(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
+        klc = self.get_ses_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos, nsig_outliers_0_neg=nsig_outliers_0_neg)
+        best_temps_sh = np.arange(klc.indices_of_templates[self.best_temp][0], klc.indices_of_templates[self.best_temp][-1])
+        best_raw_stats = []
+        best_stat_denoms = []
+        best_trends = []
+        optim_templ_depths = []
+        for i, tt in enumerate(self.summed_transit_times):
+            best_stat = 0.
+            best_time_ind = None
+            best_temp_ind = None
+            best_quarter = None
+            for q in klc.quarters:
+                if klc.times[q][~np.isnan(klc.times[q])][0] <= tt <= klc.times[q][~np.isnan(klc.times[q])][-1]:
+                    ind_tr = np.nanargmin(np.abs(klc.times[q] - tt))
+                    for k in best_temps_sh:
+                        ti0 = max(0, ind_tr - 1)
+                        ti1 = min(ind_tr + 1, len(klc.statistics_raw_cor[k][q]))
+                        rel_shift = np.nanargmin(klc.statistics_raw_cor[k][q][ti0:ti1])
+                        time_index = ti0 + rel_shift
+                        stat_here = klc.statistics_raw_cor[k][q][time_index]
+                        if stat_here < best_stat:
+                            best_stat = stat_here
+                            best_time_ind = time_index
+                            best_temp_ind = k
+                            best_quarter = q
+            if best_time_ind is not None:  # it can be None if the transit is between the quarters or something like that
+                best_raw_stats.append(klc.statistics_raw_cor[best_temp_ind][best_quarter][best_time_ind])
+                best_stat_denoms.append(klc.stat_denoms[best_temp_ind][best_quarter])
+                best_trends.append(klc.trends_orig_fluxes[best_quarter][best_time_ind])
+                optim_templ_depths.append(np.max(np.abs(klc.templates[best_temp_ind])))
+            else:
+                best_raw_stats.append(np.nan)
+                best_stat_denoms.append(np.nan)
+                best_trends.append(np.nan)
+                optim_templ_depths.append(np.nan)
+
+        self.ncor_raw_stats = np.array(best_raw_stats)
+        self.ncor_stat_denoms = np.array(best_stat_denoms)
+        self.ncor_trends = np.array(best_trends)
+        temp_depth = np.max(np.abs(klc.templates[best_temps_sh[0]]))
+        self.best_temp_depth = temp_depth
+
+        ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds = \
+            af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.ncor_raw_stats,
+                                              summed_trends=self.ncor_trends, summed_stat_denoms=self.ncor_stat_denoms,
+                                              templ_max=temp_depth, trends_stds=None)
+
+        self.ncor_ampls = ampls
+        self.ncor_ampls_stds = ampls_stds
+        self.ncor_ampl = ampl
+        self.ncor_norm_ampls = normalized_ampls
+        self.ncor_norm_ampls_stds = normalized_ampls_stds
+        self.ncor_ppms = ppms
+        self.ncor_ppm = ppm
+        self.ncor_ppms_stds = ppms_stds
+
+        # self.ncor_raw_stats = np.array(best_raw_stats)
+        # self.ncor_stat_denoms = np.array(best_stat_denoms)
+        # self.ncor_trends = np.array(best_trends)
+        #
+        # temp_depth = np.max(np.abs(klc.templates[best_temps_sh[0]]))
+        #
+        # self.ncor_ampls = np.abs(self.ncor_raw_stats / self.ncor_stat_denoms)
+        # self.ncor_stds_of_ampls = np.abs(1 / self.ncor_stat_denoms)
+        #
+        # not_missed_transit_mask = (~np.isnan(self.ncor_raw_stats)) & (self.ncor_trends > 0.) & (self.ncor_raw_stats != 0.)
+        # self.ncor_ampl = (np.nanmean((self.ncor_ampls[not_missed_transit_mask] / self.ncor_trends[not_missed_transit_mask]))
+        #                   * np.nanmean(self.ncor_trends[not_missed_transit_mask]))
+        # ppms = np.zeros(len(self.ncor_raw_stats))
+        # vars_of_ppms = np.zeros(len(self.ncor_raw_stats)) * np.nan
+        # ppms[not_missed_transit_mask] = (self.ncor_raw_stats[not_missed_transit_mask] / self.ncor_stat_denoms[not_missed_transit_mask]
+        #                                  / self.ncor_trends[not_missed_transit_mask] * temp_depth * 1e6)
+        # vars_of_ppms[not_missed_transit_mask] = (
+        #         1 / self.ncor_stat_denoms[not_missed_transit_mask] * np.var(self.ncor_trends[not_missed_transit_mask]) / self.ncor_trends[
+        #         not_missed_transit_mask] ** 4 * temp_depth ** 2 * 1e12)
+        # self.ncor_ppms = (self.ncor_raw_stats / self.ncor_stat_denoms / self.ncor_trends * temp_depth * 1e6)
+        # self.ncor_ppm = np.abs(np.nanmean(self.ncor_ppms[not_missed_transit_mask]))
+        # self.stds_ncor_ppms = vars_of_ppms ** 0.5
+
+    def estimate_rp(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
         ##############################################################################################################################
         # THIS IS A TEMPORARY PIECE OF CODE WHICH IS NEEDED TO CORRECT THE PREVIOUSLY INCORRECT PPM ESTIMATE
         # IF IT WAS NOT CORRECTED BEFORE
@@ -1577,11 +1684,12 @@ class KeplerTarget(object):
         #                  * np.max(np.abs(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]])) * 1e6)
         #     self.best_ppm = np.abs(np.nanmean(self.ppms[not_missed_transit_mask]))
         ##############################################################################################################################
-        if self.optim_ppms is None or self.optim_ppm is None:
+        if self.ncor_ppms is None or self.ncor_ppm is None or self.ncor_ppms_stds is None:
             self.get_summed_values_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos,
-                                              nsig_outliers_0_neg=nsig_outliers_0_neg, ttv_hours_allowed=ttv_hours_allowed)
-        self.rp_to_rs = (self.optim_ppm / 1e6) ** 0.5
-        self.rp_to_rs_std = np.nanstd(np.abs(self.optim_ppms / 1e6) ** 0.5)
+                                              nsig_outliers_0_neg=nsig_outliers_0_neg)
+        self.rp_to_rs = (self.ncor_ppm / 1e6) ** 0.5
+        self.rp_to_rs_std = (np.nanvar(np.abs(self.ncor_ppms) ** 0.5)
+                             + np.nanmean(self.ncor_ppms_stds**2) / np.abs(self.ncor_ppm)) ** 0.5 / 1e3
         self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
         self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
 
@@ -1772,80 +1880,109 @@ class KeplerTarget(object):
                      + ', duration: ' + self.templates_durations_hours[self.best_temp_inv] + ' hours')
         ax.legend(loc='upper right')
 
-    def plot_folded_red_flux(self, ax=None, figsize=(8, 6)):
+    def plot_folded_red_flux(self, ax=None, figsize=(8, 6), plot_twice=False):
         # PLOT FOLD RED FLUX
         self.get_light_curve_for_plotting_ses()
         binwid = min(self.templates_durations_hours[self.best_temp] / 24 / 5, 0.1)
         means = [np.nanmean(self.klc.orig_fluxes[q]) for q in self.klc.quarters]
 
-        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped = fold_fluxes(
+        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std = fold_fluxes(
             times=self.klc.times, fluxes=self.klc.fluxes, period=self.best_per, first_time=self.summed_transit_times[0],
             masks=self.klc.big_hole_masks,
             binwid=binwid, time_fold=self.best_per,  # self.templates_durations_hours[self.best_temp] / 24 * 20,
             dt=self.klc.dt_days,
             means=means,
-            template=np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]]))
+            template=np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]]),
+            return_std=True)
         if ax is None:
             fig = plt.figure(figsize=figsize)
             ax = fig.gca()
         for i in range(len(folds_times)):
             ax.plot(folds_times[i], folds_fluxes[i], 'o', markersize=1, color=(0.5, 0.5, 0.5))
-        ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1,
-                label='binning, bin ' + ut.fstr(np.round(binwid, 3)) + ' days')
+        ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                    markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                    ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                    xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                    label='binning, bin ' + ut.fstr(np.round(binwid, 3)) + ' days')
+        # ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1,
+        #         label='binning, bin ' + ut.fstr(np.round(binwid, 3)) + ' days')
         ax.plot(time_template, 1 - template_cropped * np.abs(np.nanmean(
             self.ampls[self.summed_trends > 0] / self.summed_trends[self.summed_trends > 0])),
-                color='r', linewidth=1, label=r'template $\cdot$ amplitude')
+                color='r', linewidth=1,
+                label=r'template $\cdot$ amplitude,'+'\nduration: ' + self.templates_durations_hours[self.best_temp] + ' hours')
+
+        if plot_twice:
+            for i in range(len(folds_times)):
+                ax.plot(folds_times[i] + self.best_per, folds_fluxes[i], 'o', markersize=1, color=(0.5, 0.5, 0.5))
+            ax.errorbar(bins_time[bins_counts > 0] + self.best_per, bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                        markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                        ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                        xlolims=False, xuplims=False, errorevery=1, capthick=None)
+            ax.plot(time_template + self.best_per, 1 - template_cropped * np.abs(np.nanmean(
+                self.ampls[self.summed_trends > 0] / self.summed_trends[self.summed_trends > 0])),
+                    color='r', linewidth=1)
+
         maxdev = np.nanmax(
             [np.nanmax(np.abs(bins_flux - 1)), np.nanmax([np.nanmax(np.abs(folds_fluxes[i] - 1)) for i in range(len(folds_fluxes))])])
         ax.set_ylim(1 - maxdev * 1.01, 1 + maxdev * 1.01)  # make the limits symmetric
         ax.set_xlim(-self.best_per / 2, self.best_per / 2)
+        if plot_twice:
+            ax.set_xlim(-self.best_per / 2, self.best_per / 2 + self.best_per)
+            ax.axvline(self.best_per / 2, color=(0.5, 0.5, 0.5), linewidth=1)
         ax.legend(loc='upper right')
         ax.set_title('KOI' + self.target_id + ' fold, ' + str(len(self.summed_raw_stats)) + ' transits')
-        ax.set_xlabel('time from the mid transit, days')
-        ax.set_ylabel('flux normalized by mean')
+        ax.set_xlabel('Time from the mid transit, days')
+        ax.set_ylabel('Flux normalized by mean')
 
     def plot_folded_red_flux_inv(self, ax=None, figsize=(8, 6)):
         # PLOT FOLD RED FLUX
         self.get_light_curve_for_plotting_ses()
         binwid_inv = min(self.templates_durations_hours[self.best_temp_inv] / 24 / 5, 0.1)
-        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped = fold_fluxes(
+        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std = fold_fluxes(
             times=self.klc.times, fluxes=[-fl for fl in self.klc.fluxes], period=self.best_per_inv,
             first_time=self.summed_transit_times_inv[0],
             masks=self.klc.big_hole_masks,
             binwid=binwid_inv, time_fold=self.best_per_inv,  # self.templates_durations_hours[self.best_temp_inv] / 24 * 10,
             dt=self.klc.dt_days,
             means=[np.nanmean(self.klc.orig_fluxes[q]) for q in self.klc.quarters],
-            template=np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp_inv][0]]))
+            template=np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp_inv][0]]),
+            return_std=True)
         if ax is None:
             fig = plt.figure(figsize=figsize)
             ax = fig.gca()
         for i in range(len(folds_times)):
             ax.plot(folds_times[i], folds_fluxes[i], 'o', markersize=1, color=(0.5, 0.5, 0.5))
-        ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid_inv) + ' days')
+        ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                    markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                    ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                    xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                    label='binning, bin ' + ut.fstr(np.round(binwid_inv, 3)) + ' days')
+        # ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid_inv) + ' days')
         ax.plot(time_template, 1 - template_cropped * np.abs(np.nanmean(
             self.ampls_inv[self.summed_trends_inv > 0] / self.summed_trends_inv[self.summed_trends_inv > 0])),
-                color='r', linewidth=1, label=r'template $\cdot$ amplitude')
+                color='r', linewidth=1,
+                label=r'template $\cdot$ amplitude,'+'\nduration: ' + self.templates_durations_hours[self.best_temp_inv] + ' hours')
         maxdev = np.nanmax(
             [np.nanmax(np.abs(bins_flux - 1)), np.nanmax([np.nanmax(np.abs(folds_fluxes[i] - 1)) for i in range(len(folds_fluxes))])])
         ax.set_ylim(1 - maxdev * 1.01, 1 + maxdev * 1.01)  # make the limits symmetric
         ax.set_xlim(-self.best_per_inv / 2, self.best_per_inv / 2)
         ax.legend(loc='upper right')
         ax.set_title('KOI' + self.target_id + ' inverted fold, ' + str(len(self.summed_raw_stats_inv)) + ' transits')
-        ax.set_xlabel('time from the mid transit, days')
-        ax.set_ylabel('flux normalized by mean')
+        ax.set_xlabel('Time from the mid transit, days')
+        ax.set_ylabel('Flux normalized by mean')
 
-    def plot_folded_whitened_flux(self, ax=None, figsize=(8, 6)):
+    def plot_folded_whitened_flux(self, ax=None, figsize=(8, 6), plot_twice=False):
         self.get_light_curve_for_plotting_ses()
         binwid = min(self.templates_durations_hours[self.best_temp] / 24 / 5, 0.1)
         if ax is None:
             fig = plt.figure(figsize=figsize)
             ax = fig.gca()
-        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes = fold_fluxes(
+        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
             times=self.klc.times, fluxes=self.klc.whitened_fluxes_td, period=self.best_per, first_time=self.summed_transit_times[0],
             masks=self.klc.big_hole_masks,
             binwid=binwid, time_fold=self.best_per,  # self.templates_durations_hours[self.best_temp] / 24 * 10,
             dt=self.klc.dt_days, means=None,
-            template=None)  # np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]]))
+            template=None, return_std=True)  # np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]]))
         n_time_templ = int(np.round(self.best_per / self.klc.dt_days))
         temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
         for q in range(len(temps)):
@@ -1859,14 +1996,33 @@ class KeplerTarget(object):
 
         for i in range(len(folds_times)):
             ax.plot(folds_times[i], folds_fluxes[i], 'o', markersize=1, color=(0.5, 0.5, 0.5))
-        ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid) + ' days')
-        ax.plot(time_template, -temp_best * self.best_ampl, color='r', linewidth=1, label='average whitened template')
+        ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                    markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                    ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                    xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                    label='binning, bin ' + ut.fstr(binwid) + ' days')
+        # ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid) + ' days')
+        ax.plot(time_template, -temp_best * self.best_ampl, color='r', linewidth=1,
+                label='average whitened template,'+'\ntransit duration: ' + self.templates_durations_hours[self.best_temp] + ' hours')
+
+        if plot_twice:
+            for i in range(len(folds_times)):
+                ax.plot(folds_times[i] + self.best_per, folds_fluxes[i], 'o', markersize=1, color=(0.5, 0.5, 0.5))
+            ax.errorbar(bins_time[bins_counts > 0] + self.best_per, bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                        markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                        ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                        xlolims=False, xuplims=False, errorevery=1, capthick=None)
+            ax.plot(time_template + self.best_per, -temp_best * self.best_ampl, color='r', linewidth=1)
+
         maxdev = np.nanmax(
             [np.nanmax(np.abs(bins_flux)), np.nanmax([np.nanmax(np.abs(folds_fluxes[i])) for i in range(len(folds_fluxes))])])
         ax.set_ylim(-maxdev * 1.01, maxdev * 1.01)  # make the limits symmetric
         ax.set_xlim(-self.best_per / 2, self.best_per / 2)
-        ax.set_xlabel('time from the mid transit, days')
-        ax.set_ylabel('whitened flux')
+        if plot_twice:
+            ax.set_xlim(-self.best_per / 2, self.best_per / 2 + self.best_per)
+            ax.axvline(self.best_per / 2, color=(0.5, 0.5, 0.5), linewidth=1)
+        ax.set_xlabel('Time from the mid transit, days')
+        ax.set_ylabel('Whitened flux')
         ax.legend(loc='upper right')
         ax.set_title('KOI' + self.target_id + ' whitened fold, ' + str(len(self.summed_raw_stats)) + ' transits')
 
@@ -1876,11 +2032,11 @@ class KeplerTarget(object):
             fig = plt.figure(figsize=figsize)
             ax = fig.gca()
         binwid_inv = min(self.templates_durations_hours[self.best_temp_inv] / 24 / 5, 0.1)
-        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped = fold_fluxes(
-            times=self.klc.times, fluxes=[-fl for fl in self.klc.whitened_fluxes_td], period=self.best_per_inv,
+        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std = fold_fluxes(
+            times=self.klc.times, fluxes=self.klc.whitened_fluxes_td, period=self.best_per,
             first_time=self.summed_transit_times_inv[0],
             masks=self.klc.big_hole_masks,
-            binwid=binwid_inv, time_fold=self.best_per_inv,  # self.templates_durations_hours[self.best_temp_inv] / 24 * 10,
+            binwid=binwid_inv, time_fold=self.best_per_inv,  # self.templates_durations_hours[self.best_temp] / 24 * 10,
             dt=self.klc.dt_days, means=None,
             template=np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp_inv][0]]))
         n_time_templ = len(time_template)
@@ -1901,18 +2057,110 @@ class KeplerTarget(object):
         # temp_best = np.concatenate((temp_best_2, temp_best_1))
         for i in range(len(folds_times)):
             ax.plot(folds_times[i], folds_fluxes[i], 'o', markersize=1, color=(0.5, 0.5, 0.5))
-        ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid_inv) + ' days')
-        ax.plot(time_template, -temp_best * self.best_ampl_inv, color='r', linewidth=1, label='average whitened template')
+        ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                    markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                    ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                    xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                    label='binning, bin ' + ut.fstr(binwid_inv) + ' days')
+        # ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid_inv) + ' days')
+        ax.plot(time_template, -temp_best * self.best_ampl_inv, color='r', linewidth=1,
+                label='average whitened template,'+'\ntransit duration: ' + self.templates_durations_hours[self.best_temp_inv] + ' hours')
         maxdev = np.nanmax(
             [np.nanmax(np.abs(bins_flux)), np.nanmax([np.nanmax(np.abs(folds_fluxes[i])) for i in range(len(folds_fluxes))])])
         ax.set_ylim(-maxdev * 1.01, maxdev * 1.01)  # make the limits symmetric
         ax.set_xlim(-self.best_per_inv / 2, self.best_per_inv / 2)
-        ax.set_xlabel('time from the mid transit, days')
-        ax.set_ylabel('whitened flux')
+        ax.set_xlabel('Time from the mid transit, days')
+        ax.set_ylabel('Whitened flux')
         ax.legend(loc='upper right')
         ax.set_title('KOI' + self.target_id + ' inverted whitened fold, ' + str(len(self.summed_raw_stats_inv)) + ' transits')
 
-    def plot_background(self, ax=None, figsize=(10, 5), fixed_limits=True, limits=None, plot_extrapolation=True):
+    def plot_folded_stat_snr(self, ax=None, figsize=(8, 6), plot_twice=False):
+        self.get_light_curve_for_plotting_ses()
+        time_full, trend_orig_flux_full = af.connect_quarters_fun(self.klc.times, self.klc.trends_orig_fluxes,
+                                                                  zero_padding_ends=None,
+                                                                  is_data_cut=~self.klc.is_zero_padded,
+                                                                  is_time_cut=~self.klc.is_zero_padded,
+                                                                  dt=self.klc.dt_days, fill_gaps_by_nan=False)
+        stats_snr = self.klc.statistics_snr[
+                    self.klc.indices_of_templates[self.best_temp][0]:self.klc.indices_of_templates[self.best_temp][1]]
+        masks_temp = self.klc.stat_masks[self.klc.indices_of_templates[self.best_temp][0]:self.klc.indices_of_templates[self.best_temp][1]]
+        stats_snr_full = np.array([af.connect_quarters_fun(self.klc.times, stats_snr[k],
+                                                           zero_padding_ends=None, is_data_cut=~self.klc.is_zero_padded,
+                                                           is_time_cut=~self.klc.is_zero_padded, dt=self.klc.dt_days,
+                                                           fill_gaps_by_nan=False)[1]
+                                   for k in range(len(stats_snr))])
+        stat_masks_full = np.array([(af.connect_quarters_fun(self.klc.times, masks_temp[k],
+                                                             zero_padding_ends=None, is_data_cut=~self.klc.is_zero_padded,
+                                                             is_time_cut=~self.klc.is_zero_padded, dt=self.klc.dt_days,
+                                                             fill_gaps_by_nan=False)[1]).astype(bool)
+                                    for k in range(len(stats_snr))])
+        if len(stats_snr_full) > 1:
+            time_interleaved = [np.arange(len(trend_orig_flux_full)) * self.klc.dt_days / self.klc.n_shifts + time_full[0]]
+            statistics_interleaved = [np.array(stats_snr_full.T.flatten())]
+            masks_interleaved = [np.array(stat_masks_full.T.flatten())]
+        else:
+            time_interleaved = [time_full]
+            statistics_interleaved = stats_snr_full
+            masks_interleaved = stat_masks_full
+
+        binwid = min(self.templates_durations_hours[self.best_temp] / 24 / 5, 0.1)
+        if ax is None:
+            fig = plt.figure(figsize=figsize)
+            ax = fig.gca()
+        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
+            times=time_interleaved, fluxes=statistics_interleaved, period=self.best_per, first_time=self.summed_transit_times[0],
+            masks=masks_interleaved,
+            binwid=binwid, time_fold=self.best_per,  # self.templates_durations_hours[self.best_temp] / 24 * 10,
+            dt=self.klc.dt_days, means=None,
+            template=None, return_std=True)  # np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]]))
+
+        n_time_templ = int(np.round(self.best_per / self.klc.dt_days))
+        temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
+        for q in range(len(temps)):
+            if len(temps[q]) < n_time_templ:
+                temps[q] = ut.pad_by_zeros(temps[q], n_time_templ, in_the_center=True)
+        temp_best_1 = np.array(np.mean([temps[q][:n_time_templ // 2] for q in self.klc.quarters], axis=0))
+        temp_best_2 = np.array(np.mean([temps[q][-n_time_templ // 2:] for q in self.klc.quarters], axis=0))
+        temp_best = np.concatenate((temp_best_2, temp_best_1))
+        temp_best = temp_best / np.linalg.norm(temp_best)
+        tem_center = np.nanargmax(np.abs(temp_best))
+        temp_best = np.fft.irfft(np.abs(np.fft.rfft(temp_best)) ** 2)  # for statistic, templete is convolution
+        temp_best = np.roll(temp_best, tem_center)
+        tem_center = np.nanargmax(np.abs(temp_best))
+        time_template = np.concatenate((np.arange(tem_center) - tem_center, np.arange(len(temp_best) - tem_center))) * self.klc.dt_days
+
+        for i in range(len(folds_times)):
+            ax.plot(folds_times[i], folds_fluxes[i], 'o', markersize=0.6, color=(0.6, 0.6, 0.6))
+        ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                    markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                    ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                    xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                    label='binning, bin ' + ut.fstr(binwid) + ' days')
+        ax.plot(time_template, temp_best * self.best_stat / (len(self.summed_raw_stats)) ** 0.5, color='r', linewidth=1,
+                label='average per-transit snr')
+
+        if plot_twice:
+            for i in range(len(folds_times)):
+                ax.plot(folds_times[i] + self.best_per, folds_fluxes[i], 'o', markersize=0.6, color=(0.6, 0.6, 0.6))
+            ax.errorbar(bins_time[bins_counts > 0] + self.best_per, bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0], xerr=None,
+                        markersize=2.5, fmt='o', markerfacecolor='k', markeredgecolor='k',
+                        ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
+                        xlolims=False, xuplims=False, errorevery=1, capthick=None)
+            ax.plot(time_template + self.best_per, temp_best * self.best_stat / (len(self.summed_raw_stats)) ** 0.5, color='r', linewidth=1)
+        maxdev = np.nanmax(
+            [np.nanmax(np.abs(bins_flux)), np.nanmax([np.nanmax(np.abs(folds_fluxes[i])) for i in range(len(folds_fluxes))])])
+        ax.set_ylim(-maxdev * 1.01, maxdev * 1.01)  # make the limits symmetric
+        ax.set_xlim(-self.best_per / 2, self.best_per / 2)
+        if plot_twice:
+            ax.set_xlim(-self.best_per / 2, self.best_per / 2 + self.best_per)
+            ax.axvline(self.best_per / 2, color=(0.5, 0.5, 0.5), linewidth=1)
+        ax.set_xlabel('Time from the mid transit, days')
+        ax.set_title('Statistic [snr]', fontsize=14)
+        ax.legend(loc='upper right')
+        ax.set_title('KOI' + self.target_id + ' statistic snr fold, ' + str(len(self.summed_raw_stats)) + ' transits')
+
+    def plot_background(self, ax=None, figsize=(10, 5), fixed_limits=True, limits=None, plot_extrapolation=True,
+                        fontsize_legend=None):
         # PLOT BACKGROUND AND INJECTION-RECOVERY
         if self.prob_density_planet_not_noise is None:
             self.analyze_injections_and_background()
@@ -1956,8 +2204,8 @@ class KeplerTarget(object):
                      + str(np.round(10 ** (self.log10_best_period_edges[0]), 1)) + '-'
                      + str(np.round(10 ** (self.log10_best_period_edges[1]), 1))
                      + '] days, duration=' + str(self.templates_durations_hours[self.best_temp]) + ' hours', fontsize=13)
-        ax.set_xlabel('recovered MES [$SNR^2$]')
-        ax.set_ylabel('counts per effective one star \n per these periods and template')
+        ax.set_xlabel('Recovered MES [$SNR^2$]')
+        ax.set_ylabel('Counts per effective one star \n per period bin per template')
         ax.set_yscale('log')
         ax.set_xlim(min_plot_mes2, max_plot_mes2)
 
@@ -1974,7 +2222,10 @@ class KeplerTarget(object):
             bins_extra = np.linspace(bin_extra_min, bin_extra_max, 10)
             ax.plot(bins_extra, np.exp(bins_extra * coefs[1] + coefs[0]), '--',
                     label='extrapolation, FAP=' + f"{self.false_alarm_prob_trigger:.2e}")
-        ax.legend(loc='upper right')  # fontsize=11)
+        if fontsize_legend is not None:
+            ax.legend(loc='upper right', fontsize=fontsize_legend)
+        else:
+            ax.legend(loc='upper right')
 
     # def plot_all(self):
     #     """

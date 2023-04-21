@@ -257,7 +257,7 @@ def read_quarters_from_file(name, location='', dimension=2, to_array=True):
     return res
 
 
-def get_correct_tid_folder(target_id, location):
+def get_correct_tid_folder(target_id, location, allow_creation=True):
     """
     Looks around the given folder and finds or creates the correct directory,
     so that the structure is General_all_stars_folder/target_id[:4]/target_id[:4]
@@ -265,29 +265,41 @@ def get_correct_tid_folder(target_id, location):
     :type target_id: str, will be adjusted to len 9
     :param location:
     :type location:
+    :param allow_creation: Whether the function is allowed to create the needed folder if it does not exist
+    :type allow_creation: bool
     :return:
     :rtype:
     """
     target_id = str(target_id).rjust(9, '0')
 
-    if os.path.split(location)[-1] == target_id:
-        pass
-    elif os.path.split(location)[-1] == target_id[:4]:
-        if target_id not in os.listdir(location):
-            os.mkdir(os.path.join(location, target_id))
-        location = os.path.join(location, target_id)
+    if allow_creation:
+        if os.path.split(location)[-1] == target_id:
+            pass
+        elif os.path.split(location)[-1] == target_id[:4]:
+            if target_id not in os.listdir(location):
+                os.mkdir(os.path.join(location, target_id))
+            location = os.path.join(location, target_id)
+        else:
+            if target_id[:4] not in os.listdir(location):
+                os.mkdir(os.path.join(location, target_id[:4]))
+            location = os.path.join(location, target_id[:4])
+            if target_id not in os.listdir(location):
+                os.mkdir(os.path.join(location, target_id))
+            location = os.path.join(location, target_id)
+        return location
     else:
-        if target_id[:4] not in os.listdir(location):
-            os.mkdir(os.path.join(location, target_id[:4]))
-        location = os.path.join(location, target_id[:4])
-        if target_id not in os.listdir(location):
-            os.mkdir(os.path.join(location, target_id))
-        location = os.path.join(location, target_id)
-    return location
+        if os.path.split(location)[-1] == target_id:
+            pass
+        elif os.path.split(location)[-1] == target_id[:4]:
+            if target_id not in os.listdir(location):
+                raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
+        else:
+            if target_id[:4] not in os.listdir(location):
+                raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id[:4]))
 
 
 def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 * 3,
-                time_fold=400 * 0.0204336, dt=0.0204336, means=None, template=None):
+                time_fold=400 * 0.0204336, dt=0.0204336, means=None, template=None, return_std=False):
     if not hasattr(times[0], "__len__"):
         times = [times]
     if not hasattr(fluxes[0], "__len__"):
@@ -303,6 +315,7 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
 
     n_bins = int(np.ceil(time_fold / binwid))
     bins_flux = np.zeros(2 * (n_bins // 2) + 1)
+    bins_flux_2 = np.zeros(2 * (n_bins // 2) + 1)
     bins_counts = np.zeros(2 * (n_bins // 2) + 1)
     bins_time = np.arange(2 * (n_bins // 2) + 1) * binwid - time_fold / 2 + binwid / 2
     folds_times = []
@@ -310,6 +323,8 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
 
     tt0 = transit_times[0]
     for q in range(len(times)):
+        assert len(times[q]) == len(fluxes[q])
+        assert len(times[q]) == len(masks[q])
         mask1 = np.array(masks[q])
         time1 = (np.array(times[q]) - tt0 + time_fold / 2) % time_fold
         if means is not None:
@@ -323,33 +338,22 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
         for i in range(len(time1)):
             ind = int(time1[i] // binwid)
             bins_flux[ind] += flux1[i]
+            bins_flux_2[ind] += (flux1[i])**2
             bins_counts[ind] += 1
 
-    # for it in range(len(transit_times)):
-    #     tt = transit_times[it]
-    #     for q in range(len(times)):
-    #         if (tt >= np.nanmin(times[q])) and (tt <= np.nanmax(times[q])):
-    #             ind1 = np.argmin(np.abs(times[q] - tt))
-    #             mask1 = masks[q][max(0, ind1 - n_timesteps // 2):min(len(times[q]), ind1 + n_timesteps // 2 + 1)]
-    #             time1 = times[q][max(0, ind1 - n_timesteps // 2):min(len(times[q]), ind1 + n_timesteps // 2 + 1)] - tt + time_fold / 2
-    #             if means is not None:
-    #                 flux1 = (fluxes[q][max(0, ind1 - n_timesteps // 2):min(len(times[q]), ind1 + n_timesteps // 2 + 1)] + means[q]) / means[q]
-    #             else:
-    #                 flux1 = fluxes[q][max(0, ind1 - n_timesteps // 2):min(len(times[q]), ind1 + n_timesteps // 2 + 1)]
-    #             time1 = time1[mask1]
-    #             flux1 = flux1[mask1]
-    #             for i in range(len(time1)):
-    #                 ind = int(time1[i] // binwid)
-    #                 bins_flux[ind] += flux1[i]
-    #                 bins_counts[ind] += 1
-    #             folds_times.append(time1 - time_fold / 2)
-    #             folds_fluxes.append(flux1)
-    # bins_flux = bins_flux[bins_counts != 0]
-    # bins_time = bins_time[bins_counts != 0]
-    # bins_counts = bins_counts[bins_counts != 0]
-    bins_flux = bins_flux / bins_counts
+    # bins_flux = bins_flux / bins_counts
+    inds1 = bins_counts >= 1
+    bins_flux[inds1] = bins_flux[inds1] / bins_counts[inds1]
+    # estimate of the variance of the measurements:
+    bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
+    bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+    bins_std = bins_flux_2**0.5
+
     if template is None:
-        return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes
+        if return_std:
+            return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std
+        else:
+            return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes
     else:
         template_cropped = np.zeros(n_timesteps)
         half_len = min(len(template) // 2, n_timesteps // 2)
@@ -361,7 +365,10 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
         # time_template = np.arange(len(template_cropped)) * dt - time_fold / 2
         # template_cropped = template[len(template) // 2 - n_timesteps // 2:len(template) // 2 + n_timesteps // 2]
         # time_template = np.arange(len(template_cropped)) * dt - time_fold / 2
-        return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped
+        if return_std:
+            return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std
+        else:
+            return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped
 
 
 def get_histogram_extrapolation_coefs_in_log(counts, bins, min_counts_to_include=3, right_from_max_to_left=1.5, counts_are_log=False):
@@ -729,11 +736,15 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
     argsort = np.argsort(reference_times)
     times = [times[ind] for ind in argsort]
     target_pixels = [target_pixels[ind] for ind in argsort]
+    if return_aperture_masks:
+        aperture_masks = [aperture_masks[ind] for ind in argsort]
 
     if remove_zeroth_quarter:
         if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
             times = times[1:]
             target_pixels = target_pixels[1:]
+            if return_aperture_masks:
+                aperture_masks = aperture_masks[1:]
 
     if len(times) < 1:
         raise AssertionError('There is no data to process!')
@@ -743,6 +754,8 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
                 1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
             times = times[:-1]
             target_pixels = target_pixels[:-1]
+            if return_aperture_masks:
+                aperture_masks = aperture_masks[:-1]
     if not return_aperture_masks:
         return times, target_pixels
     else:
@@ -804,25 +817,20 @@ def get_sap_from_pixels(target_pixel_fluxes, bit_aperture_masks=None, custom_mas
 
     sap_fluxes = []
     for q in range(len(target_pixel_fluxes)):
-        mean_stamp = np.nanmean(target_pixel_fluxes[q], axis=0)
-        # s1, s2 = np.shape(target_pixel_fluxes[q][0])
-        msf = np.array(mean_stamp.flatten())
-        # msf[np.isnan(msf)] = 0
-
-        # getting the aperture mask flattened
         if custom_masks is not None:
-            summation_mask_f = custom_masks[q].flatten().astype(float)
+            summation_mask = custom_masks[q].flatten()
         elif bit_aperture_masks is not None:
-            summation_mask_f = bit_aperture_masks[q].flatten()
+            s1, s2 = np.shape(bit_aperture_masks[q])
+            summation_mask = bit_aperture_masks[q].flatten()
             # go to binary representation and take the first bit to understand
             # whether the pixel was in the optimal aperture
-            summation_mask_f = [utils.dec_to_bin(e, return_list=True) for e in summation_mask_f]
-            summation_mask_f = np.array([e[1] if len(e) > 1 else 0 for e in summation_mask_f]).astype(float)
+            summation_mask = [utils.dec_to_bin(e, return_list=True) for e in summation_mask]
+            summation_mask = np.array([e[1] if len(e) > 1 else 0 for e in summation_mask]).astype(float)
+            summation_mask = summation_mask.reshape((s1, s2))
         else:
-            summation_mask_f = np.ones(len(msf)).astype(float)
-        # masking the needed amount of bright pixels
+            summation_mask = np.ones(np.shape(target_pixel_fluxes[q][0]))
 
-        sap = np.nansum(target_pixel_fluxes[q] * summation_mask_f, axis=(1, 2))
+        sap = np.nansum(target_pixel_fluxes[q] * summation_mask, axis=(1, 2))
         sap[sap == 0] = np.nan  # THIS HAS FAILURE MODES
         sap_fluxes.append(sap)
     return sap_fluxes
@@ -869,6 +877,42 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
         star_part_sap_fluxes.append(star_part_sap_flux)
         bg_part_sap_fluxes.append(bg_part_sap_flux)
     return star_part_sap_fluxes, bg_part_sap_fluxes
+
+
+def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_denoms, templ_max, trends_stds=None):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (summed_trends > 0.) & (summed_raw_stats != 0.)
+        ampls = np.zeros(len(summed_raw_stats)) * np.nan
+        ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
+        normalized_ampls = np.zeros(len(summed_raw_stats)) * np.nan
+        normalized_ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
+        ppms = np.zeros(len(summed_raw_stats)) * np.nan
+        ppms_stds = np.zeros(len(summed_raw_stats)) * np.nan
+
+        ampls[not_missed_transit_mask] = np.abs(summed_raw_stats / summed_stat_denoms)[not_missed_transit_mask]
+        ampls_stds[not_missed_transit_mask] = (np.abs(1 / summed_stat_denoms)**0.5)[not_missed_transit_mask]
+        mean_trend = np.nanmean(summed_trends)
+        normalized_ampls[not_missed_transit_mask] = (ampls / summed_trends * mean_trend)[not_missed_transit_mask]
+        if trends_stds is not None:
+            mean_trend_std = (np.nanmean(trends_stds**2) + np.nanvar(summed_trends))**0.5
+            normalized_ampls_stds = (ampls_stds * mean_trend / summed_trends
+                                     + trends_stds * ampls * mean_trend / summed_trends**2
+                                     + mean_trend_std * ampls / summed_trends)
+        else:
+            mean_trend_std = (np.nanvar(summed_trends)) ** 0.5
+            normalized_ampls_stds = (ampls_stds * mean_trend / summed_trends
+                                     + mean_trend_std * ampls * mean_trend / summed_trends ** 2
+                                     + mean_trend_std * ampls / summed_trends)
+
+        ampl = (np.nanmean((ampls[not_missed_transit_mask] / summed_trends[not_missed_transit_mask]))
+                * np.nanmean(summed_trends[not_missed_transit_mask]))
+        ppms[not_missed_transit_mask] = (summed_raw_stats / summed_stat_denoms / summed_trends * templ_max * 1e6)[not_missed_transit_mask]
+        ppm = np.abs(np.nanmean(ppms[not_missed_transit_mask]))
+        ppms_stds[not_missed_transit_mask] = (
+                1 / summed_stat_denoms[not_missed_transit_mask] * np.var(summed_trends[not_missed_transit_mask])
+                / summed_trends[not_missed_transit_mask] ** 4 * templ_max ** 2 * 1e12)**0.5
+        return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
 
 
 def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time):
@@ -1002,6 +1046,25 @@ def get_centroid_series(target_pixel_fluxes):
 
 def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_times, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,
                               max_abs=True, time_mismatch_allowed=3):
+    """
+
+    :param signal_quarters:
+    :type signal_quarters:
+    :param time_quarters:
+    :type time_quarters:
+    :param summed_transit_times:
+    :type summed_transit_times:
+    :param nsig_outliers_0_pos:
+    :type nsig_outliers_0_pos:
+    :param nsig_outliers_0_neg:
+    :type nsig_outliers_0_neg:
+    :param max_abs:
+    :type max_abs:
+    :param time_mismatch_allowed: is specified in bins! (very stupid name then!)
+    :type time_mismatch_allowed: int
+    :return:
+    :rtype:
+    """
     # making the lightcurve out of this whatever data and doing search:
     klc = spip.KeplerLightCurve(target_id=None, get_data=False, times=time_quarters, fluxes=signal_quarters)
     klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
@@ -1066,3 +1129,86 @@ def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_tim
             std_stat_maxs.append(np.nan)
             max_templs.append(np.nan)
     return max_stats, std_stat_maxs, max_templs
+
+
+def make_bool_aperture_mask(bit_aperture_mask, bit=1):
+    """
+    Receives pixel quality mask with integers encoding quality flag in bits and
+    extracts one `bit` information from every integer making a bool mask from it.
+    Bit 0 is whether the pixel was taken,
+    Bit 1 is whether it was used in the optimal aperture.
+    :param bit_aperture_mask: pixel quality mask with integers encoding quality flag in bits
+    :type bit_aperture_mask: ndarray 2d of int
+    :param bit: number of bit which needs to be extracted from every integer
+    :type bit: int
+    :return: bool_mask
+    :rtype: ndarray 2d of bool
+    """
+    s1, s2 = np.shape(bit_aperture_mask)
+    bool_mask = [ut.dec_to_bin(e, return_list=True) for e in bit_aperture_mask.flatten()]
+    bool_mask = np.array([e[bit] if len(e) > 1 else 0 for e in bool_mask]).astype(bool)
+    bool_mask = bool_mask.reshape((s1, s2))
+    return bool_mask
+
+
+def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summed_transit_times, best_temp,
+                            bins_mismatch_allowed=2):
+    # Make optimal aperture masks by taking bin 1 value
+    aperture_masks = [make_bool_aperture_mask(msk, bit=1) for msk in bit_aperture_masks]
+
+    target_pixels_flt = []
+    aperture_masks_flt = []
+    for q in range(len(target_pixel_fluxes)):
+        sh0 = target_pixel_fluxes[q].shape
+        target_pixels_flt.append(target_pixel_fluxes[q].reshape((sh0[0], sh0[1] * sh0[2])))
+        aperture_masks_flt.append((aperture_masks[q].reshape((1, sh0[1] * sh0[2])))[0])
+
+    needed_quarters = []
+    times_needed_quarters = []
+    for q in range(len(times)):
+        tms_qrt = []
+        for ii, tt in enumerate(summed_transit_times):
+            if (tt >= times[q][0]) & (tt <= times[q][-1]):
+                tms_qrt.append(tt)
+        if len(tms_qrt) > 0:
+            needed_quarters.append(q)
+            times_needed_quarters.append(tms_qrt)
+
+    target_pixels_stats = []
+    target_pixels_means = []
+    target_pixels_ppms = []
+    target_pixels_stds_of_ppms = []
+    for iq, q in enumerate(needed_quarters):
+        target_pixels_stats_pxl = []
+        target_pixels_means_pxl = []
+        target_pixels_ppms_pxl = []
+        target_pixels_stds_of_ppms_pxl = []
+        for tpf in [target_pixels_flt[q][:, i] for i in range(len(target_pixels_flt[q][0])) if aperture_masks_flt[q][i]]:
+            lcp = spip.KeplerLightCurve(times=[times[q]], fluxes=[tpf], get_data=False)
+            lcp.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BECAUSE WE NEED TO INVERT FAIRLY.
+            lcp.condition_templates(template_ind=best_temp)
+            lcp.detect_single_transits(apply_score_correction=False, apply_veto=False)
+            for tt in times_needed_quarters[iq]:
+                ind_tr = np.nanargmin(np.abs(times[q] - tt))
+                std_stat = ut.outlier_free_std(lcp.statistics_snr[0][0], nsig=3, mask=lcp.masks[0], detrend=False, detr_len=128)
+                ti0 = max(0, ind_tr - bins_mismatch_allowed)
+                time_index = ti0 + np.nanargmax(np.abs(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]))
+                # -> allow the actual minimum to be a little shifted
+                stat_snr_here = np.nanmin(
+                    [np.nanmin(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]) for k in range(len(lcp.statistics_snr))])
+                stat_raw_here = np.nanmin(
+                    [np.nanmin(lcp.statistics_raw[0][0][ti0:ind_tr + bins_mismatch_allowed]) for k in range(len(lcp.statistics_raw))])
+                ppm_here = (stat_raw_here / lcp.stat_denoms[0][0] / lcp.trends_orig_fluxes[0][ind_tr] * np.max(
+                    np.abs(lcp.templates[0])) * 1e6)
+                std_of_ppm = (1 / lcp.stat_denoms[0][0] ** 0.5 * np.std(lcp.trends_orig_fluxes[0])
+                              / lcp.trends_orig_fluxes[0][ind_tr] ** 2 * np.max(np.abs(lcp.templates[0])) * 1e6)
+                target_pixels_stats_pxl.append(stat_snr_here)
+                target_pixels_means_pxl.append(lcp.means[0])
+                target_pixels_ppms_pxl.append(ppm_here)
+                target_pixels_stds_of_ppms_pxl.append(std_of_ppm)
+        target_pixels_stats.append(target_pixels_stats_pxl)
+        target_pixels_means.append(target_pixels_means_pxl)
+        target_pixels_ppms.append(target_pixels_ppms_pxl)
+        target_pixels_stds_of_ppms.append(target_pixels_stds_of_ppms_pxl)
+    return target_pixels_stats, target_pixels_means, target_pixels_ppms, target_pixels_stds_of_ppms
+

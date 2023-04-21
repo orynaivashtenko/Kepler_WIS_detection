@@ -101,7 +101,7 @@ plt.clf()
 
 fig = plt.figure(figsize=Figsize_folds)
 ax = fig.gca()
-targ.plot_folded_red_flux(ax=ax)
+targ.plot_folded_red_flux(ax=ax, plot_twice=True)
 ax.set_xlim(-targ.best_per/2, targ.best_per/2)
 pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_red.fig.pickle'), 'wb'))
 ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
@@ -121,7 +121,7 @@ plt.clf()
 
 fig = plt.figure(figsize=Figsize_folds)
 ax = fig.gca()
-targ.plot_folded_whitened_flux(ax=ax)
+targ.plot_folded_whitened_flux(ax=ax, plot_twice=True)
 ax.set_xlim(-targ.best_per/2, targ.best_per/2)
 pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_whitened.fig.pickle'), 'wb'))
 ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
@@ -137,6 +137,16 @@ pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_whitened_inv.fig.
 ax.set_xlim(-targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold,
             targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold)
 plt.savefig(os.path.join(targ.output_location, 'fold_whitened_inv.png'), bbox_inches='tight', dpi=320)
+plt.clf()
+
+fig = plt.figure(figsize=Figsize_folds)
+ax = fig.gca()
+targ.plot_folded_stat_snr(ax=ax, plot_twice=True)
+ax.set_xlim(-targ.best_per/2, targ.best_per/2)
+pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_stat_snr.fig.pickle'), 'wb'))
+ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
+            targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
+plt.savefig(os.path.join(targ.output_location, 'fold_stat_snr.png'), bbox_inches='tight', dpi=320)
 plt.clf()
 
 # # PLOT SES RAW INV

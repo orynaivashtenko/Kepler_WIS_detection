@@ -1627,7 +1627,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     :type maxdev_std: float
     :param maxdev_ampl: Relative (in units of maximal value of fitted signal) maximum deviation
         for the maximum deviation test
-    :type maxdev_ampl: float
+    :type maxdev_ampl: float or None
     :param zero_ends_len_abs: Length of zeros to take at the end of the template from each side in addition
         to the non-zero region of the template. Is needed to make sure that the shape
         of the templite is intdeed fulfilled. Is dominant over zero_end_len_rel
@@ -2023,10 +2023,15 @@ def score_correction(scores_i, return_function=False, negative_values=False):
 
 def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=None, units_of_snr=True):
     values = np.array(values)
+
     if variances is None:
         variances = np.ones(len(values))
     else:
         variances = np.array(variances)
+
+    variances = variances[~np.isnan(values)]
+    values = values[~np.isnan(values)]
+
     if A_all is None:
         A_all = np.sum(values / variances) / np.sum(1 / variances)
     if indmax is None:

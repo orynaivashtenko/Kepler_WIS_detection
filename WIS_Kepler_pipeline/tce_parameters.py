@@ -9,6 +9,7 @@ Target_pixels_location = pp.Target_pixels_location
 Summary_tce_txt_filename_postfix = 'tce_summary.txt'
 Dict_tce_txt_filename_postfix = 'tce_class_dict.txt'
 Pickle_tce_small_attributes_filename_postfix = 'tce_class_small_attributes.pickle'
+Pickle_tce_all_attributes_filename_postfix = 'tce_class_all_attributes.pickle'
 
 # Veto target pixels parameters:
 Part_of_cumsum_2_targ_pix = 0.85
