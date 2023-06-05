@@ -880,6 +880,22 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
 
 
 def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_denoms, templ_max, trends_stds=None):
+    """
+
+    :param summed_raw_stats:
+    :type summed_raw_stats:
+    :param summed_trends:
+    :type summed_trends:
+    :param summed_stat_denoms:
+    :type summed_stat_denoms:
+    :param templ_max: depth of the template that was normalized to one by the L2 norm
+    :type templ_max:
+    :param trends_stds:
+    :type trends_stds:
+    :return:
+    :rtype:
+    """
+    templ_max = np.abs(templ_max)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=RuntimeWarning)
         not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (summed_trends > 0.) & (summed_raw_stats != 0.)
@@ -909,9 +925,9 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_
                 * np.nanmean(summed_trends[not_missed_transit_mask]))
         ppms[not_missed_transit_mask] = (summed_raw_stats / summed_stat_denoms / summed_trends * templ_max * 1e6)[not_missed_transit_mask]
         ppm = np.abs(np.nanmean(ppms[not_missed_transit_mask]))
-        ppms_stds[not_missed_transit_mask] = (
-                1 / summed_stat_denoms[not_missed_transit_mask] * np.var(summed_trends[not_missed_transit_mask])
-                / summed_trends[not_missed_transit_mask] ** 4 * templ_max ** 2 * 1e12)**0.5
+        ppms_stds[not_missed_transit_mask] = ((
+                1 / summed_stat_denoms * np.var(summed_trends[not_missed_transit_mask])
+                / summed_trends ** 4 * templ_max ** 2 * 1e12)**0.5)[not_missed_transit_mask]
         return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
 
 
@@ -1042,6 +1058,76 @@ def get_centroid_series(target_pixel_fluxes):
         cents_y = cents_y / denom
         centroids.append(np.vstack((cents_x, cents_y)))
     return centroids
+
+
+def get_target_pixel_sky_coords_fun(target_id, data_location, return_aperture_masks=True, return_sky_coords=False,
+                                    remove_zeroth_quarter=True, remove_quarter_17=True):
+    from lightkurve import targetpixelfile as tpf
+    target_id = str(target_id).rjust(9, "0")
+    data_folder = get_correct_tid_folder(target_id=target_id, location=data_location)
+
+    if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
+        download_target_pixel_files(target_id, data_folder)
+
+    tp_fits_filenames = [ff for ff in os.listdir(data_folder) if '.fits' in ff]
+    assert len(tp_fits_filenames) >= 1, 'There are no files!'
+
+    times = []
+    target_pixels = []
+    aperture_masks = []
+    sky_coords = []
+    for tp_fits_filename in tp_fits_filenames:
+        tp_fits_file = fits.open(os.path.join(data_folder, tp_fits_filename))
+        time = tp_fits_file[1].data['TIME']
+        target_pix = tp_fits_file[1].data['FLUX']
+        if return_aperture_masks:
+            aperture_masks.append(tp_fits_file[2].data)
+        tp_fits_file.close()
+        times.append(time)
+        target_pixels.append(target_pix)
+        if return_sky_coords:
+            tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
+            crds = tpf1.get_coordinates()
+            sky_coords.append(crds)
+
+    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
+    argsort = np.argsort(reference_times)
+    times = [times[ind] for ind in argsort]
+    target_pixels = [target_pixels[ind] for ind in argsort]
+    if return_aperture_masks:
+        aperture_masks = [aperture_masks[ind] for ind in argsort]
+    if return_sky_coords:
+        sky_coords = [sky_coords[ind] for ind in argsort]
+
+    if remove_zeroth_quarter:
+        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
+            times = times[1:]
+            target_pixels = target_pixels[1:]
+            if return_aperture_masks:
+                aperture_masks = aperture_masks[1:]
+            if return_sky_coords:
+                sky_coords = sky_coords[1:]
+
+    if len(times) < 1:
+        raise AssertionError('There is no data to process!')
+
+    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
+        if ((1570 >= np.nanmin(times[-1])) & (
+                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
+            times = times[:-1]
+            target_pixels = target_pixels[:-1]
+            if return_aperture_masks:
+                aperture_masks = aperture_masks[:-1]
+            if return_sky_coords:
+                sky_coords = sky_coords[:-1]
+    if (not return_aperture_masks) and (not return_sky_coords):
+        return times, target_pixels
+    elif return_aperture_masks and (not return_sky_coords):
+        return times, target_pixels, aperture_masks
+    elif (not return_aperture_masks) and return_sky_coords:
+        return times, target_pixels, sky_coords
+    else:
+        return times, target_pixels, sky_coords, aperture_masks
 
 
 def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_times, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,

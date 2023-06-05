@@ -2,8 +2,7 @@
 
 # TODO: change the names in such a way that target id is not the last, because it does not give any understanding what
 #  is running in the jobname
-# TODO: in the score correction, we use two-sided distribution, although if we use a one-sided (i.e. take the abs of all the statistics),
-# we get 5% more snr
+
 from sys import getsizeof
 from astropy.io import fits
 import pickle
@@ -155,31 +154,27 @@ class KeplerTarget(object):
         self.best_stat = None
         self.best_per = None
         self.best_temp = None
-        self.best_phase = None
+        # self.best_phase = None
         self.best_first_transit_time = None
-        self.best_ppm = None  # average amplitude of the transit, coefficient that multiplies the best template
-        self.best_ampl = None  # average depth of the transit in parts per million
         self.summed_transit_times = None  # times of values that were summed to produce the best trigger
         self.summed_raw_stats = None  # statistics in units not of snr that were summed to produce the best trigger
         self.summed_trends = None
         self.summed_vars = None
-        self.ampls = None  # amplitudes of different transits
-        self.ppms = None  # depths of different transits in parts per million
 
         self.best_stat_inv = None
         self.best_per_inv = None
         self.best_temp_inv = None
-        self.best_phase_inv = None
+        # self.best_phase_inv = None
         self.best_first_transit_time_inv = None
-        self.best_ppm_inv = None
-        self.best_ampl_inv = None
+        # self.best_ppm_inv = None
+        # self.best_ampl_inv = None
         self.summed_transit_times_inv = None
         self.summed_raw_stats_inv = None
         self.summed_trends_inv = None
         self.summed_vars_inv = None
         self.summed_stat_denoms = None
-        self.ampls_inv = None
-        self.ppms_inv = None
+        # self.ampls_inv = None
+        # self.ppms_inv = None
 
         self.is_threshold_crossing = False
         self.per_wing_injection_and_slides = None
@@ -231,18 +226,31 @@ class KeplerTarget(object):
 
         # Elements of estimations:
         # Non-score-corrected values:
-        self.ncor_raw_stats = None
-        self.ncor_stat_denoms = None
-        self.ncor_trends = None
-        self.ncor_ampls = None
-        self.ncor_ampls_stds = None
-        self.ncor_ampl = None
-        self.ncor_norm_ampls = None
-        self.ncor_norm_ampls_stds = None
-        self.ncor_ppms = None
-        self.ncor_ppm = None
-        self.ncor_ppms_stds = None
+        self.best_raw_stats = None
+        self.best_stat_denoms = None
+        self.best_trends = None
+        self.best_ampls = None  # amplitudes of different transits
+        self.best_ampls_stds = None
+        self.best_ampl = None  # average depth of the transit in parts per million
+        self.best_norm_ampls = None
+        self.best_norm_ampls_stds = None
+        self.best_ppms = None  # depths of different transits in parts per million
+        self.best_ppm = None  # average amplitude of the transit, coefficient that multiplies the best template
+        self.best_ppms_stds = None
         self.best_temp_depth = None
+
+        self.best_raw_stats_inv = None
+        self.best_stat_denoms_inv = None
+        self.best_trends_inv = None
+        self.best_ampls_inv = None  # amplitudes of different transits
+        self.best_ampls_stds_inv = None
+        self.best_ampl_inv = None  # average depth of the transit in parts per million
+        self.best_norm_ampls_inv = None
+        self.best_norm_ampls_stds_inv = None
+        self.best_ppms_inv = None  # depths of different transits in parts per million
+        self.best_ppm_inv = None  # average amplitude of the transit, coefficient that multiplies the best template
+        self.best_ppms_stds_inv = None
+        self.best_temp_depth_inv = None
 
         # Things with freedom for ttvs and templates, probably useless:
         self.optim_raw_stats = None
@@ -362,7 +370,7 @@ class KeplerTarget(object):
                 except Exception as e:
                     self.failures += key + ' error ' + str(e) + '; '
                     self.__dict__[key] = None
-            # todo: add fields with units and descriptions
+            # todo: add fields with units and descriptions. astropy.table can be helpful with that
         gaia_file.close()
 
     def get_fields_from_info_file(self, gaia_file_path=None):
@@ -390,22 +398,32 @@ class KeplerTarget(object):
         if self.target_id in koi_info_dict['kepid']:
             self.is_koi = True
             self.koi_dict = {}
-            ind = koi_info_dict['kepid'].index(self.target_id)
-            # TODO: YOU NEED TO FIND ALL THE PLANETS AND NOT ONLY ONE!!!!! SYSTEMS ARE MULTI-PLANETARY!!!!!!
-            for key in koi_info_dict:
-                if key != 'kepid':
-                    self.koi_dict[key] = koi_info_dict[key][ind]
+            # ind = koi_info_dict['kepid'].index(self.target_id)
+            inds = np.where(np.array(koi_info_dict['kepid']) == self.target_id)[0]
+            for ind in inds:
+                for key in koi_info_dict:
+                    if key != 'kepid':
+                        if key not in self.koi_dict:
+                            self.koi_dict[key] = []
+                        self.koi_dict[key].append(koi_info_dict[key][ind])
 
-            self.ttv_dict = {}
             with open(ttv_dict_file, 'rb') as ttv_catalog_dict_file:
                 ttv_info_dict = pickle.load(ttv_catalog_dict_file)
-            inds = np.where(np.array(ttv_info_dict['kepid']) == self.target_id)[0]
-            for key in ttv_info_dict:
-                if key != 'kepid' and key != 'KOI':
-                    self.ttv_dict[key] = np.array(ttv_info_dict[key])[inds]
+            self.ttv_dict = {}
+            for koi_name in self.koi_dict['kepoi_name']:
+                koi_inds = np.where((np.array(ttv_info_dict['KOI']) == str(float(koi_name[1:])))
+                                    & (np.array(ttv_info_dict['kepid']) == self.target_id))[0]
+                if len(koi_inds) > 0:
+                    for key in ttv_info_dict:
+                        if key != 'kepid':
+                            if key not in self.ttv_dict:
+                                self.ttv_dict[key] = []
+                            self.ttv_dict[key].append(np.array(ttv_info_dict[key])[koi_inds])
             # Units of Kepler times : unit = 'BJD - 2454833'
             # Units in the TTV catalog :  BJD-2454900
-            self.ttv_dict['T'] = self.ttv_dict['T'].astype(float) + 2454900 - 2454833
+            if 'T' in self.ttv_dict.keys():  # it may be not there if the object is koi but not ttv
+                for j in range(len(self.ttv_dict['T'])):
+                    self.ttv_dict['T'][j] = self.ttv_dict['T'][j].astype(float) + 2454900 - 2454833
 
     def get_villanova_fields(self, villanova_dict_file=None):
         """
@@ -448,7 +466,7 @@ class KeplerTarget(object):
     # noinspection DuplicatedCode
     def print_dict_file(self, output_location=None, dict_txt_filename_postfix=Dict_target_txt_filename_postfix):
         """
-
+        Prints only small attributes
         :param output_location:
         :type output_location:
         :param dict_txt_filename_postfix:
@@ -465,7 +483,7 @@ class KeplerTarget(object):
             if isinstance(value, (str, float, int, np.float, np.integer, np.ndarray, list, dict)):
                 ok_to_print = True
                 if isinstance(value, (str, float, int, np.float, np.integer, np.ndarray, list, dict)):
-                    if hasattr(value, '__len__'):
+                    if hasattr(value, '__len__') and len(value) > 0:
                         if isinstance(value, dict) and hasattr(value[list(value.keys())[0]], '__len__'):
                             ok_to_print = False  # TODO: maybe make the selection process look at all the dict keys
                         elif ((not isinstance(value, dict)) and (not isinstance(value, str))
@@ -492,19 +510,17 @@ class KeplerTarget(object):
                 print('best_stat', ':', self.best_stat, file=fil1)
                 print('best_per', ':', self.best_per, file=fil1)
                 print('best_temp', ':', self.best_temp, file=fil1)
-                print('best_phase', ':', self.best_phase, file=fil1)
                 print('best_first_transit_time', ':', self.best_first_transit_time, file=fil1)
-                print('best_ampl', ':', self.best_ampl, file=fil1)
-                print('best_ppm', ':', self.best_ppm, file=fil1)
+                # if self.best_ppm is not None:
+                #     print('best_ppm', ':', self.best_ppm, file=fil1)
                 print('', file=fil1)
 
                 print('best_stat_inv', ':', self.best_stat_inv, file=fil1)
                 print('best_per_inv', ':', self.best_per_inv, file=fil1)
                 print('best_temp_inv', ':', self.best_temp_inv, file=fil1)
-                print('best_phase_inv', ':', self.best_phase_inv, file=fil1)
                 print('best_first_transit_time_inv', ':', self.best_first_transit_time_inv, file=fil1)
-                print('best_ampl_inv', ':', self.best_ampl_inv, file=fil1)
-                print('best_ppm_inv', ':', self.best_ppm_inv, file=fil1)
+                # if self.best_ppm_inv is not None:
+                #     print('best_ppm_inv', ':', self.best_ppm_inv, file=fil1)
                 print('', file=fil1)
         else:
             for attr in self.star_attributes:
@@ -514,19 +530,17 @@ class KeplerTarget(object):
             print('best_stat', ':', self.best_stat)
             print('best_per', ':', self.best_per)
             print('best_temp', ':', self.best_temp)
-            print('best_phase', ':', self.best_phase)
             print('best_first_transit_time', ':', self.best_first_transit_time)
-            print('best_ampl', ':', self.best_ampl)
-            print('best_ppm', ':', self.best_ppm)
+            # if self.best_ppm is not None:
+            #     print('best_ppm', ':', self.best_ppm)
             print('')
 
             print('best_stat_inv', ':', self.best_stat_inv)
             print('best_per_inv', ':', self.best_per_inv)
             print('best_temp_inv', ':', self.best_temp_inv)
-            print('best_phase_inv', ':', self.best_phase_inv)
             print('best_first_transit_time_inv', ':', self.best_first_transit_time_inv)
-            print('best_ampl_inv', ':', self.best_ampl_inv)
-            print('best_ppm_inv', ':', self.best_ppm_inv)
+            # if self.best_ppm_inv is not None:
+            #     print('best_ppm_inv', ':', self.best_ppm_inv)
             print('')
 
     def clean_output_directory(self):
@@ -534,15 +548,18 @@ class KeplerTarget(object):
             os.remove(os.path.join(self.output_location, ff))
 
     def initialize_kepler_light_curve(self, scramble=False, std_time_scrambling=spip.Std_time_scrambling,
-                                         output_location=spip.Default_output_location,
-                                         remove_zeroth_quarter=True, remove_quarter_17=True,
-                                         use_rfft=spip.Use_rfft):
-        self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
-                                         output_location=self.output_location,
+                                      data_location=None, output_location=None,
+                                      remove_zeroth_quarter=True, remove_quarter_17=True,
+                                      use_rfft=spip.Use_rfft):
+        if data_location is None:
+            data_location = self.data_location
+        if output_location is None:
+            output_location = self.output_location
+        self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=data_location,
+                                         output_location=output_location,
                                          scramble=scramble, std_time_scrambling=std_time_scrambling,
-                                         remove_zeroth_quarter=True, remove_quarter_17=True,
-                                         use_rfft=use_rfft
-                                         )  # Q17 is removed
+                                         remove_zeroth_quarter=remove_zeroth_quarter, remove_quarter_17=remove_quarter_17,  # Q17 is removed
+                                         use_rfft=use_rfft)
         self.number_of_quarters = len(self.klc.quarters)
 
     def bad_fft_check(self, amp_max_bad_fft=300, dif_max_bad_fft=11):
@@ -569,20 +586,40 @@ class KeplerTarget(object):
             self.is_bad_fft = True
 
     def mask_koi_planet(self, modify_self_klc=True, return_durations_transit_times=False):
-        # TODO: THIS ONLY MASKS ONE PLANET!!!!!! THERE ARE MANY!!!!! WHAT DID YOU THINK ABOUT?????
+        # TODO: ATTENTION: we are also masking candidates!!!!!!! not only confirmed and FP!!!!!
         # TODO why do we mask the planet, and not subtract? We could also subtract villanova ephemeris.
+        # TODO: include occultation (secondary transit)
         assert self.is_koi, 'The target is not KOI, so the KOI planet cannot be masked!'
         # Take all the transit times with TTV, take transit duration, take fractional TDV and mask.
-        transit_times = np.array(self.ttv_dict['T'], dtype=float)  # this is including TTVs
-        transit_durations = np.ones(len(transit_times)) * float(
-            self.koi_dict['koi_duration']) / 24  # we need it in days, and it was in hours
-        transit_durations = transit_durations * (1. + np.array(self.ttv_dict['TDV'], dtype=float))  # add TDVs
-        # TODO: some TDVs are Nan, and this does not work...
-        # TODO: include occultation (secondary transit)
-        if self.klc is not None and modify_self_klc:
-            self.klc.mask_ephemeris(durations=transit_durations, transit_times=transit_times)
+        durations_and_times = []
+        for i, koi_name in enumerate(self.koi_dict['kepoi_name']):
+            transit_durations = None  # just initialization, no meaning
+            transit_times = None
+            was_in_ttv = False
+            if self.ttv_dict is not None and 'T' in self.ttv_dict and 'KOI' in self.ttv_dict:
+                for j in range(len(self.ttv_dict['KOI'])):
+                    if self.ttv_dict['KOI'][j][0] == str(float(koi_name[1:])):
+                        transit_times = np.array(self.ttv_dict['T'][j], dtype=float)  # this is including TTVs
+                        transit_durations = np.ones(len(transit_times)) * float(
+                            self.koi_dict['koi_duration'][i]) / 24  # we need it in days, and it was in hours
+                        tdv_array = np.array(self.ttv_dict['TDV'][j], dtype=float)
+                        tdv_array[np.isnan(tdv_array)] = 0.
+                        transit_durations = transit_durations * (1. + tdv_array)  # add TDVs
+                        was_in_ttv = True
+                        break
+            if not was_in_ttv:
+                transit_times = [float(self.koi_dict['koi_time0bk'][i]) + float(self.koi_dict['koi_period'][i]) * nn
+                                 for nn in range(int(self.koi_dict['koi_num_transits'][i]))]
+                # TODO: -> invalid literal for int() with base 10: ''
+                transit_durations = np.ones(len(transit_times)) * float(
+                    self.koi_dict['koi_duration'][i]) / 24  # we need it in days, and it was in hours
+
+            if self.klc is not None and modify_self_klc:
+                self.klc.mask_ephemeris(durations=transit_durations, transit_times=transit_times)
+            if return_durations_transit_times:
+                durations_and_times.append([transit_durations, transit_times])
         if return_durations_transit_times:
-            return transit_durations, transit_times
+            return durations_and_times
 
     def mask_villanova_eclipses(self):
         """
@@ -620,7 +657,7 @@ class KeplerTarget(object):
                                          output_location=self.output_location)  # Q17 is removed
         self.bad_fft_check()  # Made on orig_fluxes
         if self.is_koi and mask_koi_planet:
-            self.mask_koi_planet()
+            self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False)
         self.klc.condition_data()  # In outlier mask, positive and negative nsig_outliers are the same because we run inversion after.
         self.was_notched = self.klc.was_notched
         self.klc.condition_templates()
@@ -633,13 +670,15 @@ class KeplerTarget(object):
         t2 = time.time()
         self.conditioning_ses_time = t2 - t1
 
-    def run_periodicity_search(self, p_min=None, p_max=None,
+    def run_periodicity_search(self, p_min=None, p_max=None, duty_cycle=spip.Duty_cycle,
                                p_chunks=None, mes_candidate=None,
                                conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
                                best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix,
-                               best_inverted_periodic_scores_filename_postfix=Best_inverted_periodic_scores_filename_postfix):
+                               best_inverted_periodic_scores_filename_postfix=Best_inverted_periodic_scores_filename_postfix,
+                               best_periodic_scores_filename=None,
+                               best_inverted_periodic_scores_filename=None
+                               ):
         """
-
         :param conditioned_data_filename_postfix:
         :type conditioned_data_filename_postfix:
         :param best_periodic_scores_filename_postfix:
@@ -650,10 +689,16 @@ class KeplerTarget(object):
         :type p_min:
         :param p_max:
         :type p_max:
+        :param duty_cycle:
+        :type duty_cycle:
         :param p_chunks:
         :type p_chunks:
         :param mes_candidate:
         :type mes_candidate:
+        :param best_periodic_scores_filename:
+        :type best_periodic_scores_filename:
+        :param best_inverted_periodic_scores_filename:
+        :type best_inverted_periodic_scores_filename:
         :return:
         :rtype:
         """
@@ -689,16 +734,24 @@ class KeplerTarget(object):
         best_candidates_concat = []
         best_inv_candidates_concat = []
         for pp in self.per_edges:
-            self.klc.sum_periods(Pmin=pp[0], Pmax=pp[1])
-            self.klc.veto_mes()
+            self.klc.sum_periods(pmin=pp[0], pmax=pp[1], duty_cycle=duty_cycle)
+            # self.klc.veto_mes()  # we are not doing it at this stage
             self.klc.save_best_candidates(save_to_file=False)
             best_candidates_concat.append(np.array(self.klc.best_periodic_scores_data, dtype=object))
             best_inv_candidates_concat.append(np.array(self.klc.best_inverted_periodic_scores_data, dtype=object))
             self.klc.delete_mes()
-        np.save(os.path.join(self.output_location, self.target_id + '_' + best_periodic_scores_filename_postfix),
-                np.array(best_candidates_concat, dtype=object), allow_pickle=True)
-        np.save(os.path.join(self.output_location, self.target_id + '_' + best_inverted_periodic_scores_filename_postfix),
-                np.array(best_inv_candidates_concat, dtype=object), allow_pickle=True)
+        if best_periodic_scores_filename is not None:
+            np.save(best_periodic_scores_filename,
+                    np.array(best_candidates_concat, dtype=object), allow_pickle=True)
+        else:
+            np.save(os.path.join(self.output_location, self.target_id + '_' + best_periodic_scores_filename_postfix),
+                    np.array(best_candidates_concat, dtype=object), allow_pickle=True)
+        if best_inverted_periodic_scores_filename is not None:
+            np.save(best_inverted_periodic_scores_filename,
+                    np.array(best_inv_candidates_concat, dtype=object), allow_pickle=True)
+        else:
+            np.save(os.path.join(self.output_location, self.target_id + '_' + best_inverted_periodic_scores_filename_postfix),
+                    np.array(best_inv_candidates_concat, dtype=object), allow_pickle=True)
 
         t2 = time.time()
         self.periodicity_search_time = t2 - t1
@@ -706,51 +759,40 @@ class KeplerTarget(object):
         # Check for threshold crossings, and if found, then launch time slides
         self.best_stat = 0
         for best_candidates in best_candidates_concat:  # if there is a big MES score, further processing
-            argm = np.argmin(best_candidates[4])
-            ti, i = argm // len(best_candidates[4][0]), argm % len(best_candidates[4][0])
+            argm = np.argmin(best_candidates[spip.Search_results_index_stat])
+            ti, i = argm // len(best_candidates[spip.Search_results_index_stat][0]
+                                ), argm % len(best_candidates[spip.Search_results_index_stat][0])
             # the structure is (25,10), where 10 is just 10 best per each template
-            smin = best_candidates[4][ti][i]  # minimal statistic
+            smin = best_candidates[spip.Search_results_index_stat][ti][i]  # minimal statistic
+
             if smin < self.best_stat:
                 self.best_stat = smin
-                self.best_per = best_candidates[1][ti][i]
+                self.best_per = best_candidates[spip.Search_results_index_per][ti][i]
                 self.best_temp = ti
-                self.best_phase = best_candidates[3][ti][i]
-                self.best_first_transit_time = best_candidates[5][ti][i][0]
-                self.summed_transit_times = best_candidates[5][ti][i]
-                self.summed_raw_stats = np.array(best_candidates[6][ti][i])
-                self.summed_trends = np.array(best_candidates[7][ti][i])
-                self.summed_vars = np.array(best_candidates[8][ti][i])
+                self.best_first_transit_time = best_candidates[spip.Search_results_index_sum_tr_times][ti][i][0]
+                self.summed_transit_times = best_candidates[spip.Search_results_index_sum_tr_times][ti][i]
+                self.summed_raw_stats = np.array(best_candidates[spip.Search_results_index_sum_stats][ti][i])
+                self.summed_trends = np.array(best_candidates[spip.Search_results_index_sum_trends][ti][i])
+                self.summed_vars = np.array(best_candidates[spip.Search_results_index_sum_vars][ti][i])
                 self.summed_vars[self.summed_vars == 0] = np.nan
-                # TODO !!!!!!!!!!!!!!!! VERY IMPORTANT!
-                # The following is not correct because this should be not the actual variance, but the "incorrect" computed denominator
-                self.ampls = self.summed_raw_stats / self.summed_vars
-                self.ppms = (self.summed_raw_stats / self.summed_vars / self.summed_trends
-                             * np.max(np.abs(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]])) * 1e6)
-                self.best_ppm = np.abs(np.nanmean(self.ppms))
-                self.best_ampl = np.abs(np.nanmean(self.ampls / self.summed_trends) * np.nanmean(self.summed_trends))
 
         self.best_stat_inv = 0
         for best_candidates in best_inv_candidates_concat:  # if there is a big MES score, further processing
-            argm = np.argmax(best_candidates[4])  # here, we took inverted best scores collection, they are positive
-            ti, i = argm // len(best_candidates[4][0]), argm % len(best_candidates[4][0])
+            argm = np.argmax(best_candidates[spip.Search_results_index_stat])  # we took inverted best scores collection, they are positive
+            ti, i = argm // len(best_candidates[spip.Search_results_index_stat][0]
+                                ), argm % len(best_candidates[spip.Search_results_index_stat][0])
             # the structure is (25,10), where 10 is just 10 best per each template
-            smax = best_candidates[4][ti][i]  # maximal statistic
+            smax = best_candidates[spip.Search_results_index_stat][ti][i]  # maximal statistic
             if smax > self.best_stat_inv:
                 self.best_stat_inv = smax
-                self.best_per_inv = best_candidates[1][ti][i]
+                self.best_per_inv = best_candidates[spip.Search_results_index_per][ti][i]
                 self.best_temp_inv = ti
-                self.best_phase_inv = best_candidates[3][ti][i]
-                self.best_first_transit_time_inv = best_candidates[5][ti][i][0]
-                self.summed_transit_times_inv = best_candidates[5][ti][i]
-                self.summed_raw_stats_inv = np.array(best_candidates[6][ti][i])
-                self.summed_trends_inv = np.array(best_candidates[7][ti][i])
-                self.summed_vars_inv = np.array(best_candidates[8][ti][i])
+                self.best_first_transit_time_inv = best_candidates[spip.Search_results_index_sum_tr_times][ti][i][0]
+                self.summed_transit_times_inv = best_candidates[spip.Search_results_index_sum_tr_times][ti][i]
+                self.summed_raw_stats_inv = np.array(best_candidates[spip.Search_results_index_sum_stats][ti][i])
+                self.summed_trends_inv = np.array(best_candidates[spip.Search_results_index_sum_trends][ti][i])
+                self.summed_vars_inv = np.array(best_candidates[spip.Search_results_index_sum_vars][ti][i])
                 self.summed_vars_inv[self.summed_vars_inv == 0] = np.nan
-                # TODO: THIS IS INCORRECT:!!! the denominator should be different!
-                self.ampls_inv = self.summed_raw_stats_inv / self.summed_vars_inv
-                self.ppms_inv = self.summed_raw_stats_inv / self.summed_vars_inv / self.summed_trends_inv * 1e6
-                self.best_ppm_inv = np.abs(np.nanmean(self.ppms_inv))
-                self.best_ampl_inv = np.abs(np.nanmean(self.ampls_inv))
 
     # TODO: add parsing parameters!
     def run_main_search(self, p_min=None, p_max=None,
@@ -820,15 +862,17 @@ class KeplerTarget(object):
             self.is_threshold_crossing = True
             if save_to_threshold_crossing_list:
                 with open(threshold_crossing_list_file, 'a') as fil1:  # will save here these good targets
-                    print(self.target_id, self.best_stat, self.best_per, self.best_temp, self.best_phase,
-                          self.best_first_transit_time, self.best_ampl, self.best_ppm, sep=' ', end='\n', file=fil1)
+                    print(self.target_id, self.best_stat, self.best_per, self.best_temp,  # self.best_phase,
+                          self.best_first_transit_time,  # self.best_ampl, self.best_ppm,
+                          sep=' ', end='\n', file=fil1)
 
         if self.best_stat_inv ** 2 > self.mes_candidate ** 2:
             self.is_threshold_crossing = True
             if save_to_threshold_crossing_list:
                 with open(threshold_inv_crossing_list_file, 'a') as fil1:  # will save here these good targets
-                    print(self.target_id, self.best_stat_inv, self.best_per_inv, self.best_temp_inv, self.best_phase_inv,
-                          self.best_first_transit_time_inv, self.best_ampl_inv, self.best_ppm_inv, sep=' ', end='\n', file=fil1)
+                    print(self.target_id, self.best_stat_inv, self.best_per_inv, self.best_temp_inv,  # self.best_phase_inv,
+                          self.best_first_transit_time_inv,  # self.best_ampl_inv, self.best_ppm_inv,
+                          sep=' ', end='\n', file=fil1)
 
         if (not self.is_threshold_crossing) and clean_dir_if_not_threshold_crossing:
             # delete conditioned data because we have no space on the disk!
@@ -868,7 +912,7 @@ class KeplerTarget(object):
             best_inv_candidates_concat = []
             for pp in self.per_edges:
                 self.klc.sum_periods(pmin=pp[0], pmax=pp[1])
-                self.klc.veto_mes()
+                # self.klc.veto_mes()  # we are not doing it at this stage
                 self.klc.save_best_candidates(save_to_file=False)
                 best_candidates_concat.append(np.array(self.klc.best_periodic_scores_data, dtype=object))
                 best_inv_candidates_concat.append(np.array(self.klc.best_inverted_periodic_scores_data, dtype=object))
@@ -951,14 +995,14 @@ class KeplerTarget(object):
             klc.connect_quarters()
             klc.interleave_shifts()
             klc.sum_periods(pmin=p_min, pmax=p_max)
-            klc.veto_mes()
+            # klc.veto_mes()  # we are not doing it at this stage
             klc.save_best_candidates(n_per_temp=4, save_to_file=False)
-            mess = mess + list(klc.best_periodic_scores_data[4][0])
-            pers = pers + list(klc.best_periodic_scores_data[1][0])
-            first_times = first_times + list(klc.best_periodic_scores_data[5][0][0])
-            mess_inv = mess_inv + list(klc.best_inverted_periodic_scores_data[4][0])
-            pers_inv = pers_inv + list(klc.best_inverted_periodic_scores_data[1][0])
-            first_times_inv = first_times_inv + list(klc.best_inverted_periodic_scores_data[5][0][0])
+            mess = mess + list(klc.best_periodic_scores_data[spip.Search_results_index_stat][0])
+            pers = pers + list(klc.best_periodic_scores_data[spip.Search_results_index_per][0])
+            first_times = first_times + list(klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][0])
+            mess_inv = mess_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_stat][0])
+            pers_inv = pers_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_per][0])
+            first_times_inv = first_times_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][0])
             klc.delete_mes()
 
         fls = os.listdir(self.output_location)
@@ -1053,7 +1097,7 @@ class KeplerTarget(object):
         THE NON-TRANSITING ONES, OR SOMETHING ELSE.............OR IT IS OKAY THAT THEY ARE DISCRETE
         :return:
         """
-        # TODO: generating this for only one best template is not correct if the template prior is not flat!
+        # TODO: generating this for only one best template is not correct if the template prior is not flat! (what??)
         if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
             self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
             m_1_3_r_s = 1.
@@ -1178,7 +1222,6 @@ class KeplerTarget(object):
 
     def save_injection_parameters(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
         """
-
         :param injection_parameters_filename_postfix:
         :type injection_parameters_filename_postfix:
         :return:
@@ -1266,11 +1309,12 @@ class KeplerTarget(object):
         klc.connect_quarters()
         klc.interleave_shifts()
         klc.sum_periods(pmin=p_min, pmax=p_max)
-        klc.veto_mes()
+        # klc.veto_mes()  # we are not doing it at this stage
         klc.save_best_candidates(n_per_temp=4, save_to_file=False)
-        retrieved_mes = klc.best_periodic_scores_data[4][0][0]
+        # TODO: replace indices for them not to be hard-coded!
+        retrieved_mes = klc.best_periodic_scores_data[spip.Search_results_index_stat][0][0]
         # retrieved_phase = klc.best_periodic_scores_data[3][0][0]  # wrt the beginning of Kepler time
-        retrieved_first_transit_time = klc.best_periodic_scores_data[5][0][0][0]
+        retrieved_first_transit_time = klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][0][0]
 
         with open(os.path.join(self.output_location, self.target_id + '_' + injections_filename_postfix), 'a') as fil1:
             print(per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, first_transit_time_inj, retrieved_mes,
@@ -1464,9 +1508,7 @@ class KeplerTarget(object):
         self.prob_density_planet_not_noise = self.prob_density_h1_trigger / (self.prob_density_h1_trigger + self.prob_density_h0_trigger)
 
     def analyze_injections_and_background(self, max_phase_mismatch_rel=Max_phase_mismatch_rel):
-        # TODO add analysis of background and FP estimation
         """
-
         :param max_phase_mismatch_rel:
         :type max_phase_mismatch_rel:
         :return:
@@ -1571,13 +1613,10 @@ class KeplerTarget(object):
         # self.optim_templs = [klc.templates_of_indices[templ_sh_ind] if not np.isnan(templ_sh_ind) else np.nan
         #                      for templ_sh_ind in best_temp_sh_inds]
 
-        self.optim_ampls = np.abs(self.optim_raw_stats / self.optim_stat_denoms)
-        not_missed_transit_mask = (~np.isnan(self.optim_raw_stats)) & (self.optim_trends > 0.) & (self.optim_raw_stats != 0.)
-        # -> TODO: introduce this concept everywhere
-        self.optim_ampl = (np.nanmean((self.optim_ampls[not_missed_transit_mask] / self.optim_trends[not_missed_transit_mask]))
-                           * np.nanmean(self.optim_trends[not_missed_transit_mask]))
-        self.optim_ppms = (self.optim_raw_stats / self.optim_stat_denoms / self.optim_trends * optim_templ_depths * 1e6)
-        self.optim_ppm = np.abs(np.nanmean(self.optim_ppms[not_missed_transit_mask]))
+        self.optim_ampl, self.optim_ppm, self.optim_ampls, ampls_stds, normalized_ampls, \
+            normalized_ampls_stds, self.optim_ppms, ppms_stds = \
+            af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.optim_raw_stats, summed_trends=self.optim_trends,
+                                              summed_stat_denoms=self.optim_stat_denoms, templ_max=optim_templ_depths, trends_stds=None)
 
     def get_summed_values_no_filters(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
         klc = self.get_ses_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos, nsig_outliers_0_neg=nsig_outliers_0_neg)
@@ -1616,80 +1655,36 @@ class KeplerTarget(object):
                 best_trends.append(np.nan)
                 optim_templ_depths.append(np.nan)
 
-        self.ncor_raw_stats = np.array(best_raw_stats)
-        self.ncor_stat_denoms = np.array(best_stat_denoms)
-        self.ncor_trends = np.array(best_trends)
+        self.best_raw_stats = np.array(best_raw_stats)
+        self.best_stat_denoms = np.array(best_stat_denoms)
+        self.best_trends = np.array(best_trends)
         temp_depth = np.max(np.abs(klc.templates[best_temps_sh[0]]))
         self.best_temp_depth = temp_depth
 
         ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds = \
-            af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.ncor_raw_stats,
-                                              summed_trends=self.ncor_trends, summed_stat_denoms=self.ncor_stat_denoms,
+            af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.best_raw_stats,
+                                              summed_trends=self.best_trends, summed_stat_denoms=self.best_stat_denoms,
                                               templ_max=temp_depth, trends_stds=None)
 
-        self.ncor_ampls = ampls
-        self.ncor_ampls_stds = ampls_stds
-        self.ncor_ampl = ampl
-        self.ncor_norm_ampls = normalized_ampls
-        self.ncor_norm_ampls_stds = normalized_ampls_stds
-        self.ncor_ppms = ppms
-        self.ncor_ppm = ppm
-        self.ncor_ppms_stds = ppms_stds
-
-        # self.ncor_raw_stats = np.array(best_raw_stats)
-        # self.ncor_stat_denoms = np.array(best_stat_denoms)
-        # self.ncor_trends = np.array(best_trends)
-        #
-        # temp_depth = np.max(np.abs(klc.templates[best_temps_sh[0]]))
-        #
-        # self.ncor_ampls = np.abs(self.ncor_raw_stats / self.ncor_stat_denoms)
-        # self.ncor_stds_of_ampls = np.abs(1 / self.ncor_stat_denoms)
-        #
-        # not_missed_transit_mask = (~np.isnan(self.ncor_raw_stats)) & (self.ncor_trends > 0.) & (self.ncor_raw_stats != 0.)
-        # self.ncor_ampl = (np.nanmean((self.ncor_ampls[not_missed_transit_mask] / self.ncor_trends[not_missed_transit_mask]))
-        #                   * np.nanmean(self.ncor_trends[not_missed_transit_mask]))
-        # ppms = np.zeros(len(self.ncor_raw_stats))
-        # vars_of_ppms = np.zeros(len(self.ncor_raw_stats)) * np.nan
-        # ppms[not_missed_transit_mask] = (self.ncor_raw_stats[not_missed_transit_mask] / self.ncor_stat_denoms[not_missed_transit_mask]
-        #                                  / self.ncor_trends[not_missed_transit_mask] * temp_depth * 1e6)
-        # vars_of_ppms[not_missed_transit_mask] = (
-        #         1 / self.ncor_stat_denoms[not_missed_transit_mask] * np.var(self.ncor_trends[not_missed_transit_mask]) / self.ncor_trends[
-        #         not_missed_transit_mask] ** 4 * temp_depth ** 2 * 1e12)
-        # self.ncor_ppms = (self.ncor_raw_stats / self.ncor_stat_denoms / self.ncor_trends * temp_depth * 1e6)
-        # self.ncor_ppm = np.abs(np.nanmean(self.ncor_ppms[not_missed_transit_mask]))
-        # self.stds_ncor_ppms = vars_of_ppms ** 0.5
+        self.best_ampls = ampls
+        self.best_ampls_stds = ampls_stds
+        self.best_ampl = ampl
+        self.best_norm_ampls = normalized_ampls
+        self.best_norm_ampls_stds = normalized_ampls_stds
+        self.best_ppms = ppms
+        self.best_ppm = ppm
+        self.best_ppms_stds = ppms_stds
 
     def estimate_rp(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
-        ##############################################################################################################################
-        # THIS IS A TEMPORARY PIECE OF CODE WHICH IS NEEDED TO CORRECT THE PREVIOUSLY INCORRECT PPM ESTIMATE
-        # IF IT WAS NOT CORRECTED BEFORE
-        # TODO: WRITE IT NORMALLY IN THE SEARCH PIPELINE AND REMOVE THIS
-        ##############################################################################################################################
-        # if correct_ppm_estimate:
-        #     self.get_ses_no_filters()
-        #     self.summed_stat_denoms = np.ones(len(self.summed_transit_times)) * np.inf
-        #     for ii, tt in enumerate(self.summed_transit_times):
-        #         for q in self.klc.quarters:
-        #             if (tt >= self.klc.times[q][0]) & (tt <= self.klc.times[q][-1]):
-        #                 self.summed_stat_denoms[ii] = self.klc.stat_denoms[self.klc.indices_of_templates[self.best_temp][0]][q]
-        #
-        #     self.ampls = np.abs(self.summed_raw_stats / self.summed_stat_denoms)
-        #     not_missed_transit_mask = self.summed_trends > 0.  # TODO: introduce this concept everywhere
-        #     self.best_ampl = (np.nanmean((self.ampls[not_missed_transit_mask] / self.summed_trends[not_missed_transit_mask]))
-        #                       * np.nanmean(self.summed_trends[not_missed_transit_mask]))
-        #     # self.ppms = (self.summed_raw_stats / self.summed_vars / self.summed_trends
-        #     #              * np.max(np.abs(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]])) * 1e6)
-        #     # I am not sure this is correct. It was written, but now I don't know why.
-        #     self.ppms = (self.summed_raw_stats / self.summed_stat_denoms / self.summed_trends
-        #                  * np.max(np.abs(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]])) * 1e6)
-        #     self.best_ppm = np.abs(np.nanmean(self.ppms[not_missed_transit_mask]))
-        ##############################################################################################################################
-        if self.ncor_ppms is None or self.ncor_ppm is None or self.ncor_ppms_stds is None:
+        if self.best_ppms is None or self.best_ppm is None or self.best_ppms_stds is None:
             self.get_summed_values_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos,
                                               nsig_outliers_0_neg=nsig_outliers_0_neg)
-        self.rp_to_rs = (self.ncor_ppm / 1e6) ** 0.5
-        self.rp_to_rs_std = (np.nanvar(np.abs(self.ncor_ppms) ** 0.5)
-                             + np.nanmean(self.ncor_ppms_stds**2) / np.abs(self.ncor_ppm)) ** 0.5 / 1e3
+        # ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds = \
+        #     estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_denoms, templ_max, trends_stds=None)
+        #
+        self.rp_to_rs = (self.best_ppm / 1e6) ** 0.5
+        self.rp_to_rs_std = (np.nanvar(np.abs(self.best_ppms) ** 0.5)
+                             + np.nanmean(self.best_ppms_stds ** 2) / np.abs(self.best_ppm)) ** 0.5 / 1e3
         self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
         self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
 
@@ -1907,7 +1902,7 @@ class KeplerTarget(object):
         # ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1,
         #         label='binning, bin ' + ut.fstr(np.round(binwid, 3)) + ' days')
         ax.plot(time_template, 1 - template_cropped * np.abs(np.nanmean(
-            self.ampls[self.summed_trends > 0] / self.summed_trends[self.summed_trends > 0])),
+            self.best_ampls[self.summed_trends > 0] / self.summed_trends[self.summed_trends > 0])),
                 color='r', linewidth=1,
                 label=r'template $\cdot$ amplitude,'+'\nduration: ' + self.templates_durations_hours[self.best_temp] + ' hours')
 
@@ -1919,7 +1914,7 @@ class KeplerTarget(object):
                         ecolor='k', elinewidth=1.2, capsize=None, barsabove=False, lolims=False, uplims=False,
                         xlolims=False, xuplims=False, errorevery=1, capthick=None)
             ax.plot(time_template + self.best_per, 1 - template_cropped * np.abs(np.nanmean(
-                self.ampls[self.summed_trends > 0] / self.summed_trends[self.summed_trends > 0])),
+                self.best_ampls[self.summed_trends > 0] / self.summed_trends[self.summed_trends > 0])),
                     color='r', linewidth=1)
 
         maxdev = np.nanmax(
@@ -1959,7 +1954,7 @@ class KeplerTarget(object):
                     label='binning, bin ' + ut.fstr(np.round(binwid_inv, 3)) + ' days')
         # ax.plot(bins_time, bins_flux, '-o', markersize=3, color='b', linewidth=1, label='binning, bin ' + ut.fstr(binwid_inv) + ' days')
         ax.plot(time_template, 1 - template_cropped * np.abs(np.nanmean(
-            self.ampls_inv[self.summed_trends_inv > 0] / self.summed_trends_inv[self.summed_trends_inv > 0])),
+            self.best_ampls_inv[self.summed_trends_inv > 0] / self.summed_trends_inv[self.summed_trends_inv > 0])),
                 color='r', linewidth=1,
                 label=r'template $\cdot$ amplitude,'+'\nduration: ' + self.templates_durations_hours[self.best_temp_inv] + ' hours')
         maxdev = np.nanmax(
@@ -2226,111 +2221,3 @@ class KeplerTarget(object):
             ax.legend(loc='upper right', fontsize=fontsize_legend)
         else:
             ax.legend(loc='upper right')
-
-    # def plot_all(self):
-    #     """
-    #     statistics, folds, histograms, injections
-    #     :return:
-    #     """
-        # pmin = Pmin
-        # pmax = Pmax + 0.01
-        # pstep = 0.50001
-        # periods_grid = np.arange(pmin, pmax, pstep)
-        #
-        # templates_periods_grid_mes = [[[] for i in range(len(periods_grid))] for j in range(len(durations))]
-        # templates_periods_grid_mes_inv = [[[] for i in range(len(periods_grid))] for j in range(len(durations))]
-        # for i_slides in range(n_slides):
-        #     mesf_pers = best_cand_concat_slides[i_slides]
-        #     for best_candidates in mesf_pers:  # if there is a big MES score, further processing
-        #         for ti in range(len(best_candidates[0])):  # over templates (25)
-        #             for i in range(len(best_candidates[0][0])):  # over the 10 best
-        #                 p_grid_ind = int((best_candidates[1][ti][i] - pmin) // pstep)
-        #                 templates_periods_grid_mes[ti][p_grid_ind].append(best_candidates[4][ti][i])
-        #     mesf_pers_inv = best_inv_cand_concat_slides[i_slides]
-        #     for best_candidates in mesf_pers_inv:  # if there is a big MES score, further processing
-        #         for ti in range(len(best_candidates[0])):  # over templates (25)
-        #             for i in range(len(best_candidates[0][0])):  # over the 10 best
-        #                 p_grid_ind = int((best_candidates[1][ti][i] - pmin) // pstep)
-        #                 templates_periods_grid_mes_inv[ti][p_grid_ind].append(best_candidates[4][ti][i])
-        # np.save(os.path.join(output_location, str(target_id) + '_histogram_full_5_slides'), templates_periods_grid_mes, allow_pickle=True)
-        # np.save(os.path.join(output_location, str(target_id) + '_histogram_full_inverted_5_slides'), templates_periods_grid_mes_inv,
-        #         allow_pickle=True)
-        #
-        # chunk_days = 50
-        # per_1 = max(best_per - chunk_days / 2, Pmin)  # days
-        # per_2 = min(per_1 + chunk_days, Pmax)  # days
-        # per_1 = max(per_2 - chunk_days, Pmin)  # in order to make sure we have 50 days (edges)
-        # per_grid_ind_1 = int((per_1 - pmin) // pstep)
-        # per_grid_ind_2 = int((per_2 - pmin) // pstep)
-        #
-        # per_1_inv = max(best_per_inv - chunk_days / 2, Pmin)  # days
-        # per_2_inv = min(per_1_inv + chunk_days, Pmax)  # days
-        # per_1_inv = max(per_2_inv - chunk_days, Pmin)  # in order to make sure we have 50 days (edges)
-        # per_grid_ind_1_inv = int((per_1_inv - pmin) // pstep)
-        # per_grid_ind_2_inv = int((per_2_inv - pmin) // pstep)
-        #
-        # binlist = np.linspace(10, max(50, best_stat ** 2), 80)
-        #
-        # # PLOTTING TIME SLIDES
-        # fig = plt.figure(figsize=(10, 5))
-        #
-        # # different templates, close periods
-        # for ti in range(len(durations)):
-        #     c, b = np.histogram(np.concatenate((templates_periods_grid_mes[ti][:])) ** 2, Bins=binlist)
-        #     if ti == 0:
-        #         plt.stairs(c, b, linewidth=0.75, color=def_col[7], label='all periods, different templates')
-        #     else:
-        #         plt.stairs(c, b, linewidth=0.75, color=def_col[7])
-        #
-        # # all periods all templates
-        # c, b = np.histogram(np.concatenate([np.concatenate((templates_periods_grid_mes[ti][:])) for ti in range(len(durations))]) ** 2,
-        #                     Bins=binlist)
-        # plt.stairs(c, b, label='all per, all templ', linestyle='--', linewidth=1.5, color=def_col[0])
-        # c, b = np.histogram(np.concatenate([np.concatenate((templates_periods_grid_mes_inv[ti][:])) for ti in range(len(durations))])**2,
-        #                     Bins=binlist)
-        # plt.stairs(c, b, label='inv, all per, all templ', linewidth=1.5, color=def_col[0])
-        #
-        # # all periods best template
-        # c, b = np.histogram(np.concatenate((templates_periods_grid_mes[best_temp][:])) ** 2, Bins=binlist)
-        # plt.stairs(c, b, label='all per, best template', linestyle='--', linewidth=1.5, color=def_col[2])
-        # c, b = np.histogram(np.concatenate((templates_periods_grid_mes_inv[best_temp_inv][:])) ** 2, Bins=binlist)
-        # plt.stairs(c, b, label='inv, all per, best template', linewidth=1.5, color=def_col[2])
-        #
-        # # close periods all templates
-        # c, b = np.histogram(np.concatenate(
-        #     [np.concatenate((templates_periods_grid_mes[ti][per_grid_ind_1:per_grid_ind_2])) for ti in range(len(durations))]) ** 2,
-        #                     Bins=binlist)
-        # plt.stairs(c, b, linestyle='--', label='per ' + str(int(per_1)) + '-' + str(int(per_2)) + ' d, all templates', linewidth=1.5,
-        #            color=def_col[1])
-        # c, b = np.histogram(np.concatenate(
-        #     [np.concatenate((templates_periods_grid_mes_inv[ti][per_grid_ind_1_inv:per_grid_ind_2_inv])) for ti in
-        #      range(len(durations))]) ** 2, Bins=binlist)
-        # plt.stairs(c, b, label='inv, per ' + str(int(per_1_inv)) + '-' + str(int(per_2_inv)) + ' d, all templates', linewidth=1.5,
-        #            color=def_col[1])
-        #
-        # # close templates, close periods
-        # c, b = np.histogram(np.concatenate((templates_periods_grid_mes[best_temp][per_grid_ind_1:per_grid_ind_2])) ** 2, Bins=binlist)
-        # plt.stairs(c, b, linestyle='--', label='per ' + str(int(per_1)) + '-' + str(int(per_2)) + ' d, best template', linewidth=1.5,
-        #            color=def_col[3])
-        # c, b = np.histogram(np.concatenate((templates_periods_grid_mes_inv[best_temp_inv][per_grid_ind_1_inv:per_grid_ind_2_inv])) ** 2,
-        #                     Bins=binlist)
-        # plt.stairs(c, b, label='inv, per ' + str(int(per_1_inv)) + '-' + str(int(per_2_inv)) + ' d, best template', linewidth=1.5,
-        #            color=def_col[3])
-        #
-        # plt.axvline(best_stat ** 2, linestyle='--', color='k', linewidth=2, label='best MES score, ' + str(np.round(best_stat ** 2, 2)))
-        # plt.axvline(best_stat_inv ** 2, color='k', linewidth=2, label='inv best MES score, ' + str(np.round(best_stat_inv ** 2, 2)))
-        #
-        # plt.yscale('log')
-        # plt.xlabel('MES')
-        # plt.ylabel('counts per one star, ' + str(n_slides) + ' timeslides')
-        # plt.title('Best trigger and Background from time slides KOI' + str(target_id) + '\n'
-        #           + 'trigger: template #' + str(best_temp) + ' of ' + str(durations[best_temp]) + ' hours' + ', period=' + str(
-        #     np.round(best_per, 1)) + ' days, \n'
-        #           + 'inverse: template #' + str(best_temp_inv) + ' of ' + str(durations[best_temp_inv]) + ' hours' + ', period=' + str(
-        #     np.round(best_per_inv, 1)) + ' days')
-        # plt.legend(loc='upper right', fontsize=10)
-        # plt.savefig(os.path.join(results_location, str(target_id) + '_background_time_slides_trigger_and_inverted.png'), dpi=320,
-        #             bbox_inches='tight')
-        # plt.clf()
-        # plt.close()
-        # pass

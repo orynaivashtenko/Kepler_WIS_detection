@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 
 import os
+from pipeline_parameters import Run_name
+
 
 Run_files_folder = os.path.dirname(__file__)
+Run_foldername = Run_name
+Run_jobs_outputs_folder = '/home/labs/barakz/orynai'
 
-Job_files_folder = '/home/labs/barakz/orynai/run_6/jobs'
-Future_job_files_folder = '/home/labs/barakz/orynai/run_6/future_jobs'
-Running_jobs_folder = '/home/labs/barakz/orynai/run_6/running_jobs'
-Output_files_folder = '/home/labs/barakz/orynai/run_6/outputfiles'
-Error_files_folder = '/home/labs/barakz/orynai/run_6/errorfiles'
-Output_stars_folder = '/home/labs/barakz/orynai/run_6/outputs_stars'
+Job_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/jobs'
+Future_job_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/future_jobs'
+Running_jobs_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/running_jobs'
+Output_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/outputfiles'
+Error_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/errorfiles'
+Output_stars_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/outputs_stars'
 Star_full_output_filename_postfix = 'full_output.txt'
 
-Error_list_file = '/home/labs/barakz/orynai/run_6/error_list.txt'
+Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_list.txt'
 
 Queue = 'physics-short'
 Mem_per_job_gb = '3.9'

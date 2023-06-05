@@ -13,24 +13,32 @@ N_slides_total_for_now = 20000  # we have too many targets to afford 100000, so 
 Snr_threshold_for_now = 6.8  # this will produce of the order of 100000 jobs, which is enough for now...
 N_injection_chunks_for_now = 50
 
-threshold_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_list_filename)
-threshold_inv_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_inv_crossing_list_filename)
-
-with open(threshold_crossing_list_file, 'r') as trig_file:
-    lines = trig_file.readlines()
-trig_ids = [line.split()[0] for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
-trig_snrs = [np.abs(float(line.split()[1])) for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
-
-# # TODO: FOR NOW, WE ONLY RUN ON THE NOT-INVERTED!!!! BECAUSE IT TAKES TOO LONG
-# with open(threshold_inv_crossing_list_file, 'r') as trig_file:
+###############################################################################################
+# threshold_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_list_filename)
+# threshold_inv_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_inv_crossing_list_filename)
+#
+# with open(threshold_crossing_list_file, 'r') as trig_file:
 #     lines = trig_file.readlines()
-# trig_ids = trig_ids + [line.split()[0] for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
-# trig_snrs = trig_snrs + [np.abs(float(line.split()[1])) for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
+# trig_ids = [line.split()[0] for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
+# trig_snrs = [np.abs(float(line.split()[1])) for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
+#
+# # # TODO: FOR NOW, WE ONLY RUN ON THE NOT-INVERTED!!!! BECAUSE IT TAKES TOO LONG
+# # with open(threshold_inv_crossing_list_file, 'r') as trig_file:
+# #     lines = trig_file.readlines()
+# # trig_ids = trig_ids + [line.split()[0] for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
+# # trig_snrs = trig_snrs + [np.abs(float(line.split()[1])) for line in lines if (line.strip()[0] != '#' and len(line.strip()) >= 9)]
+#
+# trig_ids = [trig_ids[jj] for jj in range(len(trig_ids)) if trig_snrs[jj] >= Snr_threshold_for_now]
+# trig_ids = list(set(trig_ids))
+###############################################################################################
 
-trig_ids = [trig_ids[jj] for jj in range(len(trig_ids)) if trig_snrs[jj] >= Snr_threshold_for_now]
-trig_ids = list(set(trig_ids))
+tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/run_6_results/tids_very_good_triggers.txt'
+with open(tid_to_run_file, 'r') as ttrf:
+    trig_ids = ttrf.readlines()
+trig_ids = [tid.strip() for tid in trig_ids]
 
-Output_location_wexac = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_6'
+
+Output_location_wexac = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_7'
 # noinspection DuplicatedCode
 for tid in trig_ids:
     # f_sl = [ff for ff in os.listdir(os.path.join('/home/labs/barakz/Collaboration-Kepler/orynai/output_run_6', tid[:4], tid)) if 'mes_slides' in ff]

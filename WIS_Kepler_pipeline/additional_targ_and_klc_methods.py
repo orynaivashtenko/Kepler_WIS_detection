@@ -1,6 +1,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import os
+import warnings
 from auxiliary_functions import histogram
+import search_pipeline as spip
+import utils as ut
+import copy
 
 time_chunk_minimization_size = 20
 threshold_to_std_veto = 35 ** 0.5
@@ -767,3 +772,437 @@ def plot_results(klc,
         plt.ylabel('statistic, [SNR]')
         plt.tight_layout()
         plt.show()
+
+
+def print_veto_profile(self, quarters, indices=None, times=None, temp_inds=12, path=None, filename=None):
+    """
+    klc method
+    quarters : int or list of int or str 'all' or None.
+        None is when time is specified and quarter has to be found
+    indices : int or list of int or str 'all'
+
+    time : float or list of float or str 'all'
+
+    temp_inds : int or list of int or str 'all'
+
+    file : str or None
+    """
+    if path is None:
+        path = self.output_location
+    if quarters == 'all':
+        quarters = self.quarters
+    elif isinstance(quarters, int):
+        quarters = [quarters]
+    else:
+        assert hasattr(quarters, "__len__"), 'Invalid quarters value specified!'
+        if hasattr(indices, "__len__") and len(indices) > 1:
+            assert (len(quarters) == len(indices)), 'Undefined way to match indices to quarters!'
+        elif hasattr(times, "__len__") and len(times) > 1:
+            assert (len(quarters) == len(times)), 'Undefined way to match times to quarters!'
+
+    if isinstance(temp_inds, int):
+        temp_inds = [temp_inds]
+
+    if isinstance(indices, int):
+        indices = [indices]
+
+    if isinstance(times, float):
+        times = [times]
+
+    if indices is None:
+        indices = []
+        if quarters is not None and len(quarters) == 1:
+            for tim in times:
+                ind1 = np.argmin(np.abs(self.times[quarters[0]] - tim))
+                if np.abs(self.times[quarters[0]][ind1] - tim) > 2 * self.dt_days:
+                    warnings.warn('indices not in this quarters!')
+                else:
+                    indices.append(ind1)
+        else:
+            quarters = []
+            indices = []
+            for tim in times:
+                timedifmins = []
+                indmins = []
+                for q in self.quarters:
+                    ind1 = np.argmin(np.abs(self.times[q] - tim))
+                    indmins.append(ind1)
+                    timedifmins.append(np.abs(self.times[q][ind1] - tim))
+                qindmin = np.argmin(timedifmins)
+                quarters.append(self.quarters[qindmin])
+                indices.append(indmins[qindmin])
+
+    if len(quarters) == 1:
+        quarters = np.array([quarters[0]] * len(indices))
+
+    if filename is None:
+        filename0 = 'veto_klc' + str(self.target_id)
+        filename = filename0
+        num = 0
+        while (filename in os.listdir(path)) or (filename + '.txt' in os.listdir(path)):
+            num += 1
+            filename = filename0 + '_' + str(num)
+    if filename[-4:] != '.txt':
+        filename = filename + '.txt'
+
+    with open(os.path.join(path, filename), 'w') as file:
+        for i in range(len(indices)):
+            q = quarters[i]
+            index = indices[i]
+            if temp_inds == 'all':
+                temp_inds = list(self.triggers[q][index].keys())
+            for j in range(len(temp_inds)):
+                temp_ind = temp_inds[j]
+                print('quarter:', q, file=file)
+                print('index:', index, file=file)
+                print('template index:', temp_ind, file=file)
+                if index not in self.triggers[q].keys():
+                    print('not a trigger')
+                    return None
+                if temp_ind not in self.triggers[q][index].keys():
+                    print('not a trigger')
+                    return None
+                print('whether passed vetting:', self.triggers[q][index][temp_ind][0], file=file)
+                if not self.triggers[q][index][temp_ind][0]:
+                    print('reasons why:', self.triggers[q][index][temp_ind][1], file=file)
+                if len(self.triggers[q][index][temp_ind][2]) == 8:
+                    print('chi squared:', self.triggers[q][index][temp_ind][2][0], file=file)
+                    print('threshold chi squared:', self.triggers[q][index][temp_ind][2][1], file=file)
+                    print('max dev std:', self.triggers[q][index][temp_ind][2][2], file=file)
+                    print('threshold max dev std:', self.triggers[q][index][temp_ind][2][3], file=file)
+                    print('max dev ampl:', self.triggers[q][index][temp_ind][2][4], file=file)
+                    print('threshold max dev ampl:', self.triggers[q][index][temp_ind][2][5], file=file)
+                    print('inner product abs:', np.abs(self.triggers[q][index][temp_ind][2][6]), file=file)
+                    print('threshold inner product abs:', self.triggers[q][index][temp_ind][2][7], file=file)
+                if len(self.triggers[q][index][temp_ind][3]) != 0:
+                    print('chi2 parts snr local:', *self.triggers[q][index][temp_ind][3][0][:-1], file=file)
+                    print('threshold chi2 parts snr local:', self.triggers[q][index][temp_ind][3][1], file=file)
+                    print('chi2 parts snr total:', self.triggers[q][index][temp_ind][3][0][-1], file=file)
+                    print('threshold chi2 parts snr total:', self.triggers[q][index][temp_ind][3][2], file=file)
+                if len(self.triggers[q][index][temp_ind][4]) != 0:
+                    print('chi2 parts len local:', *self.triggers[q][index][temp_ind][4][0][:-1], file=file)
+                    print('threshold chi2 parts len local:', self.triggers[q][index][temp_ind][3][1], file=file)
+                    print('chi2 parts len total:', self.triggers[q][index][temp_ind][4][0][-1], file=file)
+                    print('threshold chi2 parts len total:', self.triggers[q][index][temp_ind][3][2], file=file)
+                if len(self.triggers[q][index][temp_ind][5]) != 0:
+                    print('snr2 of this trigger:', self.triggers[q][index][temp_ind][5][0], file=file)
+                    print('snr2 of the best template:', self.triggers[q][index][temp_ind][5][1], file=file)
+                print('', file=file)
+
+
+def save_ses_quarters(self, path=None):
+    """
+    klc method
+    Saves the essential SES results that will be used in the periodicity search
+    as .npy file that can be read with `load_ses_quarters` funtion:
+        self.times
+        self.trends_orig_fluxes
+        self.statistics_raw_cor
+        self.stat_masks
+        self.stat_vars
+
+    Parameters
+    ----------
+    path : str
+        path to the folder in which the data should be saved.
+
+    Returns
+    -------
+    None.
+
+    """
+    if path is None:
+        path = self.output_location
+
+    len_data = sum(
+        [self.support for q in self.quarters])  # is assumed to be support length times number of quarters
+    ses_quarter_data = np.zeros((4 + 3 * self.templ_num_shifts, len_data), dtype=np.float32)
+    ses_quarter_data[0][0] = self.support
+    ses_quarter_data[0][1] = self.templ_num
+    ses_quarter_data[0][2] = self.templ_num_shifts
+    ses_quarter_data[0][3] = self.dt_days
+    ses_quarter_data[0][4] = len(self.quarters)
+    for tn in range(self.templ_num):
+        ses_quarter_data[0][5 + tn] = self.indices_of_templates[tn][0]
+    ind_last = 0
+    for q in self.quarters:
+        ses_quarter_data[1][ind_last + 0] = self.zero_padding_ends[q][0]
+        ses_quarter_data[1][ind_last + 1] = self.zero_padding_ends[q][1]
+        ses_quarter_data[1][ind_last + 2] = len(
+            self.statistics_raw_cor[0][q])  # this depends on whether data is cut from zeros or not
+        ses_quarter_data[1][ind_last + 3] = len(self.times[q])
+        for tn in range(self.templ_num_shifts):
+            ses_quarter_data[1][ind_last + 4 + tn] = self.stat_vars[tn][q]
+        ses_quarter_data[2][ind_last:ind_last + len(self.times[q])] = self.times[q]
+        ses_quarter_data[3][ind_last:ind_last + len(self.times[q])] = self.trends_orig_fluxes[q]
+        row_pos = 4
+        for k in range(self.templ_num_shifts):
+            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw_cor[k][q])] = \
+                self.statistics_raw_cor[k][q]
+        row_pos += self.templ_num_shifts
+        for k in range(self.templ_num_shifts):
+            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw_cor[k][q])] = \
+                self.stat_masks[k][q]
+        row_pos += self.templ_num_shifts
+        for k in range(self.templ_num_shifts):
+            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw_cor[k][q])] = \
+                self.statistics_snr_no_rank[k][q]
+        ind_last += self.support
+    if self.target_id is not None:
+        np.save(os.path.join(path, str(self.target_id) + '_ses_quarter_data'),
+                np.array(ses_quarter_data, dtype=object), allow_pickle=True)
+    else:
+        np.save(os.path.join(path, '_ses_quarter_data'), np.array(ses_quarter_data, dtype=object),
+                allow_pickle=True)
+
+
+def load_ses_quarters(self, filename=None):
+    """
+    klc method
+    Only works for data created by `save_ses_quarters`. Maybe contains assertion bugs.
+
+    Sets:
+    self.times
+    self.trends_orig_fluxes
+    self.statistics_raw_cor
+    self.stat_masks
+    self.stat_vars
+    self.dt_days
+
+    :param filename: path to the .npy file where the data is stored.
+    :type filename: str
+    :return:
+    :rtype:
+    """
+    if filename is None:
+        filename = os.path.join(self.output_location, str(self.target_id) + '_ses_quarter_data.npy')
+    else:
+        assert filename[-4:] == '.npy', 'file should have .npy type!'
+    ses_quarter_data = np.load(filename, allow_pickle=True)
+    self.support = ses_quarter_data[0][0]
+    self.templ_num = ses_quarter_data[0][1]
+    self.templ_num_shifts = ses_quarter_data[0][2]
+    self.dt_days = float(ses_quarter_data[0][3])
+    self.quarters = range(int(ses_quarter_data[0][4]))
+    self.indices_of_templates = []
+    for tn in range(self.templ_num - 1):
+        self.indices_of_templates.append([ses_quarter_data[0][5 + tn], ses_quarter_data[0][6 + tn]])
+    self.indices_of_templates.append([ses_quarter_data[0][6 + self.templ_num - 1], self.templ_num_shifts])
+    ind_last = 0
+    self.zero_padding_ends = [[0, 0] for _ in self.quarters]
+    self.whitened_fluxes_td = []
+    self.times = []
+    self.stat_vars = [[] for _ in range(self.templ_num_shifts)]
+    self.statistics_raw_cor = [[] for _ in range(self.templ_num_shifts)]
+    self.stat_masks = [[] for _ in range(self.templ_num_shifts)]
+    self.statistics_snr_no_rank = [[] for _ in range(self.templ_num_shifts)]
+    for q in self.quarters:
+        self.zero_padding_ends[q][0] = ses_quarter_data[1][ind_last + 0]
+        self.zero_padding_ends[q][1] = ses_quarter_data[1][ind_last + 1]
+        len_time = ses_quarter_data[1][ind_last + 2]
+        len_stat = ses_quarter_data[1][ind_last + 3]
+        for tn in range(self.templ_num_shifts):
+            self.stat_vars[tn].append(ses_quarter_data[1][ind_last + 4 + tn])
+        self.times.append(ses_quarter_data[2][ind_last:ind_last + len_time])
+        self.trends_orig_fluxes.append(ses_quarter_data[3][ind_last:ind_last + len_time])
+        row_pos = 4
+        for k in range(self.templ_num_shifts):
+            self.statistics_raw_cor[k].append(ses_quarter_data[k + row_pos][ind_last:ind_last + len_stat])
+        row_pos += self.templ_num_shifts
+        for k in range(self.templ_num_shifts):
+            self.stat_masks[k].append(ses_quarter_data[k + row_pos][ind_last:ind_last + len_stat])
+        row_pos += self.templ_num_shifts
+        for k in range(self.templ_num_shifts):
+            self.statistics_snr_no_rank[k].append(ses_quarter_data[k + row_pos][ind_last:ind_last + len_stat])
+        ind_last += self.support
+
+
+def save_trigger_info(self, triggers, path=None, filename_postfix='trigger_info'):
+    """
+    klc method
+    :param self:
+    :type self:
+    :param path:
+    :type path:
+    :param filename_postfix:
+    :type filename_postfix:
+    :return:
+    :rtype:
+    """
+    if path is None:
+        path = self.output_location
+    np.save(os.path.join(path, str(self.target_id) + '_' + filename_postfix), np.array(triggers, dtype=object), allow_pickle=True)
+
+
+def save_all_results(self, path=None, n_per_temp_saving=spip.N_per_temp_saving):
+    """
+    klc method
+    :param self:
+    :type self:
+    :param path:
+    :type path:
+    :param n_per_temp_saving:
+    :type n_per_temp_saving:
+    :return:
+    :rtype:
+    """
+    if path is None:
+        path = self.output_location
+    self.save_conditioned_data(path)
+    if ('triggers' in self.__dict__) and (self.triggers is not None):
+        save_trigger_info(self, self.triggers, path)
+    self.save_best_candidates(n_per_temp=n_per_temp_saving, path=path)
+
+def determine_mins(self, ngap_moving_var=spip.Ngap_moving_var):
+    """
+    klc method
+    Finds the best value of statistics and saves the corresponding parameters.
+
+    Parameters
+    ----------
+    ngap_moving_var : TYPE, optional
+        DESCRIPTION. The default is ngap_moving_var.
+
+    Returns
+    -------
+
+
+    """
+    if len(self.interleaved_numbers) > 0:
+        pind_min_interleaved = np.nanargmin(  # argmin over periods
+            [np.nanmin(  # min over templates
+                [np.nanmin(  # min over phases
+                    self.statistics_periodic_interleaved[pi][ti])
+                    for ti in range(len(self.statistics_periodic_interleaved[pi]))])
+                for pi in range(len(self.statistics_periodic_interleaved))])
+        tempind_min_interleaved = np.nanargmin(  # argmin over templates
+            [np.nanmin(  # min over phases
+                self.statistics_periodic_interleaved[pind_min_interleaved][ti])  # in the best period
+                for ti in range(len(self.statistics_periodic_interleaved[pind_min_interleaved]))])
+        phasind_min_interleaved = np.nanargmin(  # argmin over phases
+            self.statistics_periodic_interleaved[pind_min_interleaved][tempind_min_interleaved])
+    else:
+        pind_min_interleaved = np.nan
+        tempind_min_interleaved = np.nan
+        phasind_min_interleaved = np.nan
+
+    if len(self.not_interleaved_numbers) > 0:
+        pind_min_not_interleaved = np.nanargmin(  # argmin over periods
+            [np.nanmin(  # min over templates
+                [np.nanmin(  # min over phases
+                    self.statistics_periodic_not_interleaved[pi][ti])
+                    for ti in range(len(self.statistics_periodic_not_interleaved[pi]))])
+                for pi in range(len(self.statistics_periodic_not_interleaved))])
+        tempind_min_not_interleaved = np.nanargmin(  # argmin over templates
+            [np.nanmin(  # min over phases
+                self.statistics_periodic_not_interleaved[pind_min_not_interleaved][ti])  # in the best period
+                for ti in range(len(self.statistics_periodic_not_interleaved[pind_min_not_interleaved]))])
+        phasind_min_not_interleaved = np.nanargmin(  # argmin over phases
+            self.statistics_periodic_not_interleaved[pind_min_not_interleaved][tempind_min_not_interleaved])
+    else:
+        pind_min_not_interleaved = np.nan
+        tempind_min_not_interleaved = np.nan
+        phasind_min_not_interleaved = np.nan
+
+    if len(self.not_interleaved_numbers) > 0:
+        pind_incorrect = np.nanargmin(  # argmin over periods
+            [np.nanmin(  # min over templates
+                [np.nanmin(  # min over phases
+                    np.abs(self.statistics_periodic_not_interleaved[pi][ti]))
+                    for ti in range(len(self.statistics_periodic_not_interleaved[pi]))])
+                for pi in range(len(self.statistics_periodic_not_interleaved))])
+        tempind_incorrect = np.nanargmin(  # argmin over templates
+            [np.nanmin(  # min over phases
+                np.abs(self.statistics_periodic_not_interleaved[pind_min_not_interleaved][ti]))
+                # in the best period
+                for ti in range(len(self.statistics_periodic_not_interleaved[pind_min_not_interleaved]))])
+        self.std_free_place = ut.outlier_free_std(
+            self.statistics_periodic_not_interleaved[pind_incorrect][tempind_incorrect])
+    else:
+        pind_incorrect = np.nanargmin(  # argmin over periods
+            [np.nanmin(  # min over templates
+                [np.nanmin(  # min over phases
+                    np.abs(self.statistics_periodic_interleaved[pi][ti]))
+                    for ti in range(len(self.statistics_periodic_interleaved[pi]))])
+                for pi in range(len(self.statistics_periodic_interleaved))])
+        tempind_incorrect = np.nanargmin(  # argmin over templates
+            [np.nanmin(  # min over phases
+                np.abs(self.statistics_periodic_interleaved[pind_min_interleaved][ti]))  # in the best period
+                for ti in range(len(self.statistics_periodic_interleaved[pind_min_interleaved]))])
+        self.std_free_place = ut.outlier_free_std(
+            self.statistics_periodic_interleaved[pind_incorrect][tempind_incorrect])
+
+    if (np.nanmin(self.statistics_periodic_interleaved) < np.nanmin(self.statistics_periodic_not_interleaved)
+            or len(self.statistics_periodic_not_interleaved) == 0):
+        self.is_min_interleaved = True
+        self.snr_measured = np.nanmin(self.statistics_periodic_interleaved)
+        self.pind_measured = pind_min_interleaved
+        self.period_measured = self.periods[self.pind_measured]
+        self.phind_measured = phasind_min_interleaved
+        # self.ph_measured = self._phases_interleaved[
+        #   phasind_min_interleaved] #relative phase, wrt the beginning of the data
+        self.ph_measured = (self.time_interleaved[
+            phasind_min_interleaved]) % self.period_measured  # phase wrt the beginning of Kepler time
+        self.tempind_min_interleaved = tempind_min_interleaved
+        self.tempind_measured = self.interleaved_numbers[tempind_min_interleaved]
+        self.std_around_min = ut.outlier_free_std(np.concatenate((
+            self.statistics_periodic_interleaved[self.pind_measured][tempind_min_interleaved][
+            :self.phind_measured - ngap_moving_var // 2 * self.n_shifts],
+            self.statistics_periodic_interleaved[self.pind_measured][tempind_min_interleaved][
+            self.phind_measured + ngap_moving_var // 2 * self.n_shifts:])))
+    else:
+        self.is_min_interleaved = False
+        self.snr_measured = np.nanmin(self.statistics_periodic_not_interleaved)
+        self.pind_measured = pind_min_not_interleaved
+        self.period_measured = self.periods[self.pind_measured]
+        self.phind_measured = phasind_min_not_interleaved
+        # self.ph_measured = self._phases_not_interleaved[
+        #   phasind_min_not_interleaved]  # relative phase, wrt the beginning of the data
+        self.ph_measured = (self.time_not_interleaved[
+            phasind_min_not_interleaved]) % self.period_measured  # phase wrt the beginning of Kepler time
+        self.tempind_min_not_interleaved = tempind_min_not_interleaved
+        self.tempind_measured = self.not_interleaved_numbers[tempind_min_not_interleaved]
+        self.std_around_min = ut.outlier_free_std(np.concatenate((
+            self.statistics_periodic_not_interleaved[self.pind_measured][tempind_min_not_interleaved][
+            :self.phind_measured - ngap_moving_var // 2],
+            self.statistics_periodic_not_interleaved[self.pind_measured][tempind_min_not_interleaved][
+            self.phind_measured + ngap_moving_var // 2:])))
+
+    expected_transit_times = [self.tmin + self.ph_measured + i * self.period_measured
+                              for i in range(int(np.ceil((self.tmax - self.tmin - self.ph_measured) / self.period_measured)))]
+    self.expected_transit_times = expected_transit_times
+    if self.is_min_interleaved:
+        summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in
+                                 range(len(expected_transit_times))]
+        self.summed_transit_times = np.array(self.time_interleaved[summed_transit_points])
+        summed_stats = np.array(self.statistics_interleaved[tempind_min_interleaved][summed_transit_points])
+        summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
+        summed_vars = np.array(self.stat_vars_interleaved[tempind_min_interleaved][summed_transit_points])
+    else:
+        summed_transit_points = [np.argmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i in
+                                 range(len(expected_transit_times))]
+        self.summed_transit_times = np.array(self.time_not_interleaved[summed_transit_points])
+        summed_stats = np.array(self.statistics_not_interleaved[tempind_min_not_interleaved][summed_transit_points])
+        summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
+        summed_vars = np.array(self.stat_vars_not_interleaved[tempind_min_not_interleaved][summed_transit_points])
+    denom = np.sum(summed_vars * summed_trends ** 2) ** 0.5
+    self.summed_transit_indices = copy.deepcopy(summed_transit_points)
+    self.summed_transit_statistics_raw = summed_stats
+    self.summed_transit_statistics_variances = copy.deepcopy(summed_vars)
+    self.summed_transit_statistics_trends = copy.deepcopy(summed_trends)
+    self.summed_transit_statistics = (summed_stats * summed_trends) / denom
+    self.origrnal_transit_indices = [[] for q in self.quarters]
+    for t in self.expected_transit_times:
+        qmin = 0
+        imin = 0
+        minval = np.abs(t - self.times[0][0])
+        for q in self.quarters:
+            if (((t - self.times[q][0]) >= 0) and (np.abs(t - self.times[q][0]) < minval)):
+                qmin = q
+                minval = np.abs(t - self.times[q][0])
+        minval = t - self.times[qmin][0]
+        for i in range(len(self.times[qmin])):
+            if np.abs(t - self.times[qmin][i]) < minval:
+                imin = i
+                minval = np.abs(t - self.times[qmin][i])
+        self.origrnal_transit_indices[qmin].append(imin)

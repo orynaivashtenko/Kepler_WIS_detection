@@ -54,15 +54,15 @@ def get_occurrence_table(stellar_radius):
 # TARGET CLASS PARAMETERS
 P_min_search = 30  # days
 P_max_search = 500  # days
-P_chunks_search = 180  # will give approx 2GB per core
+P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle
 Mes_candidate_search = 40**0.5  # mes in units of SNR (not squared)
 N_broad_slides = 5  # for all templates and periods
 N_deep_slides_total = 100000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
-N_deep_slides_chunk = 5000
+N_deep_slides_chunk = 2000
 N_injections_total = 10000  # total number of all injections (all radii and periods etc.)
-N_injections_chunk = 100  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
+N_injections_chunk = 50  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
 Per_wing_injection_and_slides_relative = 2 / 30  # Range to the left and to the right of the best period in units of period. Will be used
 # to generate injections and deep time slides with variable periods around the best one
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
@@ -76,8 +76,10 @@ Figsize_hist = (8, 6)
 
 Data_location = os.path.join(os.getcwd(), 'light_curves')  # in this directory, a file named after target_id will be created
 Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a file named after target_id will be created
+Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
 Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
+Run_name = 'run_7'
 
 if Working_place == 'Home':
     Gaia_kepler_file = '/Users/orynaivashtenko/Work/Kepler_Project/kepler_dr3_good.fits'
@@ -87,26 +89,26 @@ if Working_place == 'Home':
 
 if Working_place == 'Marvin':
     Data_location = '/SMALLDATA/KeplerData/Kepler'  # TODO : this does not work properly, not entering the prefix directory
-    Output_location = '/SMALLDATA/orynai/run_6_output'
+    Output_location = '/SMALLDATA/orynai/' + str(Run_name) + '_output'
     Kepler_files_folder = '/Collaboration-Kepler/KeplerFiles'
     Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
     Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
     Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
     Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
-    Threshold_crossing_lists_folder = '/SMALLDATA/orynai/run_6'
-    Run_root_folder = '/SMALLDATA/orynai/run_6'
+    Threshold_crossing_lists_folder = '/SMALLDATA/orynai/' + str(Run_name)
+    Run_root_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
 
 if Working_place == 'WEXAC':
     Data_location = '/home/labs/barakz/Collaboration-Kepler/KeplerData'
-    Output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_6'
+    Output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/output_' + str(Run_name)
     Kepler_files_folder = '/home/labs/barakz/Collaboration-Kepler/KeplerFiles'
     Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
     Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
     Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
     Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
-    Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/run_6'
-    Run_root_folder = '/home/labs/barakz/orynai/run_6'
+    Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
+    Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
 
 # Gaia_kepler_file = '/home/orynai/Kepler_Notebooks/kepler_dr3_good.fits'
@@ -118,7 +120,7 @@ if Working_place == 'WEXAC':
 # Default_ttv_catalog_file = '/Users/orynaivashtenko/Work/Kepler_Project/TTV_Catalog_Table3_O-C.txt'
 
 
-Home_output_storage_folder = 'orynai@marvin.weizmann.ac.il:/SMALLDATA/orynai/run_6_output'
+Home_output_storage_folder = 'orynai@marvin.weizmann.ac.il:/SMALLDATA/orynai/' + str(Run_name) + '_output'
 
 
 Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'

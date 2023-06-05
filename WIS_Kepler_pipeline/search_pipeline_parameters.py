@@ -70,10 +70,20 @@ Apply_score_correction = True
 
 Pmin = 30  # days
 Pmax = 500
-Duty_cycle = 0.1
+Duty_cycle = 0.05  # this was 0.1, but I changed it because sometimes it is not enough
 Std_time_scrambling = 10.  # days
 N_per_temp_saving = 10  # how many best candidates per template to save
 # track_process = False
+
+Search_results_index_per = 0
+Search_results_index_stat = 1
+Search_results_index_sum_tr_times = 2
+Search_results_index_sum_stats = 3
+Search_results_index_sum_trends = 4
+Search_results_index_sum_vars = 5
+Search_results_index_shifts = 6
+Search_results_index_per_list = 7
+Search_results_length = 8
 
 Default_output_location = os.getcwd()  # os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Outputs_of_pipeline')
 Default_data_location = os.getcwd()

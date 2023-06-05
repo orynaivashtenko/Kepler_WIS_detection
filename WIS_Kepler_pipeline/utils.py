@@ -17,9 +17,9 @@ def dec_to_bin(num, return_list=False, return_str=False):
     else:
         max_ord = int(np.log2(num))
         bits = []
-        for i in range(max_ord+1):
-            bits.append(num%2)
-            num = num//2
+        for i in range(max_ord + 1):
+            bits.append(num % 2)
+            num = num // 2
     if return_list:
         return bits  # bits[0] is 2**0
     elif return_str:
@@ -461,6 +461,7 @@ def measure_psd(x, mask=None, nperseg=64, noverlap=-1, window='hann', dt=1.,
         return freqs, psd
     else:
         return freqs, psd, psds
+
 
 def psd2wf(psd, support=None, rfft=True):
     """
@@ -1596,6 +1597,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
                   zero_ends_len_abs=3, zero_ends_len_rel=0.1,
                   return_amplitude=True, return_reason=True, inn_prod_min=Inn_prod_min_veto,
                   return_scores=False):
+    # TODO check how it works for positive
     """
     Checks the goodness of fit of data by the template by chi squared and maximum deviation.
     Fits the best amplitude for the template. Performs a chi squared test with this
@@ -1659,14 +1661,13 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     # subtract linear trend
     inds_outside = np.array([i for i in range(len(data)) if i not in inds])
     data_outside = np.array(data[inds_outside])
-    lin_sol = minimize(lambda x: np.sum((data_outside - x[0] - inds_outside * x[1]) ** 2),
-                       x0=np.array([0., 0.]))  # find linear trend
+    lin_sol = minimize(lambda x: np.sum((data_outside - x[0] - inds_outside * x[1]) ** 2), x0=np.array([0., 0.]))  # find linear trend
     data = data - lin_sol.x[0] - lin_sol.x[1] * np.arange(len(data))
     data_left = data[np.max([0, inds[0] - 20]):inds[0]]
     data_rignt = data[inds[-1]:np.min([inds[-1] + 10, len(data)])]
     if np.abs(np.mean(data_left) - np.mean(data_rignt)) >= 2 * ((np.var(data_left) * len(data_left)
                                                                  + np.var(data_rignt) * len(data_rignt)) / (
-                                                                        (len(data_left) + len(data_rignt)))) ** 0.5:
+                                                                        len(data_left) + len(data_rignt))) ** 0.5:
         reason += 'step '
         is_good = False  # check that it is not a step instead of transit
     data_outside = np.array(data[inds_outside])
@@ -1674,11 +1675,10 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
 
     if zero_ends_len_abs is None:
         zero_ends_len_abs = int(np.round(len(inds) * zero_ends_len_rel))
-    assert zero_ends_len_abs >= 1, 'Incorrect zero_end_len_abs=' + str(zero_ends_len_abs) + '! Sould be >=1'
+    assert zero_ends_len_abs >= 1, 'Incorrect zero_end_len_abs=' + str(zero_ends_len_abs) + '! Should be >=1'
     spare_ind_left = 0
     spare_ind_right = 0
-    if inds[
-        0] > 0:  # if possible, include some zeros in the ends where the template is zero to ensure that the shape goes to zero
+    if inds[0] > 0:  # if possible, include some zeros in the ends where the template is zero to ensure that the shape goes to zero
         spare_ind_left = min(zero_ends_len_abs, inds[0])
         inds = np.concatenate((np.arange(inds[0] - spare_ind_left, inds[0]), inds))
     if inds[-1] < len(template) - 1:
@@ -1688,8 +1688,8 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     temp = np.array(template[inds])
     dat = np.array(data[inds])
     if (spare_ind_left > 0) and (spare_ind_right > 0):
-        dat = dat - np.mean(np.concatenate((dat[0:spare_ind_left], dat[len(
-            dat) - spare_ind_right:])))  # although we detrended, we subtract local median
+        dat = dat - np.mean(np.concatenate((dat[0:spare_ind_left], dat[len(dat) - spare_ind_right:])))
+        # -> although we detrended, we subtract local median
     elif spare_ind_left > 0:
         dat = dat - np.mean(dat[0:spare_ind_left])  # although we detrended, we subtract local median
     elif spare_ind_right > 0:
@@ -1717,7 +1717,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     if maxdev_std_dat > maxdev_std:
         reason += 'maximal_deviation_std '
         is_good = False
-    if ((maxdev_ampl is not None) and (maxdev_ampl_dat > maxdev_ampl)):
+    if (maxdev_ampl is not None) and (maxdev_ampl_dat > maxdev_ampl):
         reason += 'maximal_deviation_amplitude '
         is_good = False
 
@@ -1799,18 +1799,16 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
     template_wh_full = np.array(template_wh_full)
     if tlen is None:
         temp_smthnd = np.abs(template_wh_full)
-        temp_smthnd = (temp_smthnd + np.roll(temp_smthnd, 1) + np.roll(temp_smthnd,
-                                                                       -1)) / 3  # averaging the rolled template making it smooth
-        inds_small = np.where((temp_smthnd / np.max(temp_smthnd) < 0.001))[
-            0]  # choosing where the tamplate is close to zero
+        temp_smthnd = (temp_smthnd + np.roll(temp_smthnd, 1) + np.roll(temp_smthnd, -1)) / 3
+        # -> averaging the rolled template making it smooth
+        inds_small = np.where((temp_smthnd / np.max(temp_smthnd) < 0.001))[0]  # choosing where the tamplate is close to zero
         # TODO: maybe change 0.001 to 0.0001 in furhter runs!
-        inds_small = inds_small[
-            np.where((inds_small > nperseg_psd // 4) & (inds_small <= len(template_wh_full) - nperseg_psd // 4))[
-                0]]  # if suddenly there is zero in the beginning, ignore
-        tlen = inds_small[0] + (
-                len(temp_smthnd) - inds_small[-1])  # taking parts where the template is not close to zero
+        inds_small = inds_small[np.where((inds_small > nperseg_psd // 4) & (inds_small <= len(template_wh_full) - nperseg_psd // 4))[0]]
+        # -> if suddenly there is zero in the beginning, ignore
+        tlen = inds_small[0] + (len(temp_smthnd) - inds_small[-1])  # taking parts where the template is not close to zero
         # this weird procedure is needed because we are dealing with the whitened template, and its shape can be complex, so at some point
-        # it can reash zero, but it does not mean that it is the end of the transit. We are smoothening it, so that if it is zero only in one point,
+        # it can reach zero, but it does not mean that it is the end of the transit.
+        # We are smoothening it, so that if it is zero only in one point,
         # the smoothened one will be nonzero.
         # then, we are setting a threshold and selecting everything non-zero
         # note the rolling! the transit center should be in the zeroth index!
@@ -1819,15 +1817,13 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
         mask = ~np.isnan(data_wh_full).astype(bool)
 
     local_th = chi2.ppf(1 - fn / (n_parts + 1), df=1)  # local threshold, chi2 of parts will be compared to it
-    total_th = chi2.ppf(1 - fn / (n_parts + 1),
-                        df=4)  # total threshold, sum of chi2 of all parts will be compared to it
+    total_th = chi2.ppf(1 - fn / (n_parts + 1), df=4)  # total threshold, sum of chi2 of all parts will be compared to it
 
     template_cut_centered = np.roll(template_wh_full, tlen // 2)[:tlen]  # put the transit center in the center
-    stat_for_var = np.convolve(template_cut_centered, data_wh_full,
-                               mode='valid')  # make a small sample of statistic to estimate the variance
-    stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)) & mask[
-                                                                                                       tlen // 2:len(mask) - (
-                                                                                                                   (tlen - 1) // 2)]]
+    stat_for_var = np.convolve(template_cut_centered, data_wh_full,mode='valid')
+    # -> make a small sample of statistic to estimate the variance
+    stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)
+                                 ) & mask[tlen // 2:len(mask) - ((tlen - 1) // 2)]]
     # quarter std correction so that the SNR of matched filtering the template is in units.
     var_stat_global = np.nanvar(stat_for_var)
     if splitting == 'snr':
@@ -1872,10 +1868,8 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
         i2 = chi2_temp_indices[i]
         template_wh_local = np.array(template_cut_centered[i1:i2])
         stat_for_var = np.convolve(template_wh_local, data_wh_full, mode='valid')
-        stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)) & mask[
-                                                                                                           len(template_wh_local) // 2: len(
-                                                                                                               mask) - ((
-                                                                                                                                    len(template_wh_local) - 1) // 2)]]
+        stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)
+                                     ) & mask[len(template_wh_local) // 2: len(mask) - ((len(template_wh_local) - 1) // 2)]]
         # quarter std correction so that the SNR of matched filtering the template is in units.
         var_stat_local = np.nanvar(stat_for_var)
         templates_wh_local.append(template_wh_local)
@@ -1897,8 +1891,7 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
                 i1 = chi2_temp_indices[i]
                 i2 = chi2_temp_indices[i + 1]
                 template_wh_local = np.array(template_cut_centered[i1:i2])
-                A_local = np.dot(template_wh_local, data_wh[i1:i2]) / vars_stat_local[
-                    i]  # np.dot(template_wh[i1:i2],template_wh[i1:i2])
+                A_local = np.dot(template_wh_local, data_wh[i1:i2]) / vars_stat_local[i]  # np.dot(template_wh[i1:i2],template_wh[i1:i2])
                 chi2_local = (A_local - A_global) ** 2 / (actual_Vs[i])
                 chi2_scores_index.append(chi2_local)
                 if chi2_local > local_th:
@@ -1914,14 +1907,10 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
                 template_not_full = template_cut_centered[:index + (tlen + 1) // 2]
             else:  # it is in the end
                 data_wh = data_wh_full[index - tlen // 2:]
-                template_not_full = template_cut_centered[
-                                    len(template_cut_centered) - (len(data_wh_full) - index) - tlen // 2:]
+                template_not_full = template_cut_centered[len(template_cut_centered) - (len(data_wh_full) - index) - tlen // 2:]
             stat_for_var = np.convolve(template_not_full, data_wh_full, mode='valid')
             stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)) & mask[
-                                                                                                               len(template_not_full) // 2:len(
-                                                                                                                   mask) - (
-                                                                                                                                                   (
-                                                                                                                                                               len(template_not_full) - 1) // 2)]]
+                                                            len(template_not_full) // 2:len(mask) - ((len(template_not_full) - 1) // 2)]]
             # quarter std correction so that the SNR of matched filtering the template is in units.
             var_stat_global_not_full = np.nanvar(stat_for_var)
             A_global_not_full = np.dot(template_not_full, data_wh) / var_stat_global_not_full  # global amplitude
@@ -1933,8 +1922,7 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
                                     (np.arange(n_parts_not_full) / n_parts_not_full)[1:])) + [len(template_not_full)]
             else:
                 chi2_temp_indices_not_full = list(
-                    (len(template_not_full) * np.arange(n_parts_not_full) / n_parts_not_full).astype(int)) + [
-                                                 len(template_not_full)]
+                    (len(template_not_full) * np.arange(n_parts_not_full) / n_parts_not_full).astype(int)) + [len(template_not_full)]
             chi2_temp_indices_not_full = list(set(chi2_temp_indices_not_full))  # remove repetitions
             chi2_temp_indices_not_full.sort()
             n_parts_not_full = len(chi2_temp_indices_not_full) - 1
@@ -1947,8 +1935,7 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
                         (np.arange(n_parts_not_full) / n_parts_not_full)[1:])) + [len(template_not_full)]
                 else:
                     chi2_temp_indices_not_full = list(
-                        (len(template_not_full) * np.arange(n_parts_not_full) / n_parts_not_full).astype(int)) + [
-                                                     len(template_not_full)]
+                        (len(template_not_full) * np.arange(n_parts_not_full) / n_parts_not_full).astype(int)) + [len(template_not_full)]
 
             if n_parts_not_full < 2:  # or ((chi2_temp_indices_not_full-np.roll(chi2_temp_indices_not_full, 1))[1:]<3).any():
                 is_good = True
@@ -1964,16 +1951,12 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
                     stat_for_var = np.convolve(template_wh_local, data_wh_full, mode='valid')
                     stat_for_var = stat_for_var[
                         (np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)) & mask[
-                                                                                               len(
-                                                                                                   template_wh_local) // 2:len(
-                                                                                                   mask) - ((len(
-                                                                                                   template_wh_local) - 1) // 2)]]
+                                                       len(template_wh_local) // 2:len(mask) - ((len(template_wh_local) - 1) // 2)]]
                     # quarter std correction so that the SNR of matched filtering the template is in units.
                     var_stat_local = np.nanvar(stat_for_var)
                     actual_V = 1 / var_stat_local - 1 / var_stat_global_not_full
-                    A_local = np.dot(template_wh_local,
-                                     data_wh[i1:i2]) / var_stat_local  # np.dot(template_wh[i1:i2],template_wh[i1:i2])
-                    chi2_local = (A_local - A_global_not_full) ** 2 / (actual_V)
+                    A_local = np.dot(template_wh_local, data_wh[i1:i2]) / var_stat_local  # np.dot(template_wh[i1:i2],template_wh[i1:i2])
+                    chi2_local = (A_local - A_global_not_full) ** 2 / actual_V
                     chi2_scores_index.append(chi2_local)
                     if chi2_local > local_th:
                         is_good = False
@@ -1998,27 +1981,50 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
             return is_goods
 
 
-def score_correction(scores_i, return_function=False, negative_values=False):
+# def score_correction(scores_i, return_function=False, negative_values=False):
+#     scores_i = np.array(scores_i)
+#     argsorted = np.argsort(scores_i)
+#     argargsorted = np.argsort(argsorted)
+#     sorted_scores = scores_i[argsorted]
+#     if negative_values is None:
+#         if (scores_i < 0).any():
+#             negative_values = True
+#         else:
+#             negative_values = False
+#     if negative_values:
+#         scores_c = 2 ** 0.5 * erfinv(2 * (np.arange(len(sorted_scores)) + 0.5) / len(sorted_scores) - 1)
+#     else:
+#         scores_c = 2 ** 0.5 * erfinv((np.arange(len(sorted_scores)) + 0.5) / len(sorted_scores))
+#     if return_function:
+#         # indices = ~np.isinf(scores_c)
+#         # funct = interp1d(sorted_scores[indices], scores_c[indices])
+#         funct = interp1d(sorted_scores, scores_c)
+#         return scores_c[argargsorted], funct
+#     else:
+#         return scores_c[argargsorted]
+
+
+def score_correction(scores_i, return_function=False, two_sided_distr=True):
     scores_i = np.array(scores_i)
-    argsorted = np.argsort(scores_i)
-    argargsorted = np.argsort(argsorted)
-    sorted_scores = scores_i[argsorted]
-    if negative_values is None:
-        if (scores_i < 0).any():
-            negative_values = True
-        else:
-            negative_values = False
-    if negative_values:
+    if two_sided_distr:
+        argsorted = np.argsort(scores_i)
+        argargsorted = np.argsort(argsorted)
+        sorted_scores = scores_i[argsorted]
         scores_c = 2 ** 0.5 * erfinv(2 * (np.arange(len(sorted_scores)) + 0.5) / len(sorted_scores) - 1)
+        scores_f = scores_c[argargsorted]
     else:
+        signs_scores = np.sign(scores_i)
+        abs_scores = np.abs(scores_i)
+        argsorted = np.argsort(abs_scores)
+        argargsorted = np.argsort(argsorted)
+        sorted_scores = abs_scores[argsorted]
         scores_c = 2 ** 0.5 * erfinv((np.arange(len(sorted_scores)) + 0.5) / len(sorted_scores))
+        scores_f = scores_c[argargsorted] * signs_scores
     if return_function:
-        # indices = ~np.isinf(scores_c)
-        # funct = interp1d(sorted_scores[indices], scores_c[indices])
         funct = interp1d(sorted_scores, scores_c)
-        return scores_c[argargsorted], funct
+        return scores_f, funct
     else:
-        return scores_c[argargsorted]
+        return scores_f
 
 
 def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=None, units_of_snr=True):
@@ -2093,4 +2099,4 @@ def get_p_value_gaussian(x, mean, std):
     :return:
     :rtype: float
     """
-    return 0.5 * erfc((x-mean)/(2**0.5 * std))
+    return 0.5 * erfc((x - mean) / (2 ** 0.5 * std))
