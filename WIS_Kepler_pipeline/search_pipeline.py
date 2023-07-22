@@ -289,6 +289,7 @@ class KeplerLightCurve(object):
         self.statistics_full = None
         self.stat_vars_full = None
         self.stat_masks_full = None
+        self.big_hole_masks_full = None  # used only in the statistic shuffling
         self.trigger_masks = None
         self.veto_bad_trigger_inds = None
 
@@ -1790,8 +1791,7 @@ class KeplerLightCurve(object):
         r = np.abs(np.random.normal(0, std_time_scrambling, len(self.times)))
         r = np.cumsum(r)
         for i in range(len(self.times)):
-            self.times[i] = np.array(self.times[i]) - self.time_slide_shifts[i] + r[
-                i]  # we undo old time slides and do new
+            self.times[i] = np.array(self.times[i]) - self.time_slide_shifts[i] + r[i]  # we undo old time slides and do new
         self.time_slide_shifts = r
 
         self.tmin = np.nanmin(self.times[0])
@@ -1915,7 +1915,7 @@ class KeplerLightCurve(object):
 
         # TODO: when one veto triggered, do not do other vetos, this point will be masked in any case (do it after you debug)
         assert not self.is_zero_padded, 'Zero padding ends have to be removed before vetting!'
-        self.stats_raw_no_veto_no_score_cor = copy.deepcopy(self.statistics_snr)
+        self.stats_raw_no_veto_no_score_cor = copy.deepcopy(self.statistics_raw_cor) #TODO: MAKE SURE IT WAS NOT USED BECUASE IT WAS WRONG STAT
 
         triggers = [{} for _ in self.quarters]
         for k in range(self.templ_num_shifts):
@@ -2006,25 +2006,32 @@ class KeplerLightCurve(object):
 
         # VETO OF NARROW TEMPLATES TRIGGERING ON WIDER TRANSITS
         for q in self.quarters:
-            for ind in triggers[q].keys():
+            for ind in triggers[q].keys():  # time indices
                 snrs = []
                 for k in triggers[q][ind].keys():
-                    snrs.append(self.statistics_snr[k][q][ind])
-                timax = np.argmax(np.abs(snrs))  # snr is negative, but this will find also positive things
-                tmax = list(triggers[q][ind].keys())[timax]
+                    snrs.append(self.statistics_snr[k][q][ind])  #  attention: this is applied to statistics snr, not raw
+                timax = np.argmax(np.abs(snrs))  # snr is negative, but this will find also positive things !!!!!!!!!!!!!!!!!
+
+                tmax = list(triggers[q][ind].keys())[timax]  # maximal template
                 snrmax2 = snrs[timax] ** 2
+                # TODO: check k and tmax: shifted or not!!!
                 for ik in range(len(snrs)):
                     k = list(triggers[q][ind].keys())[ik]
+                    # We required the template to be smaller than the best one because the opposite was treated with veto parts
+                    # We compare it both to positive and to negative triggers because if there is some positive thing at
+                    # this time, it is also bad, so we also fix this.
                     if (k < tmax) and (snrs[ik] ** 2 < snrmax2 - delta_snr2_wide_templ):  # TODO: better check for coincidence between templates
                         is_good_temp = False
                     else:
                         is_good_temp = True
                     iot = self.indices_of_templates[self.templates_of_indices[k]]
-                    for ts in np.arange(iot[0], iot[1]):
+                    # Change to maybe make on 7 Jun 2023. Do not kill other shifts if one shift is killed
+                    # because one shift could have lower snr because of the shift, whereas maybe the other one is ok?
+                    # Maybe change the sut of delta_snr2_wide_templ=4? because it is strict.
+                    for ts in np.arange(iot[0], iot[1]):  # kill also shifts, although not clear why would we do that
                         if ts not in triggers[q][ind].keys():
                             if not is_good_temp:
-                                triggers[q][ind][ts] = [is_good_temp, 'template_width ', [], [], [],
-                                                             [snrs[ik] ** 2, snrmax2]]
+                                triggers[q][ind][ts] = [is_good_temp, 'template_width ', [], [], [], [snrs[ik] ** 2, snrmax2]]
                             else:
                                 triggers[q][ind][ts] = [is_good_temp, '', [], [], [], [snrs[ik] ** 2, snrmax2]]
                         else:
@@ -2118,9 +2125,35 @@ class KeplerLightCurve(object):
                                                              is_time_cut=~self.is_zero_padded, dt=self.dt_days,
                                                              fill_gaps_by_nan=False)[1]
 
+    def scramble_full_stats(self, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling):
+        self.big_hole_masks_full = (af.connect_quarters_fun(self.times, self.big_hole_masks,
+                                                            zero_padding_ends=None,
+                                                            is_data_cut=~self.is_zero_padded,
+                                                            is_time_cut=~self.is_zero_padded,
+                                                            dt=self.dt_days, fill_gaps_by_nan=False)[1]).astype(bool)
+        inds_pieces = ut.get_pieces_indices(mask=self.big_hole_masks_full, max_hole=max_hole, max_piece=max_piece, min_piece=min_piece)
+        tot_hole_len = len(self.time_full) - np.sum([ip[1] - ip[0] for ip in inds_pieces])
+        n_pieces = len(inds_pieces)
+        np.random.shuffle(inds_pieces)
+        # how many spaces between the pieces and plus one in the end, although it effectively changes the length ->
+        len_holes = ut.gen_uniform_piece_lengths(tot_len=tot_hole_len, n_pieces=n_pieces)
+        # "connect_quarters" is now destroyed. do it again to restore the original positioning
+        # for now, the shuffling is not really saved.
+        self.trend_orig_flux_full = ut.rearrange_pieces(self.trend_orig_flux_full, inds_pieces=inds_pieces, hole_lens=len_holes,
+                                                        fill_hole_with=0.)
+        for k in range(len(self.statistics_raw_cor)):
+            self.statistics_full[k] = ut.rearrange_pieces(self.statistics_full[k], inds_pieces=inds_pieces, hole_lens=len_holes,
+                                                          fill_hole_with=0.)
+            self.stat_masks_full[k] = ut.rearrange_pieces(self.stat_masks_full[k], inds_pieces=inds_pieces, hole_lens=len_holes,
+                                                          fill_hole_with=False)
+            self.stat_vars_full[k] = ut.rearrange_pieces(self.stat_vars_full[k], inds_pieces=inds_pieces, hole_lens=len_holes,
+                                                         fill_hole_with=0.)
+
     def interleave_shifts(self):
         """
-
+        Takes statistics of the same template with different shifts and interleaves them in the alternating
+        manner to create continuity of sliding of this template over the data. The resulting array will have the length
+        equal to the sum of the length of all the arrays for different shifts.
         """
         self.interleaved_numbers = np.array([i for i in range(len(self.indices_of_templates))
                                              if ((self.indices_of_templates[i][1] - self.indices_of_templates[i][0]) >= 2)])
@@ -2210,7 +2243,19 @@ class KeplerLightCurve(object):
         if hasattr(self, 'npsds'):
             del self.npsds
 
-    def sum_periods(self, pmin=Pmin, pmax=Pmax, dp=None, duty_cycle=Duty_cycle):
+        if hasattr(self, 'whitened_clean_fluxes_fd'):
+            del self.whitened_clean_fluxes_fd
+
+        if hasattr(self, 'triggers'):
+            del self.triggers
+        if hasattr(self, 'trigger_masks'):
+            del self.trigger_masks
+        if hasattr(self, 'stats_raw_no_veto_no_score_cor'):
+            del self.stats_raw_no_veto_no_score_cor
+        if hasattr(self, 'veto_bad_trigger_inds'):
+            del self.veto_bad_trigger_inds
+
+    def make_periods_array(self, pmin=Pmin, pmax=Pmax, dp=None, duty_cycle=Duty_cycle, t_mission=None):
         """
         Sums the statistics with all the possible periods and initial phases. Accounts for
         subbin template shifts, accounts for masks.
@@ -2230,6 +2275,47 @@ class KeplerLightCurve(object):
         :type dp: float
         :param duty_cycle:
         :type duty_cycle:
+        :return:
+        :rtype:
+        """
+        if t_mission is None:
+            t_mission = self.T_mission
+        per = pmin
+        periods = [per]
+        if dp is None:
+            while per <= pmax:
+                dp = duty_cycle * per / t_mission
+                per += dp
+                periods.append(per)
+        else:
+            while per <= pmax:
+                per += dp
+                periods.append(per)
+        periods = np.array(periods)
+        return periods
+
+    def sum_periods(self, pmin=Pmin, pmax=Pmax, dp=None, duty_cycle=Duty_cycle, periods=None):
+        """
+        Sums the statistics with all the possible periods and initial phases. Accounts for
+        subbin template shifts, accounts for masks.
+
+        Creates:
+        self.statistics_periodic,
+        self.statistics_periodic_counts,
+        self.statistics_phases,
+        self.statistics_periodic_lengths_filled,
+        self.statistics_periodic_relative_amplitudes
+
+        :param pmin: Minimal period, days
+        :type pmin: float
+        :param pmax: Maximal period to consider.
+        :type pmax: float
+        :param dp: Step in the list of all the investigated periods
+        :type dp: float
+        :param duty_cycle:
+        :type duty_cycle:
+        :param periods: Alternatively, you can specify all the periods, and then the previous parameters are not needed.
+        :type periods: ndarray
         :return:
         :rtype:
         """
@@ -2261,22 +2347,29 @@ class KeplerLightCurve(object):
         tmin : float
             Minimal time in the time axis.
         """
-
-        self.Pmin = pmin
-        self.Pmax = pmax
-        per = pmin
-        periods = [per]
-        if dp is None:
-            while per <= pmax:
-                dp = duty_cycle * per / self.T_mission
-                per += dp
-                periods.append(per)
+        if periods is None:
+            self.Pmin = pmin
+            self.Pmax = pmax
+            periods = self.make_periods_array( pmin=pmin, pmax=pmax, dp=dp, duty_cycle=duty_cycle, t_mission=None)
+            #
+            # per = pmin
+            # periods = [per]
+            # if dp is None:
+            #     while per <= pmax:
+            #         dp = duty_cycle * per / self.T_mission
+            #         per += dp
+            #         periods.append(per)
+            # else:
+            #     while per <= pmax:
+            #         per += dp
+            #         periods.append(per)
+            # periods = np.array(periods)
+            self.periods = periods
         else:
-            while per <= pmax:
-                per += dp
-                periods.append(per)
-        periods = np.array(periods)
-        self.periods = periods
+            self.Pmin = periods[0]
+            self.Pmax = periods[-1]
+            self.periods = periods
+
         self._phases_interleaved = []
         self._phases_not_interleaved = []
         self.statistics_periodic_not_interleaved = []
@@ -2301,7 +2394,7 @@ class KeplerLightCurve(object):
 
             self.statistics_periodic_interleaved, denomsq = self.sum_periods_fast(
                                                               statistics_by_trends, trends_sq_by_vars, self.dt_days / self.n_shifts,
-                                                              self.tmax + self.dt_days * (1 - 1 / self.n_shifts), self.tmin,periods)
+                                                              self.tmax + self.dt_days * (1 - 1 / self.n_shifts), self.tmin, periods)
             # attention: we use the same dt for interleaved and not? it means that the phase step for the interleaved could be smaller.
             for p in range(len(self.statistics_periodic_interleaved)):
                 for t in range(len(self.statistics_periodic_interleaved[p])):
@@ -2653,6 +2746,7 @@ class KeplerLightCurve(object):
 
             times_quarters = [(np.nanmin(self.times[q]), np.nanmax(self.times[q])) for q in
                               self.quarters]  # attention: there should be no zero-padding
+            #TODO: you updated time slides, but the indices of the shuffled pieces are not saved here because you did not need them yet.
 
             self.best_inverted_periodic_scores_data = [[] for _ in range(Search_results_length)]
             self.best_inverted_periodic_scores_data[Search_results_index_per] = periods_selected
@@ -2704,6 +2798,17 @@ class KeplerLightCurve(object):
             self.summed_vars_inv[self.summed_vars_inv == 0] = np.nan
 
     def get_values_at_transit_times(self, in_non_corrected=True, transit_times=None, template_ind=None):
+        """
+        Get UNCORRECTED VALUES!!!
+        :param in_non_corrected:
+        :type in_non_corrected:
+        :param transit_times:
+        :type transit_times:
+        :param template_ind:
+        :type template_ind:
+        :return:
+        :rtype:
+        """
         if in_non_corrected:
             assert self.stats_raw_no_veto_no_score_cor is not None
             stats_raw = self.stats_raw_no_veto_no_score_cor
@@ -2755,6 +2860,8 @@ class KeplerLightCurve(object):
         self.best_templ_depths = np.array(best_templ_depths)
 
     def measure_depths(self):
+        #TODO: MAKE SURE IT WAS NOT USED BECUASE IT USES WRONG STAT
+        #TODO: get rid of the redundancies, because there is a similar function in target_class!
         if self.best_raw_stats is None:
             if self.summed_transit_times is None:
                 self.get_best_trigger()

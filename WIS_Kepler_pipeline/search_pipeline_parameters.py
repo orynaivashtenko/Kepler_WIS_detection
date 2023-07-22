@@ -71,7 +71,10 @@ Apply_score_correction = True
 Pmin = 30  # days
 Pmax = 500
 Duty_cycle = 0.05  # this was 0.1, but I changed it because sometimes it is not enough
-Std_time_scrambling = 10.  # days
+Std_time_scrambling = 10.  # days # for time slides
+Max_hole_pieces_scrampling = 30  # <1 day # Hole which is considered a reason to split the statistic to two pieces which can be shuffled
+Max_piece_scrambling = int(50 * 24 * 2)  # 50 days # Maximal possible length of a piece which will be shuffled
+Min_piece_scrambling = int(5 * 24 * 2)  # 5 days # Minimal possible length of a piece which will be shuffled
 N_per_temp_saving = 10  # how many best candidates per template to save
 # track_process = False
 

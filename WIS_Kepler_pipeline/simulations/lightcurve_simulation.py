@@ -7,12 +7,13 @@ Created on Sun Sep 26 12:16:38 2021
 """
 
 import numpy as np
-import sys
+# import sys
 import os
-import search_pipeline as pip
+# import search_pipeline as pip
 import templates.template_module as tm
 import auxiliary_functions as af
 import file_operations as fop
+import utils as ut
 
 dt_lc = tm.dt_lc
 
@@ -268,7 +269,7 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
     """
     if get_data:
         assert target_id is not None, 'Please specify target ID!'
-        times, fluxes = pip.get_data_fun(target_id, location=data_location)
+        times, fluxes = af.get_data_fun(target_id, location=data_location)
     times = [np.array(tt) for tt in times]  # should work like copy...
     fluxes = [np.array(ff) for ff in fluxes]
 
@@ -276,7 +277,7 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
     for q in range(len(times)):
         dts.append(np.nanmean((times[q] - np.roll(times[q], 1))[1:]))
     dt = np.nanmean(dts)
-    times_int = [pip.interpolate_time(times[i]) for i in range(len(times))]
+    times_int = [ut.interpolate_time(times[i]) for i in range(len(times))]
     # time = np.arange(times_int[0][0], times_int[-1][-1]+dt)*dt
 
     if first_transit_center - times_int[0][0] >= period:
@@ -302,10 +303,10 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
                 if template_num is None:
                     widths = tm.durations(tm.time(dt=dt), tm.template_bank(dt=dt))
                     template_num = np.argmin(np.abs(widths - transit_duration))
-                trans_quart = 1 - tm.flux_par(prms=tm.template_bank_parameter_list[template_num])
+                trans_quart = 1 - tm.flux_par(params=tm.template_bank_parameter_list[template_num])
             transits_quarters.append(trans_quart)
             # padding to avoid crosstalks in whitening and to make even support
-            padded_transits_quarter, zerlens = af.pad_by_zeros(trans_quart, minimal_extension=nperseg, return_zero_padding_ends=True)
+            padded_transits_quarter, zerlens = ut.pad_by_zeros(trans_quart, minimal_extension=nperseg, return_zero_padding_ends=True)
             padded_transits_quarters.append(padded_transits_quarter)
             padding_zerlens.append(zerlens)
 
@@ -329,11 +330,11 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
             mov_medians.append(mov_median)
             mask *= np.abs(fluxes[q] - mov_median) <= nsig_outliers * np.nanstd(fluxes[q] - mov_median)
             if np.prod(mask) == 0:
-                flux_interp = pip.interpolate_over_mask(np.array(fluxes[q]), mask=mask)
-                frqs, psd_quarter = af.measure_psd(flux_interp, rfft=False, nperseg=nperseg)
+                flux_interp = ut.interpolate_over_mask(np.array(fluxes[q]), mask=mask)
+                frqs, psd_quarter = ut.measure_psd(flux_interp, rfft=False, nperseg=nperseg)
             else:
-                frqs, psd_quarter = af.measure_psd(fluxes[q], rfft=False, nperseg=nperseg)
-            wf_td, wf_fd = af.psd2wf(psd_quarter, support=len(padded_transits_quarters[q]), rfft=False)
+                frqs, psd_quarter = ut.measure_psd(fluxes[q], rfft=False, nperseg=nperseg)
+            wf_td, wf_fd = ut.psd2wf(psd_quarter, support=len(padded_transits_quarters[q]), rfft=False)
             wffds.append(wf_fd)
             whit_pad_trans = np.fft.fft(padded_transits_quarters[q]) * wf_fd
             #         whitened_transits_quarters.append(whit_pad_trans[padding_zerlens[q][0]:len(whit_pad_trans)-padding_zerlens[q][-1]])
@@ -395,7 +396,7 @@ def generate_injection(times=None, fluxes=None, get_data=False, target_id=415877
                 if template_num is None:
                     widths = tm.durations(tm.time(dt=dt), tm.template_bank(dt=dt))
                     template_num = np.argmin(np.abs(widths - transit_duration))
-                trans_quart = tm.flux_par(prms=tm.template_bank_parameter_list[template_num])
+                trans_quart = tm.flux_par(params=tm.template_bank_parameter_list[template_num])
             trans_quart = 1. - trans_quart
             if (not depth_by_rp) and (depth_ppm is not None):
                 trans_quart = trans_quart * depth_ppm / 10 ** 6

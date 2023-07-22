@@ -933,9 +933,11 @@ class KeplerTarget(object):
                             slides_pers_inv_filename_postfix=Slides_pers_inv_filename_postfix,
                             slides_pers_filename_postfix=Slides_pers_filename_postfix,
                             slides_first_times_inv_filename_postfix=Slides_first_times_inv_filename_postfix,
-                            slides_first_times_filename_postfix=Slides_first_times_filename_postfix):
+                            slides_first_times_filename_postfix=Slides_first_times_filename_postfix,
+                            use_period_chunks=False, n_periods_per_chunk=N_periods_per_chunk,
+                            n_per_temp=N_per_temp_saving_slides,
+                            use_shuffling_pieces=False):
         """
-
         :param slides_first_times_filename_postfix:
         :type slides_first_times_filename_postfix:
         :param slides_first_times_inv_filename_postfix:
@@ -954,6 +956,12 @@ class KeplerTarget(object):
         :type per_wing_slides_relative:
         :param n_slides: WILL TAKE THIS NUMBER OF NORMAL AND OF INVERTED
         :type n_slides: int
+        :param use_period_chunks: whether to slice periods to chunks to reduce the RAM consummed
+        :type use_period_chunks: bool
+        :param n_periods_per_chunk: how many period to process at once
+        :type n_periods_per_chunk: int
+        :param n_per_temp: how many best candidates per template to save
+        :type n_per_temp: int
         :return:
         :rtype:
         """
@@ -982,6 +990,9 @@ class KeplerTarget(object):
         klc.initialize_templates(template_ind=self.best_temp)
         klc.detect_single_transits(apply_score_correction=True)
 
+        # ATTENTION: we introduced this because of unclear memory issues
+        klc.delete_irrelevant()
+
         # HISTOGRAM DATA WILL BE COLLECTED HERE
         mess = []
         mess_inv = []
@@ -990,22 +1001,80 @@ class KeplerTarget(object):
         first_times = []
         first_times_inv = []
 
-        for i_slides in range(n_slides):
-            klc.time_slides()
-            klc.connect_quarters()
-            klc.interleave_shifts()
-            klc.sum_periods(pmin=p_min, pmax=p_max)
-            # klc.veto_mes()  # we are not doing it at this stage
-            klc.save_best_candidates(n_per_temp=4, save_to_file=False)
-            mess = mess + list(klc.best_periodic_scores_data[spip.Search_results_index_stat][0])
-            pers = pers + list(klc.best_periodic_scores_data[spip.Search_results_index_per][0])
-            first_times = first_times + list(klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][0])
-            mess_inv = mess_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_stat][0])
-            pers_inv = pers_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_per][0])
-            first_times_inv = first_times_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][0])
-            klc.delete_mes()
+        if not use_period_chunks:
+            for i_slides in range(n_slides):
+                if not use_shuffling_pieces:
+                    klc.time_slides()
+                    klc.connect_quarters()
+                else:
+                    klc.connect_quarters()
+                    klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
+                                            min_piece=spip.Min_piece_scrambling)
+                klc.interleave_shifts()
+                klc.sum_periods(pmin=p_min, pmax=p_max)
+                # klc.veto_mes()  # we are not doing it at this stage
+                klc.save_best_candidates(n_per_temp=n_per_temp, save_to_file=False)
+                mess = mess + list(klc.best_periodic_scores_data[spip.Search_results_index_stat][0])
+                pers = pers + list(klc.best_periodic_scores_data[spip.Search_results_index_per][0])
+                first_times = first_times + [klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][i][0]
+                                             for i in range(len(klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0]))]
+                mess_inv = mess_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_stat][0])
+                pers_inv = pers_inv + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_per][0])
+                first_times_inv = first_times_inv + [klc.best_inverted_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][i][0]
+                                     for i in range(len(klc.best_inverted_periodic_scores_data[spip.Search_results_index_sum_tr_times][0]))]
+                klc.delete_mes()
+        else:
+            periods = klc.make_periods_array(pmin=p_min, pmax=p_max)
+            period_chunks = [periods[i * n_periods_per_chunk: min((i+1) * n_periods_per_chunk, len(periods))]
+                             for i in range(int(np.ceil(len(periods) / n_periods_per_chunk))-1)]
+            mess = []
+            mess_inv = []
+            pers = []
+            pers_inv = []
+            first_times = []
+            first_times_inv = []
+            for i_slides in range(n_slides):
+                klc.time_slides()
+                klc.connect_quarters()
+                klc.interleave_shifts()
+
+                best_candidates_concat = []
+                best_inv_candidates_concat = []
+                mess_temp = []
+                pers_temp = []
+                first_times_temp = []
+                mess_inv_temp = []
+                pers_inv_temp = []
+                first_times_inv_temp = []
+                for pers_summing in period_chunks:
+                    klc.sum_periods(periods=pers_summing)
+                    # klc.veto_mes()  # we are not doing it at this stage
+                    klc.save_best_candidates(n_per_temp=n_per_temp, save_to_file=False)
+                    best_candidates_concat.append(np.array(klc.best_periodic_scores_data, dtype=object))
+                    best_inv_candidates_concat.append(np.array(klc.best_inverted_periodic_scores_data, dtype=object))
+
+                    mess_temp = mess_temp + list(klc.best_periodic_scores_data[spip.Search_results_index_stat][0])
+                    pers_temp = pers_temp + list(klc.best_periodic_scores_data[spip.Search_results_index_per][0])
+                    first_times_temp = first_times_temp + [klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][i][0]
+                                             for i in range(len(klc.best_periodic_scores_data[spip.Search_results_index_sum_tr_times][0]))]
+                    mess_inv_temp = mess_inv_temp + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_stat][0])
+                    pers_inv_temp = pers_inv_temp + list(klc.best_inverted_periodic_scores_data[spip.Search_results_index_per][0])
+                    first_times_inv_temp = first_times_inv_temp + [
+                                    klc.best_inverted_periodic_scores_data[spip.Search_results_index_sum_tr_times][0][i][0]
+                                    for i in range(len(klc.best_inverted_periodic_scores_data[spip.Search_results_index_sum_tr_times][0]))]
+                    klc.delete_mes()
+                best_indices_temp = np.argsort(mess_temp)[:n_per_temp]
+                best_indices_inv_temp = (np.argsort(mess_inv_temp)[::-1])[:n_per_temp]
+
+                mess = mess + list(np.array(mess_temp)[best_indices_temp])
+                mess_inv = mess_inv + list(np.array(mess_inv_temp)[best_indices_inv_temp])
+                pers = pers + list(np.array(pers_temp)[best_indices_temp])
+                pers_inv = pers_inv + list(np.array(pers_inv_temp)[best_indices_inv_temp])
+                first_times = first_times + list(np.array(first_times_temp)[best_indices_temp])
+                first_times_inv = first_times_inv + list(np.array(first_times_inv_temp)[best_indices_inv_temp])
 
         fls = os.listdir(self.output_location)
+
         for fl in fls:
             if self.target_id + '_' + slides_mes_inv_filename_postfix + '_' in fl:
                 n_slides_0 = int(fl[len(self.target_id + '_' + slides_mes_inv_filename_postfix + '_'): fl.index('.')])
@@ -1013,39 +1082,91 @@ class KeplerTarget(object):
                 hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
                 mess_inv = mess_inv + hist0
                 os.remove(os.path.join(self.output_location, fl))
-            elif self.target_id + '_' + slides_mes_filename_postfix + '_' in fl:
+        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_mes_inv_filename_postfix + '_' + str(n_slides)),
+                mess_inv, allow_pickle=True)
+
+        for fl in fls:
+            if self.target_id + '_' + slides_mes_filename_postfix + '_' in fl:
                 hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
                 mess = mess + hist0
                 os.remove(os.path.join(self.output_location, fl))
-            elif self.target_id + '_' + slides_pers_inv_filename_postfix + '_' in fl:
+        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_mes_filename_postfix + '_' + str(n_slides)),
+                mess, allow_pickle=True)
+
+        for fl in fls:
+            if self.target_id + '_' + slides_pers_inv_filename_postfix + '_' in fl:
                 hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
                 pers_inv = pers_inv + hist0
                 os.remove(os.path.join(self.output_location, fl))
-            elif self.target_id + '_' + slides_pers_filename_postfix + '_' in fl:
+        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_pers_inv_filename_postfix + '_' + str(n_slides)),
+                pers_inv, allow_pickle=True)
+
+        for fl in fls:
+            if self.target_id + '_' + slides_pers_filename_postfix + '_' in fl:
                 hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
                 pers = pers + hist0
                 os.remove(os.path.join(self.output_location, fl))
-            elif self.target_id + '_' + slides_first_times_inv_filename_postfix + '_' in fl:
+        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_pers_filename_postfix + '_' + str(n_slides)),
+                pers, allow_pickle=True)
+
+        for fl in fls:
+            if self.target_id + '_' + slides_first_times_inv_filename_postfix + '_' in fl:
                 hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
                 first_times_inv = first_times_inv + hist0
                 os.remove(os.path.join(self.output_location, fl))
-            elif self.target_id + '_' + slides_first_times_filename_postfix + '_' in fl:
+        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_first_times_inv_filename_postfix + '_' + str(n_slides)),
+                first_times_inv, allow_pickle=True)
+
+        for fl in fls:
+            if self.target_id + '_' + slides_first_times_filename_postfix + '_' in fl:
                 hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
                 first_times = first_times + hist0
                 os.remove(os.path.join(self.output_location, fl))
-
-        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_mes_filename_postfix + '_' + str(n_slides)),
-                mess, allow_pickle=True)
-        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_pers_filename_postfix + '_' + str(n_slides)),
-                pers, allow_pickle=True)
         np.save(os.path.join(self.output_location, self.target_id + '_' + slides_first_times_filename_postfix + '_' + str(n_slides)),
                 first_times, allow_pickle=True)
-        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_mes_inv_filename_postfix + '_' + str(n_slides)),
-                mess_inv, allow_pickle=True)
-        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_pers_inv_filename_postfix + '_' + str(n_slides)),
-                pers_inv, allow_pickle=True)
-        np.save(os.path.join(self.output_location, self.target_id + '_' + slides_first_times_inv_filename_postfix + '_' + str(n_slides)),
-                first_times_inv, allow_pickle=True)
+
+        ##############################################################################################################
+        # This code was commented out because i want to write the new file as quickly as i can after deleting the previous one.
+        # for fl in fls:
+        #     if self.target_id + '_' + slides_mes_inv_filename_postfix + '_' in fl:
+        #         n_slides_0 = int(fl[len(self.target_id + '_' + slides_mes_inv_filename_postfix + '_'): fl.index('.')])
+        #         n_slides += n_slides_0
+        #         hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
+        #         mess_inv = mess_inv + hist0
+        #         os.remove(os.path.join(self.output_location, fl))
+        #     elif self.target_id + '_' + slides_mes_filename_postfix + '_' in fl:
+        #         hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
+        #         mess = mess + hist0
+        #         os.remove(os.path.join(self.output_location, fl))
+        #     elif self.target_id + '_' + slides_pers_inv_filename_postfix + '_' in fl:
+        #         hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
+        #         pers_inv = pers_inv + hist0
+        #         os.remove(os.path.join(self.output_location, fl))
+        #     elif self.target_id + '_' + slides_pers_filename_postfix + '_' in fl:
+        #         hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
+        #         pers = pers + hist0
+        #         os.remove(os.path.join(self.output_location, fl))
+        #     elif self.target_id + '_' + slides_first_times_inv_filename_postfix + '_' in fl:
+        #         hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
+        #         first_times_inv = first_times_inv + hist0
+        #         os.remove(os.path.join(self.output_location, fl))
+        #     elif self.target_id + '_' + slides_first_times_filename_postfix + '_' in fl:
+        #         hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
+        #         first_times = first_times + hist0
+        #         os.remove(os.path.join(self.output_location, fl))
+        #
+        # np.save(os.path.join(self.output_location, self.target_id + '_' + slides_mes_filename_postfix + '_' + str(n_slides)),
+        #         mess, allow_pickle=True)
+        # np.save(os.path.join(self.output_location, self.target_id + '_' + slides_pers_filename_postfix + '_' + str(n_slides)),
+        #         pers, allow_pickle=True)
+        # np.save(os.path.join(self.output_location, self.target_id + '_' + slides_first_times_filename_postfix + '_' + str(n_slides)),
+        #         first_times, allow_pickle=True)
+        # np.save(os.path.join(self.output_location, self.target_id + '_' + slides_mes_inv_filename_postfix + '_' + str(n_slides)),
+        #         mess_inv, allow_pickle=True)
+        # np.save(os.path.join(self.output_location, self.target_id + '_' + slides_pers_inv_filename_postfix + '_' + str(n_slides)),
+        #         pers_inv, allow_pickle=True)
+        # np.save(os.path.join(self.output_location, self.target_id + '_' + slides_first_times_inv_filename_postfix + '_' + str(n_slides)),
+        #         first_times_inv, allow_pickle=True)
 
     def generate_injection_parameters(
             self, n_injections=N_injections_total, add_to_existing_file=False,
@@ -1258,7 +1379,7 @@ class KeplerTarget(object):
         return per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj
 
     def run_injection_search(self, injection_load_parameters_index=0, per_wing_detection=Per_wing_injection_detection,
-                             injections_filename_postfix=Injections_filename_postfix):
+                             injections_filename_postfix=Injections_filename_postfix, n_per_temp=N_per_temp_saving_slides):
         """
         TODO: add the thing where it reads the fields of the class to make it autonomous
         :param injections_filename_postfix:
@@ -1310,7 +1431,7 @@ class KeplerTarget(object):
         klc.interleave_shifts()
         klc.sum_periods(pmin=p_min, pmax=p_max)
         # klc.veto_mes()  # we are not doing it at this stage
-        klc.save_best_candidates(n_per_temp=4, save_to_file=False)
+        klc.save_best_candidates(n_per_temp=n_per_temp, save_to_file=False)
         # TODO: replace indices for them not to be hard-coded!
         retrieved_mes = klc.best_periodic_scores_data[spip.Search_results_index_stat][0][0]
         # retrieved_phase = klc.best_periodic_scores_data[3][0][0]  # wrt the beginning of Kepler time

@@ -40,6 +40,9 @@ while (time.time() < timeout_start + Max_work_time) and (
             if 'Successfully completed' not in text:
                 with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
                     print('FILE:  ' + fo, file=fs)
+                    dtt = time.localtime()
+                    print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
+                        dtt.tm_min) + ':' + str(dtt.tm_sec), file=fs)
                     # print(file=fs)
                     print(text, file=fs)  # we append the output text to the general output of this star
                     print(file=fs)
@@ -57,6 +60,9 @@ while (time.time() < timeout_start + Max_work_time) and (
                     if len(text_err) > 10:  # just that it is not empty
                         with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
                             print('FILE:  ' + fe, file=fs)
+                            dtt = time.localtime()
+                            print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
+                                dtt.tm_min) + ':' + str(dtt.tm_sec), file=fs)
                             print(file=fs)
                             print(text_err, file=fs)  # we append the output text to the general output of this star
                             print(file=fs)
@@ -68,5 +74,16 @@ while (time.time() < timeout_start + Max_work_time) and (
 
             if job_filename in os.listdir(Running_jobs_folder):  # I don't know why, but for some reason files are not always there
                 os.remove(os.path.join(Running_jobs_folder, job_filename))  # remove the file which finished
+
+
+
+
+
+
+
+
+
+
+
 
 # bsub -q physics-long -R "rusage[mem=3.9GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py

@@ -55,16 +55,19 @@ def get_occurrence_table(stellar_radius):
 P_min_search = 30  # days
 P_max_search = 500  # days
 P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle
+N_periods_per_chunk = 500  # will give 1.2GB per core, and I don't know why the previous line is so (it would give 222 periods per chunk)
 Mes_candidate_search = 40**0.5  # mes in units of SNR (not squared)
 N_broad_slides = 5  # for all templates and periods
 N_deep_slides_total = 100000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
-N_deep_slides_chunk = 2000
+N_deep_slides_chunk = 1000  # in run 7, decreased from 2000 to 1000 to make sure there are no time issues
 N_injections_total = 10000  # total number of all injections (all radii and periods etc.)
-N_injections_chunk = 50  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
+N_injections_chunk = 20  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
+# I decreased it from 50 to 20 in run_7 because now we need more time for veto
 Per_wing_injection_and_slides_relative = 2 / 30  # Range to the left and to the right of the best period in units of period. Will be used
 # to generate injections and deep time slides with variable periods around the best one
+N_per_temp_saving_slides = 4  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
 Default_min_plot_mes2 = 10
@@ -130,9 +133,8 @@ Summary_target_txt_filename_postfix = 'target_summary.txt'
 Dict_target_txt_filename_postfix = 'target_class_dict.txt'
 Pickle_target_small_attributes_filename_postfix = 'target_class_small_attributes.pickle'
 Conditioned_data_filename_postfix = 'conditioned_data'
-Best_periodic_scores_filename_postfix = 'best_periodic_scores_all_p_slides'
-Best_inverted_periodic_scores_filename_postfix = 'best_inverted_periodic_scores_all_p_slides'
-# WARNING incorrect name TODO change in the next run!
+Best_periodic_scores_filename_postfix = 'best_periodic_scores_all_p'
+Best_inverted_periodic_scores_filename_postfix = 'best_inverted_periodic_scores_all_p'
 Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
 All_templates_injection_parameters_filename_postfix = 'all_templates_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'

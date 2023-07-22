@@ -2100,3 +2100,110 @@ def get_p_value_gaussian(x, mean, std):
     :rtype: float
     """
     return 0.5 * erfc((x - mean) / (2 ** 0.5 * std))
+
+
+#######################################################################################################################
+# Functions for reshuffled time slides #
+#######################################################################################################################
+def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling):
+    """
+    Produces a way to split an array into pieces of lengths from `min_piece` till `max_piece`. The pieces are primarily taken
+    as parts between the holes in the `mask` whose size is more than `max_hole`. If these pieces exceed `max_piece`, they will be
+    cut randomly, so that the length of the part is between `min_piece` and `max_piece`.
+    :param mask: mask in which holes will be considered breaks between the pieces
+    :type mask: ndarray of bool
+    :param max_hole:
+    :type max_hole: int
+    :param max_piece:
+    :type max_piece: int
+    :param min_piece:
+    :type min_piece: int
+    :return: inds_pieces, beginnings of the pieces and next indices after the ends of the pieces.
+    :rtype: list[list[int,int]]
+    """
+    mask = np.array(mask).astype(bool)
+    np.random.seed(seed=None)
+    ind1 = (np.where(mask)[0])[0]
+    ind2 = (np.where(mask)[0])[-1]
+    mask1 = np.concatenate((np.ones(ind1), np.array(mask[ind1:ind2 + 1]), np.ones(len(mask) - ind2 - 1))).astype(bool)
+    begholes = np.where(mask1 * np.roll(~mask1, -1))[0] + 1  # locates inside the hole
+    endholes = np.where(mask1 * np.roll(~mask1, 1))[0]  # locates outside the hole
+    lenholes = endholes - begholes
+    big_hole_inds = np.where(lenholes >= max_hole)[0]
+    if len(big_hole_inds) > 0:
+        begholes = begholes[big_hole_inds]
+        endholes = endholes[big_hole_inds]
+
+        inds_hole_pieces = [[ind1, begholes[0]]]
+        for i in range(len(begholes) - 1):
+            inds_hole_pieces.append([endholes[i], begholes[i + 1]])
+        inds_hole_pieces.append([endholes[-1], ind2 + 1])
+    else:
+        inds_hole_pieces = [[ind1, ind2 + 1]]
+
+    inds_pieces = []
+    for ind_hp in inds_hole_pieces:
+        len_piec = ind_hp[1] - ind_hp[0]
+        if len_piec >= max_piece:
+            len_cut = int(np.random.uniform(max(len_piec - max_piece, min_piece), min(len_piec - min_piece, max_piece)))
+            inds_pieces.append([ind_hp[0], ind_hp[0] + len_cut])
+            inds_pieces.append([ind_hp[0] + len_cut, ind_hp[1]])
+        else:
+            inds_pieces.append(ind_hp)
+    return inds_pieces
+
+
+def gen_uniform_piece_lengths(tot_len, n_pieces):
+    """
+    Splits `tot_len` into `n_pieces` parts so that the distribution of parts length is uniform
+    :param tot_len: total length which needs to be split into parts
+    :type tot_len: int
+    :param n_pieces: number of pieces in which `tot_len` needs to be split
+    :type n_pieces: int
+    :return: `lens`, the lengths
+    :rtype: List[int]
+    """
+    lens_0 = np.random.uniform(0, tot_len, n_pieces)
+    lens_0 = lens_0 / np.sum(lens_0) * tot_len
+    lens = np.round(lens_0).astype(int)
+    # make sure somehow that the total length is correct
+    if np.sum(lens) > tot_len:
+        lens[np.nanargmax(lens - lens_0)] -= 1
+    elif np.sum(lens) < tot_len:
+        lens[np.nanargmin(lens - lens_0)] += 1
+    return lens
+
+
+def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0):
+    """
+    Cuts `data` into pieces according to `inds_pieces` (which can have any order) and then glues pieces together
+    interleaving them with holes of lengths `hole_lens` filled with `fill_hole_with` values.
+    Starts filling the new array from the zero index (no hole in the beginning).
+    There is hole after the last piece, although its length may be zero.
+    In-between the pieces, puts `fill_hole_with` values.
+    :param data: the initial data array which will be cut and rearranged.
+    :type data: ndarray
+    :param inds_pieces: list[list[int, int]]
+    :type inds_pieces:
+    :param hole_lens:
+    :type hole_lens:
+    :param fill_hole_with:
+    :type fill_hole_with:
+    :return: `new_data`, the rearranged pieces of the `data` interleaved with the holes
+    :rtype: ndarray
+    """
+    data = np.array(data)
+    new_data = np.array([fill_hole_with for _ in range(len(data))])
+    pos = 0  # current pisition
+    for i, ip in enumerate(inds_pieces):
+        # print(ip[0] , ip[1])
+        piece = data[ip[0]: ip[1]]
+        pos_1 = pos + len(piece)
+        # print(pos, pos_1)
+        new_data[pos: pos_1] = piece
+        pos = pos_1 + hole_lens[i]
+        # print(pos_1, pos, hole_lens[i])
+        new_data[pos_1: pos] = fill_hole_with
+    return new_data
+
+
