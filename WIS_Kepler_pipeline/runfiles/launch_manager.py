@@ -37,40 +37,40 @@ while (time.time() < timeout_start + Max_work_time) and (
         if 'Exited with exit code' in text or 'Successfully completed' in text:  # check that the job is finished
             job_filename = os.path.split(text[(text.index('Job <') + len('Job <')):text.index('> was submitted')])[1]  # take the job file name
             target_id = ''.join(list(map(lambda x: x if x.isnumeric() else '', list(fo.split('.')[0]))))  # will extract numerical part
-            if 'Successfully completed' not in text:
-                with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
-                    print('FILE:  ' + fo, file=fs)
-                    dtt = time.localtime()
-                    print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
-                        dtt.tm_min) + ':' + str(dtt.tm_sec), file=fs)
-                    # print(file=fs)
-                    print(text, file=fs)  # we append the output text to the general output of this star
-                    print(file=fs)
-                    print('########################################################################################################################################################################',
-                          file=fs)
-                with open(Error_list_file, 'a') as elf:
-                    print(job_filename, file=elf)
-            os.remove(os.path.join(Output_files_folder, fo))
-
-            # If it has some output, then it is finished, and let us look at the error
-            fe = fo[:fo.index('output')] + 'error' + fo[fo.index('output') + len('output'):]
-            try:
-                with open(os.path.join(Error_files_folder, fe)) as err_fil:
-                    text_err = err_fil.read()
-                    if len(text_err) > 10:  # just that it is not empty
-                        with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
-                            print('FILE:  ' + fe, file=fs)
-                            dtt = time.localtime()
-                            print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
-                                dtt.tm_min) + ':' + str(dtt.tm_sec), file=fs)
-                            print(file=fs)
-                            print(text_err, file=fs)  # we append the output text to the general output of this star
-                            print(file=fs)
-                            print('########################################################################################################################################################################',
-                                  file=fs)
-                    os.remove(os.path.join(Error_files_folder, fe))
-            except:
-                pass
+            # if 'Successfully completed' not in text:
+            #     with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
+            #         print('FILE:  ' + fo, file=fs)
+            #         dtt = time.localtime()
+            #         print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
+            #             dtt.tm_min) + ':' + str(dtt.tm_sec), file=fs)
+            #         # print(file=fs)
+            #         print(text, file=fs)  # we append the output text to the general output of this star
+            #         print(file=fs)
+            #         print('########################################################################################################################################################################',
+            #               file=fs)
+            #     with open(Error_list_file, 'a') as elf:
+            #         print(job_filename, file=elf)
+            # os.remove(os.path.join(Output_files_folder, fo))
+            #
+            # # If it has some output, then it is finished, and let us look at the error
+            # fe = fo[:fo.index('output')] + 'error' + fo[fo.index('output') + len('output'):]
+            # try:
+            #     with open(os.path.join(Error_files_folder, fe)) as err_fil:
+            #         text_err = err_fil.read()
+            #         if len(text_err) > 10:  # just that it is not empty
+            #             with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
+            #                 print('FILE:  ' + fe, file=fs)
+            #                 dtt = time.localtime()
+            #                 print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
+            #                     dtt.tm_min) + ':' + str(dtt.tm_sec), file=fs)
+            #                 print(file=fs)
+            #                 print(text_err, file=fs)  # we append the output text to the general output of this star
+            #                 print(file=fs)
+            #                 print('########################################################################################################################################################################',
+            #                       file=fs)
+            #         os.remove(os.path.join(Error_files_folder, fe))
+            # except:
+            #     pass
 
             if job_filename in os.listdir(Running_jobs_folder):  # I don't know why, but for some reason files are not always there
                 os.remove(os.path.join(Running_jobs_folder, job_filename))  # remove the file which finished

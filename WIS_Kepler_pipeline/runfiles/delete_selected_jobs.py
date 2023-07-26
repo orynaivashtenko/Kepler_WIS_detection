@@ -12,7 +12,7 @@
 # from pipeline_parameters import *
 # from runfiles_parameters import *
 #
-# # N_slides_total_for_now = N_deep_slides_total
+# # N_slides_total_for_now = N_slides_total
 # Snr_threshold_lower = 6.8  # this will produce of the order of 100000 jobs, which is enough for now...
 # Snr_threshold_normal = 7.0
 # Period_threshold_trash = 50.  # days

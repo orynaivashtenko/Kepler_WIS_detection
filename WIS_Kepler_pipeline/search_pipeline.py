@@ -1952,6 +1952,7 @@ class KeplerLightCurve(object):
                             triggers[q][i] = {k: [False, 'extreme_position ', [], [], [], []]}
                         else:
                             triggers[q][i][k] = [False, 'extreme_position ', [], [], [], []]
+                        # TODO: extreme position is defined for halflen, although for small templates it can be less.
                         to_veto_combined = False  # Already marked inappropriate, will not be treated with veto_combined
                     if to_veto_combined:
                         # TODO: remind myself why the chi2 veto is done on non-whitened fluxes

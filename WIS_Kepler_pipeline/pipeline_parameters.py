@@ -58,15 +58,15 @@ P_chunks_search = 360  # will give approx 2GB per core, I increased it when chan
 N_periods_per_chunk = 500  # will give 1.2GB per core, and I don't know why the previous line is so (it would give 222 periods per chunk)
 Mes_candidate_search = 40**0.5  # mes in units of SNR (not squared)
 N_broad_slides = 5  # for all templates and periods
-N_deep_slides_total = 100000  # for one template and narrow periods for all the runs
+N_slides_total = 100000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
-N_deep_slides_chunk = 1000  # in run 7, decreased from 2000 to 1000 to make sure there are no time issues
+N_slides_chunk = 1000  # in run 7, decreased from 2000 to 1000 to make sure there are no time issues
 N_injections_total = 10000  # total number of all injections (all radii and periods etc.)
 N_injections_chunk = 20  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
 # I decreased it from 50 to 20 in run_7 because now we need more time for veto
 Per_wing_injection_and_slides_relative = 2 / 30  # Range to the left and to the right of the best period in units of period. Will be used
-# to generate injections and deep time slides with variable periods around the best one
+# to generate injections and time slides with variable periods around the best one
 N_per_temp_saving_slides = 4  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
@@ -138,11 +138,12 @@ Best_inverted_periodic_scores_filename_postfix = 'best_inverted_periodic_scores_
 Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
 All_templates_injection_parameters_filename_postfix = 'all_templates_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'
-Slides_mes_inv_filename_postfix = 'slides_mes_inversion_slides'
-Slides_mes_filename_postfix = 'slides_mes_slides'
-Slides_pers_inv_filename_postfix = 'slides_pers_inversion_slides'
-Slides_pers_filename_postfix = 'slides_pers_slides'
-Slides_first_times_inv_filename_postfix = 'slides_first_times_inversion_slides'
-Slides_first_times_filename_postfix = 'slides_first_times_slides'
+# these stupid names are because of the search which checks `in`, and I need one file not to be in another one
+Slides_mes_inv_filename_postfix = 'scramble_mes_inversion_scramble'  # 'slides_mes_inversion_slides'
+Slides_mes_filename_postfix = 'scramble_mes_scramble'  # 'slides_mes_slides'
+Slides_pers_inv_filename_postfix = 'scramble_pers_inversion_scramble'  # 'slides_pers_inversion_slides'
+Slides_pers_filename_postfix = 'scramble_pers_scramble'  # 'slides_pers_slides'
+Slides_first_times_inv_filename_postfix = 'scramble_first_times_inversion_scramble'  # 'slides_first_times_inversion_slides'
+Slides_first_times_filename_postfix = 'scramble_first_times_scramble'  # 'slides_first_times_slides'
 
 Histogram_mes2_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections

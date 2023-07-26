@@ -30,125 +30,130 @@ tlim_fold = 10  # length of the half xlimit in the folds plot in units of the te
 targ = target_class.KeplerTarget(target_id=Target_id, load_pickled_attributes=True)
 targ.analyze_injections_and_background()
 
-# This is a temporary measure to correct the mistake in the code that made it calculate not the depth but the amplitude in ppms
-###########################################
-targ.get_light_curve_for_plotting_ses()
-
-targ.summed_stat_denoms = np.ones(len(targ.summed_transit_times)) * np.inf
-for ii, tt in enumerate(targ.summed_transit_times):
-    for q in targ.klc.quarters:
-        if (tt >= targ.klc.times[q][0]) & (tt <= targ.klc.times[q][-1]):
-            targ.summed_stat_denoms[ii] = targ.klc.stat_denoms[targ.klc.indices_of_templates[targ.best_temp][0]][q]
-
-targ.ampls = np.abs(targ.summed_raw_stats / targ.summed_stat_denoms)
-not_missed_transit_mask = targ.summed_trends > 0.  # TODO: introduce this concept everywhere
-targ.best_ampl = (np.nanmean((targ.ampls[not_missed_transit_mask] / targ.summed_trends[not_missed_transit_mask]))
-                  * np.nanmean(targ.summed_trends[not_missed_transit_mask]))
-# targ.ppms = (targ.summed_raw_stats / targ.summed_vars / targ.summed_trends
+# # This was a temporary measure to correct the mistake in the code that made it calculate not the depth but the amplitude in ppms
+# TODO: make sure now we are doing this correctly!
+# ###########################################
+# targ.get_light_curve_for_plotting_ses()
+#
+# targ.summed_stat_denoms = np.ones(len(targ.summed_transit_times)) * np.inf
+# for ii, tt in enumerate(targ.summed_transit_times):
+#     for q in targ.klc.quarters:
+#         if (tt >= targ.klc.times[q][0]) & (tt <= targ.klc.times[q][-1]):
+#             targ.summed_stat_denoms[ii] = targ.klc.stat_denoms[targ.klc.indices_of_templates[targ.best_temp][0]][q]
+#
+# targ.ampls = np.abs(targ.summed_raw_stats / targ.summed_stat_denoms)
+# not_missed_transit_mask = targ.summed_trends > 0.  # TODO: introduce this concept everywhere
+# targ.best_ampl = (np.nanmean((targ.ampls[not_missed_transit_mask] / targ.summed_trends[not_missed_transit_mask]))
+#                   * np.nanmean(targ.summed_trends[not_missed_transit_mask]))
+# # targ.ppms = (targ.summed_raw_stats / targ.summed_vars / targ.summed_trends
+# #              * np.max(np.abs(targ.klc.templates[targ.klc.indices_of_templates[targ.best_temp][0]])) * 1e6)
+# # I am not sure this is correct. It was written, but now I don't know why.
+# targ.ppms = (targ.summed_raw_stats / targ.summed_stat_denoms / targ.summed_trends
 #              * np.max(np.abs(targ.klc.templates[targ.klc.indices_of_templates[targ.best_temp][0]])) * 1e6)
-# I am not sure this is correct. It was written, but now I don't know why.
-targ.ppms = (targ.summed_raw_stats / targ.summed_stat_denoms / targ.summed_trends
-             * np.max(np.abs(targ.klc.templates[targ.klc.indices_of_templates[targ.best_temp][0]])) * 1e6)
-targ.best_ppm = np.abs(np.nanmean(targ.ppms[not_missed_transit_mask]))
-
-# same for inv
-targ.summed_stat_denoms_inv = np.ones(len(targ.summed_transit_times_inv)) * np.inf
-for ii, tt in enumerate(targ.summed_transit_times_inv):
-    for q in targ.klc.quarters:
-        if (tt >= targ.klc.times[q][0]) & (tt <= targ.klc.times[q][-1]):
-            targ.summed_stat_denoms_inv[ii] = targ.klc.stat_denoms[targ.klc.indices_of_templates[targ.best_temp_inv][0]][q]
-
-targ.ampls_inv = np.abs(targ.summed_raw_stats_inv / targ.summed_stat_denoms_inv)
-not_missed_transit_mask_inv = targ.summed_trends_inv > 0.  # TODO: introduce this concept everywhere
-targ.best_ampl_inv = (np.nanmean((targ.ampls_inv[not_missed_transit_mask_inv] / targ.summed_trends_inv[not_missed_transit_mask_inv]))
-                      * np.nanmean(targ.summed_trends_inv[not_missed_transit_mask_inv]))
-targ.ppms_inv = (targ.summed_raw_stats_inv / targ.summed_vars_inv / targ.summed_trends_inv
-                 * np.max(np.abs(targ.klc.templates[targ.klc.indices_of_templates[targ.best_temp_inv][0]])) * 1e6)
-targ.best_ppm_inv = np.abs(np.nanmean(targ.ppms_inv[not_missed_transit_mask_inv]))
-
-###########################################
-targ.pickle_small_attributes()
-targ.print_dict_file()
+# targ.best_ppm = np.abs(np.nanmean(targ.ppms[not_missed_transit_mask]))
+#
+# # same for inv
+# targ.summed_stat_denoms_inv = np.ones(len(targ.summed_transit_times_inv)) * np.inf
+# for ii, tt in enumerate(targ.summed_transit_times_inv):
+#     for q in targ.klc.quarters:
+#         if (tt >= targ.klc.times[q][0]) & (tt <= targ.klc.times[q][-1]):
+#             targ.summed_stat_denoms_inv[ii] = targ.klc.stat_denoms[targ.klc.indices_of_templates[targ.best_temp_inv][0]][q]
+#
+# targ.ampls_inv = np.abs(targ.summed_raw_stats_inv / targ.summed_stat_denoms_inv)
+# not_missed_transit_mask_inv = targ.summed_trends_inv > 0.  # TODO: introduce this concept everywhere
+# targ.best_ampl_inv = (np.nanmean((targ.ampls_inv[not_missed_transit_mask_inv] / targ.summed_trends_inv[not_missed_transit_mask_inv]))
+#                       * np.nanmean(targ.summed_trends_inv[not_missed_transit_mask_inv]))
+# targ.ppms_inv = (targ.summed_raw_stats_inv / targ.summed_vars_inv / targ.summed_trends_inv
+#                  * np.max(np.abs(targ.klc.templates[targ.klc.indices_of_templates[targ.best_temp_inv][0]])) * 1e6)
+# targ.best_ppm_inv = np.abs(np.nanmean(targ.ppms_inv[not_missed_transit_mask_inv]))
+#
+# ###########################################
+# targ.pickle_small_attributes()
+# targ.print_dict_file()
 
 fig = plt.figure(figsize=Figsize_hist)
 ax = fig.gca()
 targ.plot_background(ax=ax)
-pickle.dump(fig, open(os.path.join(targ.output_location, str(targ.target_id) + '_background_injection_trigger_extrapolation.png'), 'wb'))
-plt.savefig(os.path.join(targ.output_location, str(targ.target_id) + '_background_injection_trigger_extrapolation.png'),
+pickle.dump(fig, open(os.path.join(targ.output_location, str(targ.target_id) + '_background_injection_trigger_extrapolation_scramble.png'), 'wb'))
+plt.savefig(os.path.join(targ.output_location, str(targ.target_id) + '_background_injection_trigger_extrapolation_scramble.png'),
             bbox_inches='tight', dpi=320)
 plt.clf()
 
-fig = plt.figure(figsize=Figsize_fluxes)
-ax = fig.gca()
-targ.plot_fluxes(ax=ax)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'conditioned_fluxes.fig.pickle'), 'wb'))
-plt.savefig(os.path.join(targ.output_location, str(targ.target_id) + 'conditioned_fluxes.png'), bbox_inches='tight', dpi=320)
-plt.clf()
+# fig = plt.figure(figsize=Figsize_fluxes)
+# ax = fig.gca()
+# targ.plot_fluxes(ax=ax)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'conditioned_fluxes.fig.pickle'), 'wb'))
+# plt.savefig(os.path.join(targ.output_location, str(targ.target_id) + 'conditioned_fluxes.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_fluxes)
+# ax = fig.gca()
+# targ.plot_ses_snr(ax=ax)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'ses_snr.fig.pickle'), 'wb'))
+# plt.savefig(os.path.join(targ.output_location, 'ses_snr.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_fluxes)
+# ax = fig.gca()
+# targ.plot_ses_raw(ax=ax)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'ses_raw.fig.pickle'), 'wb'))
+# plt.savefig(os.path.join(targ.output_location, 'ses_raw.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_folds)
+# ax = fig.gca()
+# targ.plot_folded_red_flux(ax=ax, plot_twice=True)
+# ax.set_xlim(-targ.best_per/2, targ.best_per/2)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_red.fig.pickle'), 'wb'))
+# ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
+#             targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
+# plt.savefig(os.path.join(targ.output_location, 'fold_red.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_folds)
+# ax = fig.gca()
+# targ.plot_folded_red_flux_inv(ax=ax)
+# ax.set_xlim(-targ.best_per_inv/2, targ.best_per_inv/2)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_red_inv.fig.pickle'), 'wb'))
+# ax.set_xlim(-targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold,
+#             targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold)
+# plt.savefig(os.path.join(targ.output_location, 'fold_red_inv.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_folds)
+# ax = fig.gca()
+# targ.plot_folded_whitened_flux(ax=ax, plot_twice=True)
+# ax.set_xlim(-targ.best_per/2, targ.best_per/2)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_whitened.fig.pickle'), 'wb'))
+# ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
+#             targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
+# plt.savefig(os.path.join(targ.output_location, 'fold_whitened.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_folds)
+# ax = fig.gca()
+# targ.plot_folded_whitened_flux_inv(ax=ax)
+# ax.set_xlim(-targ.best_per_inv/2, targ.best_per_inv/2)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_whitened_inv.fig.pickle'), 'wb'))
+# ax.set_xlim(-targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold,
+#             targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold)
+# plt.savefig(os.path.join(targ.output_location, 'fold_whitened_inv.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
+#
+# fig = plt.figure(figsize=Figsize_folds)
+# ax = fig.gca()
+# targ.plot_folded_stat_snr(ax=ax, plot_twice=True)
+# ax.set_xlim(-targ.best_per/2, targ.best_per/2)
+# pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_stat_snr.fig.pickle'), 'wb'))
+# ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
+#             targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
+# plt.savefig(os.path.join(targ.output_location, 'fold_stat_snr.png'), bbox_inches='tight', dpi=320)
+# plt.clf()
 
-fig = plt.figure(figsize=Figsize_fluxes)
-ax = fig.gca()
-targ.plot_ses_snr(ax=ax)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'ses_snr.fig.pickle'), 'wb'))
-plt.savefig(os.path.join(targ.output_location, 'ses_snr.png'), bbox_inches='tight', dpi=320)
-plt.clf()
 
-fig = plt.figure(figsize=Figsize_fluxes)
-ax = fig.gca()
-targ.plot_ses_raw(ax=ax)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'ses_raw.fig.pickle'), 'wb'))
-plt.savefig(os.path.join(targ.output_location, 'ses_raw.png'), bbox_inches='tight', dpi=320)
-plt.clf()
-
-fig = plt.figure(figsize=Figsize_folds)
-ax = fig.gca()
-targ.plot_folded_red_flux(ax=ax, plot_twice=True)
-ax.set_xlim(-targ.best_per/2, targ.best_per/2)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_red.fig.pickle'), 'wb'))
-ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
-            targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
-plt.savefig(os.path.join(targ.output_location, 'fold_red.png'), bbox_inches='tight', dpi=320)
-plt.clf()
-
-fig = plt.figure(figsize=Figsize_folds)
-ax = fig.gca()
-targ.plot_folded_red_flux_inv(ax=ax)
-ax.set_xlim(-targ.best_per_inv/2, targ.best_per_inv/2)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_red_inv.fig.pickle'), 'wb'))
-ax.set_xlim(-targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold,
-            targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold)
-plt.savefig(os.path.join(targ.output_location, 'fold_red_inv.png'), bbox_inches='tight', dpi=320)
-plt.clf()
-
-fig = plt.figure(figsize=Figsize_folds)
-ax = fig.gca()
-targ.plot_folded_whitened_flux(ax=ax, plot_twice=True)
-ax.set_xlim(-targ.best_per/2, targ.best_per/2)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_whitened.fig.pickle'), 'wb'))
-ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
-            targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
-plt.savefig(os.path.join(targ.output_location, 'fold_whitened.png'), bbox_inches='tight', dpi=320)
-plt.clf()
-
-fig = plt.figure(figsize=Figsize_folds)
-ax = fig.gca()
-targ.plot_folded_whitened_flux_inv(ax=ax)
-ax.set_xlim(-targ.best_per_inv/2, targ.best_per_inv/2)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_whitened_inv.fig.pickle'), 'wb'))
-ax.set_xlim(-targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold,
-            targ.templates_durations_hours[targ.best_temp_inv] / 24 * tlim_fold)
-plt.savefig(os.path.join(targ.output_location, 'fold_whitened_inv.png'), bbox_inches='tight', dpi=320)
-plt.clf()
-
-fig = plt.figure(figsize=Figsize_folds)
-ax = fig.gca()
-targ.plot_folded_stat_snr(ax=ax, plot_twice=True)
-ax.set_xlim(-targ.best_per/2, targ.best_per/2)
-pickle.dump(fig, open(os.path.join(targ.output_location, 'fold_stat_snr.fig.pickle'), 'wb'))
-ax.set_xlim(-targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold,
-            targ.templates_durations_hours[targ.best_temp] / 24 * tlim_fold)
-plt.savefig(os.path.join(targ.output_location, 'fold_stat_snr.png'), bbox_inches='tight', dpi=320)
-plt.clf()
-
+################################################################################################################################
+# NOT USE FOR NOW
+################################################################################################################################
 # # PLOT SES RAW INV
 # fig1 = plt.figure(figsize=(15, 5))
 # clrs = [(0.5, 0.5, 1), (0.2, 0.7, 0.5)]

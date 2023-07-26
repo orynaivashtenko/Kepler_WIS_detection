@@ -41,8 +41,8 @@ else:  # for now, run the search only if it is not a villanova binary
     # # If the target is threshold-crossing, we write job files to run the timeslides and injections:
     # if targ.is_threshold_crossing:
     #     # noinspection DuplicatedCode
-    #     for i in range(int(pp.N_deep_slides_total // pp.N_deep_slides_chunk)  # how many times we need to repeat timeslides
-    #                    + int(bool(pp.N_deep_slides_total % pp.N_deep_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
+    #     for i in range(int(pp.N_slides_total // pp.N_slides_chunk)  # how many times we need to repeat timeslides
+    #                    + int(bool(pp.N_slides_total % pp.N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
     #         # noinspection DuplicatedCode
     #         fop.write_job_file(code_file=None,
     #                            code_filename=Slides_runfile_filename,

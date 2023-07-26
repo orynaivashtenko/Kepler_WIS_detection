@@ -8,7 +8,7 @@ import file_operations as fop
 from pipeline_parameters import *
 from runfiles_parameters import *
 
-N_slides_total_for_now = N_deep_slides_total
+N_slides_total_for_now = N_slides_total
 # N_slides_total_for_now = 100000  # we have too many targets to afford 100000, so for now, let us have this
 Snr_threshold_for_now = 6.8  # this will produce of the order of 100000 jobs, which is enough for now...
 # N_injection_chunks_for_now = 50
@@ -41,8 +41,8 @@ trig_ids = [tid.strip() for tid in trig_ids]
 Output_location_wexac = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_7'
 # noinspection DuplicatedCode
 for tid in trig_ids:
-    # for i in range(int((N_slides_total_for_now) // N_deep_slides_chunk)  # how many times we need to repeat timeslides
-    #                + int(bool((N_slides_total_for_now) % N_deep_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
+    # for i in range(int(N_slides_total_for_now // N_slides_chunk)  # how many times we need to repeat timeslides
+    #                + int(bool(N_slides_total_for_now % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
     #     # noinspection DuplicatedCode
     #     fop.write_job_file(code_file=None,
     #                        code_filename=Slides_runfile_filename,
@@ -73,8 +73,8 @@ for tid in trig_ids:
     #
     #     # noinspection DuplicatedCode
     #     if n_slides < N_slides_total_for_now:
-    #         for i in range(int((N_slides_total_for_now-n_slides) // N_deep_slides_chunk)  # how many times we need to repeat timeslides
-    #                        + int(bool((N_slides_total_for_now-n_slides) % N_deep_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
+    #         for i in range(int((N_slides_total_for_now-n_slides) // N_slides_chunk)  # how many times we need to repeat timeslides
+    #                        + int(bool((N_slides_total_for_now-n_slides) % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
     #             # noinspection DuplicatedCode
     #             fop.write_job_file(code_file=None,
     #                                code_filename=Slides_runfile_filename,
@@ -141,7 +141,7 @@ for tid in trig_ids:
     #                        other_args=[['target_id', tid], ['first_injection_load_parameters_index', i]])
 
     # if len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid)) if Injections_filename_postfix in ff]) > 0:
-    # noinspection DuplicatedCode
+    #     # noinspection DuplicatedCode
     fop.write_job_file(code_file=None,
                        code_filename=Plotting_runfile_filename,
                        code_file_dir=Run_files_folder,

@@ -21,7 +21,7 @@ Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_
 Queue = 'physics-short'
 Mem_per_job_gb = '3.9'
 
-Slides_runfile_filename = 'deep_timeslides_runfile.py'
+Slides_runfile_filename = 'timeslides_runfile.py'
 Injection_parameters_runfile_filename = 'injection_parameter_generation_runfile.py'
 Injection_detection_runfile_filename = 'injection_detection_runfile.py'
 Main_search_runfile_filename = 'main_search_runfile.py'

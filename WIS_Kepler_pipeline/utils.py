@@ -1670,7 +1670,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
                                                                         len(data_left) + len(data_rignt))) ** 0.5:
         reason += 'step '
         is_good = False  # check that it is not a step instead of transit
-    data_outside = np.array(data[inds_outside])
+    data_outside = np.array(data[inds_outside])  # already with trend subtracted
     std_dat = np.std(data_outside)
 
     if zero_ends_len_abs is None:
@@ -1703,7 +1703,9 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
 
     df = len(temp)
     x0 = chi2.ppf(1 - fn, df)
-    sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), np.max(np.abs(dat)) * np.sign(np.max(np.abs(dat))))
+    # i_peak = np.argmax(np.abs(dat))
+    # sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), dat[i_peak] / np.max(temp))
+    sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), np.max(np.abs(dat)) * np.sign(np.max(np.abs(dat))))  # weird initial cond
     ampl = sol.x[0]
     xi2 = sol.fun / std_dat ** 2
     noise = dat - temp * ampl
@@ -1820,7 +1822,7 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
     total_th = chi2.ppf(1 - fn / (n_parts + 1), df=4)  # total threshold, sum of chi2 of all parts will be compared to it
 
     template_cut_centered = np.roll(template_wh_full, tlen // 2)[:tlen]  # put the transit center in the center
-    stat_for_var = np.convolve(template_cut_centered, data_wh_full,mode='valid')
+    stat_for_var = np.convolve(template_cut_centered, data_wh_full, mode='valid')
     # -> make a small sample of statistic to estimate the variance
     stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)
                                  ) & mask[tlen // 2:len(mask) - ((tlen - 1) // 2)]]
@@ -2167,10 +2169,11 @@ def gen_uniform_piece_lengths(tot_len, n_pieces):
     lens_0 = lens_0 / np.sum(lens_0) * tot_len
     lens = np.round(lens_0).astype(int)
     # make sure somehow that the total length is correct
-    if np.sum(lens) > tot_len:
-        lens[np.nanargmax(lens - lens_0)] -= 1
-    elif np.sum(lens) < tot_len:
-        lens[np.nanargmin(lens - lens_0)] += 1
+    while np.sum(lens) != tot_len:
+        if np.sum(lens) > tot_len:
+            lens[np.nanargmax(lens - lens_0)] -= 1
+        elif np.sum(lens) < tot_len:
+            lens[np.nanargmin(lens - lens_0)] += 1
     return lens
 
 

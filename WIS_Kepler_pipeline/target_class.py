@@ -882,61 +882,18 @@ class KeplerTarget(object):
         self.pickle_small_attributes()
         self.print_dict_file()
 
-    def run_broad_timeslides(self, n_slides=N_broad_slides,
-                             conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
-                             best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix,
-                             best_inverted_periodic_scores_filename_postfix=Best_inverted_periodic_scores_filename_postfix):
-        if self.klc is None:
-            self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
-                                             output_location=self.output_location)  # Q17 is removed
-            if self.per_edges is None:
-                self.per_edges = [(self.p_min + (self.p_max - self.p_min) * i / self.p_chunks) for i in
-                                  range(self.p_chunks + 1)]  # round was there
-                self.per_edges = [[self.per_edges[i], self.per_edges[i + 1]] for i in range(len(self.per_edges) - 1)]
-
-            if len([ff for ff in os.listdir(self.output_location) if conditioned_data_filename_postfix in ff]) > 0:
-                self.klc.load_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
-                self.klc.initialize_templates()
-            else:
-                self.klc.condition_data()  # In outlier mask, positive and negative nsig_outliers are equal because we run inversion after.
-                self.klc.condition_templates()
-            self.klc.detect_single_transits()
-
-        best_cand_concat_slides = []
-        best_inv_cand_concat_slides = []
-        for i_slides in range(n_slides):  # It is after the statistic was inverted!
-            self.klc.time_slides()
-            self.klc.connect_quarters()
-            self.klc.interleave_shifts()
-            best_candidates_concat = []
-            best_inv_candidates_concat = []
-            for pp in self.per_edges:
-                self.klc.sum_periods(pmin=pp[0], pmax=pp[1])
-                # self.klc.veto_mes()  # we are not doing it at this stage
-                self.klc.save_best_candidates(save_to_file=False)
-                best_candidates_concat.append(np.array(self.klc.best_periodic_scores_data, dtype=object))
-                best_inv_candidates_concat.append(np.array(self.klc.best_inverted_periodic_scores_data, dtype=object))
-                self.klc.delete_mes()
-            best_cand_concat_slides.append(best_candidates_concat)
-            best_inv_cand_concat_slides.append(best_inv_candidates_concat)
-        np.save(os.path.join(self.output_location, self.target_id + '_' + best_periodic_scores_filename_postfix + '_' + str(n_slides)),
-                np.array(best_cand_concat_slides, dtype=object), allow_pickle=True)
-        np.save(os.path.join(self.output_location,
-                             self.target_id + '_' + best_inverted_periodic_scores_filename_postfix + '_' + str(n_slides)),
-                np.array(best_inv_cand_concat_slides, dtype=object), allow_pickle=True)
-
-    def run_deep_timeslides(self, n_slides=N_deep_slides_chunk,
-                            per_wing_slides_relative=Per_wing_injection_and_slides_relative,
-                            mask_koi_planet=True,
-                            slides_mes_inv_filename_postfix=Slides_mes_inv_filename_postfix,
-                            slides_mes_filename_postfix=Slides_mes_filename_postfix,
-                            slides_pers_inv_filename_postfix=Slides_pers_inv_filename_postfix,
-                            slides_pers_filename_postfix=Slides_pers_filename_postfix,
-                            slides_first_times_inv_filename_postfix=Slides_first_times_inv_filename_postfix,
-                            slides_first_times_filename_postfix=Slides_first_times_filename_postfix,
-                            use_period_chunks=False, n_periods_per_chunk=N_periods_per_chunk,
-                            n_per_temp=N_per_temp_saving_slides,
-                            use_shuffling_pieces=False):
+    def run_timeslides(self, n_slides=N_slides_chunk,
+                       per_wing_slides_relative=Per_wing_injection_and_slides_relative,
+                       mask_koi_planet=True,
+                       slides_mes_inv_filename_postfix=Slides_mes_inv_filename_postfix,
+                       slides_mes_filename_postfix=Slides_mes_filename_postfix,
+                       slides_pers_inv_filename_postfix=Slides_pers_inv_filename_postfix,
+                       slides_pers_filename_postfix=Slides_pers_filename_postfix,
+                       slides_first_times_inv_filename_postfix=Slides_first_times_inv_filename_postfix,
+                       slides_first_times_filename_postfix=Slides_first_times_filename_postfix,
+                       use_period_chunks=False, n_periods_per_chunk=N_periods_per_chunk,
+                       n_per_temp=N_per_temp_saving_slides,
+                       use_shuffling_pieces=False):
         """
         :param slides_first_times_filename_postfix:
         :type slides_first_times_filename_postfix:
@@ -962,6 +919,8 @@ class KeplerTarget(object):
         :type n_periods_per_chunk: int
         :param n_per_temp: how many best candidates per template to save
         :type n_per_temp: int
+        :param use_shuffling_pieces: whether to cut quarters into pieces and reshuffle them while preserving the total duration of the data
+        :type use_shuffling_pieces: bool
         :return:
         :rtype:
         """
@@ -1007,7 +966,7 @@ class KeplerTarget(object):
                     klc.time_slides()
                     klc.connect_quarters()
                 else:
-                    klc.connect_quarters()
+                    klc.connect_quarters()  # this will every time destroy the effect of scrambling
                     klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
                                             min_piece=spip.Min_piece_scrambling)
                 klc.interleave_shifts()
@@ -1034,8 +993,13 @@ class KeplerTarget(object):
             first_times = []
             first_times_inv = []
             for i_slides in range(n_slides):
-                klc.time_slides()
-                klc.connect_quarters()
+                if not use_shuffling_pieces:
+                    klc.time_slides()
+                    klc.connect_quarters()
+                else:
+                    klc.connect_quarters()  # this will every time destroy the effect of scrambling
+                    klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
+                                            min_piece=spip.Min_piece_scrambling)
                 klc.interleave_shifts()
 
                 best_candidates_concat = []
@@ -1375,7 +1339,6 @@ class KeplerTarget(object):
             u2_inj = float(injection_params[6])
             rp_inj = float(injection_params[7])
             # ' a/R, inc[deg from 90 down], ecc, w[deg], u_0, u_1, rp/R, phase'
-            # target_id+'_simulation_parameter_sets.txt'
         return per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj
 
     def run_injection_search(self, injection_load_parameters_index=0, per_wing_detection=Per_wing_injection_detection,
