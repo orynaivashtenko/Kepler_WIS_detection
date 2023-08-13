@@ -28,6 +28,9 @@ Npsdsmin = 40
 Use_rfft = True
 Subtract_mean_in_psd = True
 Smoothen_psds = True
+Tukey_steps_len_psd = 16
+Conditional_zero_zeroth_freq_wf = True
+Always_zero_zeroth_freq_wf = False
 
 # Notch:
 Nsig_notch = 5.

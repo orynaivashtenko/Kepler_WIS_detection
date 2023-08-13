@@ -1197,6 +1197,7 @@ class KeplerTarget(object):
                                                'effective_whitening_filter_fourier_domain.npy'), allow_pickle=True)
         temp_bank_whit_norm = np.load(os.path.join(os.path.dirname(__file__), 'templates',
                                                    'temp_bank_whit_norm.npy'), allow_pickle=True)
+        # TODO: I am not sure about this whitening anymore!
         template_shifts = af.read_quarters_from_file(spip.Shifts_template_bank_file, dimension=2)
         n_templates = len(template_shifts)  # it is 25, not 45
         actual_template_indices = [j for j in range(len(template_shifts)) for _ in range(len(template_shifts[j]))]
@@ -1244,6 +1245,7 @@ class KeplerTarget(object):
                                         (len(effective_wf_fd) - 1) * 2) ** 0.5
                                 wh_flux_obs = wh_flux_obs / np.linalg.norm(wh_flux_obs)
                             cos_angles = [wh_flux_obs @ temp_bank_whit_norm[j] for j in range(len(temp_bank_whit_norm))]
+                            # TODO This is in Fourier rfft, how does this work on Earth?
                             args = np.argsort(cos_angles)
                             ind_1 = actual_template_indices[args[-1]]
                             ind_2 = actual_template_indices[args[-2]]

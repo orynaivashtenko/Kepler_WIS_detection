@@ -6,6 +6,7 @@ from scipy.stats import chi2
 from scipy.special import erfc, erfinv
 from scipy.interpolate import interp1d
 from scipy.signal import iirnotch, tf2sos, tf2zpk
+from scipy.signal.windows import tukey
 
 from search_pipeline_parameters import *
 
@@ -310,7 +311,7 @@ def gap_var(signal, mask=None, ngap=Ngap_moving_var,
             return np.abs(np.array(mov_var)), mask, total_var
 
 
-def outlier_free_std(data, nsig=3, mask=None, detrend=False, detr_len=128):
+def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128):
     """
     Calculates the std of data without impact of outliers and excluding masked regions
 
@@ -340,8 +341,11 @@ def outlier_free_std(data, nsig=3, mask=None, detrend=False, detr_len=128):
                                 ends='symmetric', endlen=None, return_trend=False, keep_overall_level=False)
     else:
         data1 = np.array(data)
-    outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig * np.nanstd(data1[mask])
-    return np.nanstd(data[outlier_mask * mask])
+
+    for i in range(n_iterations):
+        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig * np.nanstd(data1[mask])
+        mask = outlier_mask * mask
+    return np.nanstd(data[mask])
 
 
 def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, return_zero_padding_ends=False):
@@ -381,8 +385,7 @@ def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, r
         return data_padded
 
 
-def measure_psd(x, mask=None, nperseg=64, noverlap=-1, window='hann', dt=1.,
-                subtract_mean=True, rfft=True, return_psds=False):
+def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, return_freqs=False, dt=1, return_npsds=False):
     """
     Function for measuring psd of the signal with Welch method.
 
@@ -426,103 +429,99 @@ def measure_psd(x, mask=None, nperseg=64, noverlap=-1, window='hann', dt=1.,
     -----------
     freqs, psd
     """
-    lenx = len(x)
-    if mask is None:
-        mask = np.ones(lenx).astype(bool)
-    elif type(mask) is not bool:
-        mask = mask.astype(bool)
-
+    if noverlap < 1:
+        noverlap = int(nperseg * noverlap)
     if noverlap == -1:
         noverlap = nperseg // 2
-        # to normalize ones or not to normalize?... YES(checked with scipy)
+
     windowdict = {'boxcar': np.ones(nperseg) / np.linalg.norm(np.ones(nperseg)),
-                  'hann': 0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / (nperseg))) / np.linalg.norm(
-                      0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / (nperseg))))}
-
-    if subtract_mean:
-        x = x - np.nanmean(x[mask])
-
+                  'hann': 0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / nperseg)) / np.linalg.norm(
+                      0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / nperseg)))}
     if rfft:
-        # measuring psds for x:
-        psds = [np.abs(np.fft.rfft(windowdict[window] * x[ind1:ind1 + nperseg])
-                       ) ** 2 for ind1 in range(0, len(x) - nperseg, nperseg - noverlap
-                                                ) if np.sum((~mask)[ind1:ind1 + nperseg]) == 0]
-        psd = np.mean(np.array(psds), axis=0)
-        freqs = np.fft.rfftfreq(nperseg, d=dt)
-
+        fftfun = np.fft.rfft
+        freqfun = np.fft.rfftfreq
     else:
-        # measuring psds for x:
-        psds = [np.abs(np.fft.fft(windowdict[window] * x[ind1:ind1 + nperseg])
-                       ) ** 2 for ind1 in range(0, len(x) - nperseg, nperseg - noverlap
-                                                ) if np.sum((~mask)[ind1:ind1 + nperseg]) == 0]
-        psd = np.mean(np.array(psds), axis=0)
-        freqs = np.fft.fftfreq(nperseg, d=dt)
-    if not return_psds:
-        return freqs, psd
+        fftfun = np.fft.fft
+        freqfun = np.fft.fftfreq
+
+    psds = []
+    for i in range(len(clean_fluxes)):
+        psds.append([np.abs(fftfun(windowdict[window] * clean_fluxes[i][ind1:ind1 + nperseg])) ** 2
+                     for ind1 in range(0, len(clean_fluxes[i]) - nperseg, nperseg - noverlap
+                                       ) if np.sum((~psd_masks[i])[ind1:ind1 + nperseg]) == 0])
+    npsds = np.array([len(p) for p in psds])  # number of psds used to take the average
+    psds = [np.mean(p, axis=0) for p in psds]
+    if not return_freqs:
+        if not return_npsds:
+            return psds
+        else:
+            return psds, npsds
     else:
-        return freqs, psd, psds
+        if not return_npsds:
+            return psds, [freqfun(nperseg, d=dt) for _ in range(len(psds))]
+        else:
+            return psds, [freqfun(nperseg, d=dt) for _ in range(len(psds))], npsds
 
 
-def psd2wf(psd, support=None, rfft=True):
+def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
+           conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False):
     """
-    Generates a whitening filter of the needed length (support) from the PSD
-
-    Parameters
-    ----------
-    psd : np.array
-
-    support : int
-        length of the needed filter
-        if None, take the length of the psd
-
-    rfft : bool
-        If True, the signal is treated as real, and all ffts are rffts. The length of the frequency samples
-        are the nperseg//2+1.
-        Default is True
-
-    Returns
-    -------
-    wf_td : np.array 1d
-        whitening filter in time domain
-    wf_fd : np.array 1d
-        whitening filter in Fourier domain.
-
+    Generates a whitening filter of the needed length (support) from the PSD.
+    Makes sinc-extrapolation, applies tuckey window to the end and to the low frequencies if they drop too quickly
+    :param psd: measured PSD in coarse resolution
+    :type psd: ndarray
+    :param support: the desired length of the extrapolated filter (time domain). If None, take the length corresponding to the psd
+    :type support: int
+    :param rfft: whether to use rfft (or just fft). If true, the signal is treated as real,
+                 and all ffts are rffts. The length of the frequency samples are the nperseg//2+1.
+    :type rfft: bool
+    :param tukey_steps_len: length taken for zeroing in the tukey windowing
+    :type tukey_steps_len: int or float
+    :param conditional_zero_zeroth_freq: whether to put the low frequencies to zero if they deviate too much
+    :type conditional_zero_zeroth_freq: bool
+    :param always_zero_zeroth_freq: whether to always put the lowest frequencies to zero
+    :type always_zero_zeroth_freq: bool
+    :return: wf_td : whitening filter in time domain; wf_fd : whitening filter in Fourier domain.
+    :rtype: tuple(ndarray, ndarray)
     """
+    wf_fd_meas = 1 / np.array(psd)**0.5
     if rfft:
+        ifftfun = np.fft.irfft
+        dtype_res = np.float64
         if support is None:
-            support = 2 * (len(psd) - 1)
-
-        assert support % 2 == 0, 'support assumed to be even!'
-        wpsd = copy.deepcopy(psd ** (-0.5))
-        wpsd[0] = 0.
-
-        wf_td = np.fft.irfft(wpsd)
-        mid_point = len(wf_td) // 2
-
-        result = np.zeros(support)
-        result[:mid_point] = wf_td[:mid_point]
-        result[-mid_point:] = wf_td[-mid_point:]
-
-        wf_td = np.fft.fftshift(result)
-        wf_fd = np.fft.rfft(result)
+            support = 2 * (len(wf_fd_meas) - 1)
     else:
         if support == 'none':
-            support = len(psd)
+            support = len(wf_fd_meas)
+        ifftfun = np.fft.ifft
+        dtype_res = np.complex128
 
-        assert support % 2 == 0, 'support assumed to be even!'
-        wpsd = copy.deepcopy(psd ** (-0.5))
-        wpsd[0] = 0.
-
-        wf_td = np.fft.ifft(wpsd)
+    assert support % 2 == 0, 'self.support assumed to be even!'
+    wf_tds = []
+    wf_fds = []
+    for wpsd in wf_fd_meas:
+        wf_td = ifftfun(wpsd)
+        meas_len = len(wf_td)
+        wf_td = np.fft.ifftshift(np.fft.fftshift(wf_td) * tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
         mid_point = len(wf_td) // 2
-
-        result = np.zeros(support, dtype=np.complex128)
+        result = np.zeros(support, dtype=dtype_res)
         result[:mid_point] = wf_td[:mid_point]
         result[-mid_point:] = wf_td[-mid_point:]
 
         wf_td = np.fft.fftshift(result)
-        wf_fd = np.fft.fft(result)
-    return wf_td, wf_fd
+        wf_fd = np.abs(np.fft.rfft(result))  # It is complex, which is weird, but what can we do
+        if ((conditional_zero_zeroth_freq and (
+                np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < 0.3))
+                or always_zero_zeroth_freq):
+            first_measured_bin = int(np.ceil(support / meas_len))
+            # wf_fd[:first_measured_bin] = 0.
+            lentuk = 4 * first_measured_bin
+            wf_fd[:2 * first_measured_bin] = wf_fd[:2 * first_measured_bin] * tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
+                                                                                    sym=True)[:2 * first_measured_bin]
+            wf_td = np.fft.fftshift(ifftfun(wf_fd))
+        wf_tds.append(wf_td)
+        wf_fds.append(wf_fd)
+    return wf_tds, wf_fds
 
 
 def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
@@ -729,6 +728,22 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
         else:
             raise AssertionError('Unlefined ends parameter specified!')
     return flux
+
+
+def sinc_interp(f_vec, support, tukey_steps_len=16):
+    """
+    Works for real-fft! returns real vector!
+    """
+    if tukey_steps_len < 1:
+        tukey_steps_len = support * tukey_steps_len
+    t_vec = np.fft.irfft(f_vec)
+    meas_len = len(t_vec)
+    t_vec = np.fft.ifftshift(np.fft.fftshift(t_vec) * tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
+    mid_point = len(t_vec) // 2
+    result = np.zeros(support, dtype=np.float64)  # f_vec.dtype)
+    result[:mid_point] = t_vec[:mid_point]
+    result[-mid_point:] = t_vec[-mid_point:]
+    return np.abs(np.fft.rfft(result))
 
 
 def tanhstep(x, center=0., hwhm=1., start_from_zero=False):
@@ -1703,9 +1718,9 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
 
     df = len(temp)
     x0 = chi2.ppf(1 - fn, df)
-    # i_peak = np.argmax(np.abs(dat))
-    # sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), dat[i_peak] / np.max(temp))
-    sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), np.max(np.abs(dat)) * np.sign(np.max(np.abs(dat))))  # weird initial cond
+    i_peak = np.argmax(np.abs(dat))
+    sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), dat[i_peak] / np.max(temp))
+    # sol = minimize(lambda x: np.sum((dat - temp * x) ** 2), np.max(np.abs(dat)) * np.sign(np.max(np.abs(dat))))  # weird initial cond
     ampl = sol.x[0]
     xi2 = sol.fun / std_dat ** 2
     noise = dat - temp * ampl
@@ -1981,29 +1996,6 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
             return is_goods, amplitudes
         else:
             return is_goods
-
-
-# def score_correction(scores_i, return_function=False, negative_values=False):
-#     scores_i = np.array(scores_i)
-#     argsorted = np.argsort(scores_i)
-#     argargsorted = np.argsort(argsorted)
-#     sorted_scores = scores_i[argsorted]
-#     if negative_values is None:
-#         if (scores_i < 0).any():
-#             negative_values = True
-#         else:
-#             negative_values = False
-#     if negative_values:
-#         scores_c = 2 ** 0.5 * erfinv(2 * (np.arange(len(sorted_scores)) + 0.5) / len(sorted_scores) - 1)
-#     else:
-#         scores_c = 2 ** 0.5 * erfinv((np.arange(len(sorted_scores)) + 0.5) / len(sorted_scores))
-#     if return_function:
-#         # indices = ~np.isinf(scores_c)
-#         # funct = interp1d(sorted_scores[indices], scores_c[indices])
-#         funct = interp1d(sorted_scores, scores_c)
-#         return scores_c[argargsorted], funct
-#     else:
-#         return scores_c[argargsorted]
 
 
 def score_correction(scores_i, return_function=False, two_sided_distr=True):

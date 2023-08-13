@@ -13,8 +13,8 @@ import copy
 import warnings
 from scipy.signal import sosfiltfilt
 import numba
-from scipy.optimize import minimize
-from scipy.stats import median_abs_deviation as mad
+# from scipy.optimize import minimize
+# from scipy.stats import median_abs_deviation as mad
 
 import templates.template_module as tm
 import auxiliary_functions as af
@@ -244,12 +244,12 @@ class KeplerLightCurve(object):
         self.trends_low = None
 
         self.npsds0 = None
-        self.nperseg = None
         self.freqs = None
         self.psdfreqs = None
         self.npsds = None
         self.psds = None
         self.orig_psds = None
+        self.wf_fd_meas = None
         self.wf_td = None
         self.wf_fd = None
         self.zero_padding_ends = None
@@ -364,11 +364,15 @@ class KeplerLightCurve(object):
                        max_small_hole=Max_small_hole,
                        detr_length_outliers=Detr_length_outliers, detr_method_outliers=Detr_method_outliers,
                        detr_endmethod_outliers=Detr_endmethod_outliers,
-                       detr_ends_outliers=Detr_ends_outliers, detr_endlen_outliers=Detr_endlen_outliers):
+                       detr_ends_outliers=Detr_ends_outliers, detr_endlen_outliers=Detr_endlen_outliers,
+                       tukey_steps_len=Tukey_steps_len_psd,
+                       conditional_zero_zeroth_freq=Conditional_zero_zeroth_freq_wf,
+                       always_zero_zeroth_freq=Always_zero_zeroth_freq_wf):
         """
         Preparing data for detection. Subtract mean, mask outliers, measure psds,
         padding by zeros, notching, inpainting, whitening.
 
+        See the description of the non-described parameters in the docstrings of the corresponding functions.
         :param nsig_outliers_0: Minimal deviation from trend considered to be outlier (in units of std)
         :type nsig_outliers_0: float
         :param nsig_outliers_0_pos:
@@ -413,6 +417,12 @@ class KeplerLightCurve(object):
         :type detr_method_outliers:
         :param detr_endlen_outliers:
         :type detr_endlen_outliers:
+        :param tukey_steps_len:
+        :type tukey_steps_len:
+        :param conditional_zero_zeroth_freq:
+        :type conditional_zero_zeroth_freq:
+        :param always_zero_zeroth_freq:
+        :type always_zero_zeroth_freq:
         :return:
         :rtype:
 
@@ -439,9 +449,10 @@ class KeplerLightCurve(object):
                                 in_whitened_fluxes=False, modify_clean_masks=True)
         self.interpolate_fluxes(interpolate_clean_fluxes=False)  # need to do this again after piecewise detrending
         self.prepare_for_psd(nperseg=nperseg_psd, noverlap=noverlap_psd, npsdsmin=npsdsmin)
-        self.measure_psds(nperseg=nperseg_psd, noverlap=noverlap_psd, window=window_psd,
-                          subtract_mean=subtract_mean_in_psd,
-                          rfft=use_rfft, smoothen_psds=smoothen_psds)
+        self.measure_psds(nperseg=Nperseg_psd, noverlap=Noverlap_psd, window=Window_psd,
+                          subtract_mean=Subtract_mean_in_psd, rfft=Use_rfft, smoothen_psds=smoothen_psds,
+                          tukey_steps_len=tukey_steps_len, conditional_zero_zeroth_freq=conditional_zero_zeroth_freq,
+                          always_zero_zeroth_freq=always_zero_zeroth_freq)
         self.whiten_fluxes(whiten_clean_fluxes=True)
         self.mask_flux_outliers(nsig=nsig_outliers_w, nsig_positive=nsig_outliers_w_pos,
                                 nsig_negative=nsig_outliers_w_neg,
@@ -458,8 +469,7 @@ class KeplerLightCurve(object):
                                 detr_length_outliers=detr_length_outliers, detr_method_outliers=detr_method_outliers,
                                 detr_endmethod_outliers=detr_endmethod_outliers,
                                 detr_ends_outliers=detr_ends_outliers, detr_endlen_outliers=detr_endlen_outliers,
-                                in_whitened_fluxes=False, modify_clean_masks=True
-                                )
+                                in_whitened_fluxes=False, modify_clean_masks=True)
         self.make_big_hole_masks(max_small_hole=max_small_hole)
         self.inpaint_fluxes()
         self.whiten_fluxes(whiten_clean_fluxes=True)
@@ -716,7 +726,7 @@ class KeplerLightCurve(object):
 
         self.initialize_templates(templates=None, template_ind=template_ind, template_bank_from_file=True,
                                   templates_subbin_shift=Templates_subbin_shift)
-        self.notch_templates()
+        self.notch_templates()  # why notch is before roll, is written inside the method
         self.roll_templates()
         self.whiten_templates(use_rfft=use_rfft)
 
@@ -1026,7 +1036,7 @@ class KeplerLightCurve(object):
         :type npsdsmin: int
         :param max_small_hole:
         :type max_small_hole:
-        :return: creates self.nperseg, self.big_hole_masks; modifies self.fluxes (-> interpolated fluxes), self.psd_masks
+        :return: creates self.big_hole_masks; modifies self.fluxes (-> interpolated fluxes), self.psd_masks
         :rtype:
         """
 
@@ -1106,12 +1116,13 @@ class KeplerLightCurve(object):
         self.is_zero_padded = True
 
     def measure_psds(self, nperseg=Nperseg_psd, noverlap=Noverlap_psd, window=Window_psd,
-                     subtract_mean=Subtract_mean_in_psd, rfft=Use_rfft, smoothen_psds=True):
+                     subtract_mean=Subtract_mean_in_psd, rfft=Use_rfft, smoothen_psds=True,
+                     tukey_steps_len=16, conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False):
         """
         PSDS as function of quarter id.
         The PSD measuring algotithm makes the evenly sampled steps and not adjust the search for
-        good pieces according to the placement of the zeros in mask. That is why
-        the number of npsds is unoptimal.
+        good pieces according to the placement of the zeros in mask.
+
         :param nperseg: the length of a sample used in Welch method
         :type nperseg: int
         :param noverlap: If int: length of overlap of slices in Welch method.
@@ -1130,9 +1141,15 @@ class KeplerLightCurve(object):
             are the nperseg//2+1.
             Default is True
         :type rfft: bool
-        :param smoothen_psds:
-        :type smoothen_psds:
-        :return: creates self.psds, self.psdfreqs, self.wf_td, self.wf_fd, self.freqs, seld.npsds, self.nperseg.
+        :param smoothen_psds: whether to apply multi-resolution smoothing to mitigate the noise effects
+        :type smoothen_psds: bool
+        :param tukey_steps_len: length taken for zeroing in the tukey windowing
+        :type tukey_steps_len: int or float
+        :param conditional_zero_zeroth_freq: whether to put the low frequencies to zero if they deviate too much
+        :type conditional_zero_zeroth_freq: bool
+        :param always_zero_zeroth_freq: whether to always put the lowest frequencies to zero
+        :type always_zero_zeroth_freq: bool
+        :return: creates self.psds, self.psdfreqs, self.wf_td, self.wf_fd, self.freqs, seld.npsds.
         :rtype:
         """
 
@@ -1142,114 +1159,128 @@ class KeplerLightCurve(object):
         if self.is_fluxes_inpainted:
             warnings.warn("Fluxes have been inpainted, new PSD will make inpainting invalid for detection.")
 
-        if noverlap < 1:
-            noverlap = int(nperseg * noverlap)
-        if noverlap == -1:
-            noverlap = nperseg // 2
-
-        windowdict = {'boxcar': np.ones(nperseg) / np.linalg.norm(np.ones(nperseg)),
-                      'hann': 0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / nperseg)) / np.linalg.norm(
-                          0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / nperseg)))}
-
-        psds = []
+        if rfft:
+            fftfun = np.fft.rfft
+            ifftfun = np.fft.irfft
+            freqfun = np.fft.rfftfreq
+            dtype_res = np.float64
+        else:
+            fftfun = np.fft.fft
+            ifftfun = np.fft.ifft
+            freqfun = np.fft.fftfreq
+            dtype_res = np.complex128
 
         if subtract_mean:
-            if rfft:
-                for i in self.quarters:
-                    clean_flux = self.clean_fluxes[i] - np.nanmean((self.clean_fluxes[i])[self.psd_masks[i]])
-                    psds.append([np.abs(np.fft.rfft(windowdict[window] * clean_flux[ind1:ind1 + nperseg])
-                                        ) ** 2 for ind1 in
-                                 range(0, len(self.clean_fluxes[i]) - nperseg, nperseg - noverlap
-                                       ) if np.sum((~self.psd_masks[i])[ind1:ind1 + nperseg]) == 0])
-                self.freqs = [np.fft.rfftfreq(len(time), d=self.dt_sec) for time in self.times]
-                self.psdfreqs = [np.fft.rfftfreq(nperseg, d=self.dt_sec) for _ in self.quarters]
-            else:
-                for i in self.quarters:
-                    clean_flux = self.clean_fluxes[i] - np.nanmean((self.clean_fluxes[i])[self.psd_masks[i]])
-                    psds.append([np.abs(np.fft.fft(windowdict[window] * clean_flux[ind1:ind1 + nperseg])
-                                        ) ** 2 for ind1 in
-                                 range(0, len(self.clean_fluxes[i]) - nperseg, nperseg - noverlap
-                                       ) if np.sum((~self.psd_masks[i])[ind1:ind1 + nperseg]) == 0])
-                self.freqs = [np.fft.fftfreq(len(time), d=self.dt_sec) for time in self.times]
-                self.psdfreqs = [np.fft.fftfreq(nperseg, d=self.dt_sec) for _ in self.quarters]
+            clean_fluxes = [self.clean_fluxes[i] - np.nanmean((self.clean_fluxes[i])[self.psd_masks[i]]) for i in
+                            range(len(self.clean_fluxes))]
+        else:
+            clean_fluxes = self.clean_fluxes
+
+        self.orig_psds, self.psdfreqs = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,
+                                                      nperseg=nperseg, noverlap=noverlap, window=window, rfft=rfft,
+                                                      return_freqs=True, dt=self.dt_sec, return_npsds=False)
+
+        self.freqs = [freqfun(len(time), d=self.dt_sec) for time in self.times]
+
+        #############################################################################################################
+        # Smoothing
+        #############################################################################################################
+        if smoothen_psds:
+            nperseg_two = 2 * nperseg
+            nperseg_half = nperseg // 2
+            nperseg_quart = nperseg // 8
+            psds_res_two = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                         nperseg=nperseg_two, noverlap=noverlap, window=window, rfft=rfft,
+                                         return_freqs=False, dt=self.dt_sec, return_npsds=False)
+            psds_res_half = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                          nperseg=nperseg_half, noverlap=noverlap, window=window, rfft=rfft,
+                                          return_freqs=False, dt=self.dt_sec, return_npsds=False)
+            psds_res_quart = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                           nperseg=nperseg_quart, noverlap=noverlap, window=window, rfft=rfft,
+                                           return_freqs=False, dt=self.dt_sec, return_npsds=False)
+
+            self.psdfreqs = [freqfun(nperseg_two, d=self.dt_sec) for _ in range(len(self.orig_psds))]
+            self.psds = []
+            self.wf_fd_meas = []
+            for q in range(len(self.orig_psds)):
+                noisy_vec = 1 / psds_res_two[q] ** 0.5
+                mean_vec = ut.sinc_interp(1 / psds_res_quart[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+                noisy_resid_vec = noisy_vec - mean_vec
+                orig_vec = ut.sinc_interp(1 / self.orig_psds[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+                orig_resid_vec = orig_vec - mean_vec
+                coarse_vec = ut.sinc_interp(1 / psds_res_half[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+
+                hwin = nperseg // 8
+                std_vec = np.array([ut.outlier_free_std(noisy_resid_vec[max(0, i - hwin):min(len(noisy_resid_vec), i + hwin)],
+                                                        nsig=3, n_iterations=2) for i in np.arange(hwin, len(noisy_resid_vec), 2 * hwin)])
+                std_vec_iter = ((std_vec + np.roll(std_vec, 1)) / 2)[1:]
+                std_vec_full = np.vstack((std_vec[:-1], std_vec_iter)).flatten(order='F')
+                std_vec_full = np.concatenate(([std_vec[0]], std_vec_full, [std_vec[-1], std_vec[-1]]))
+                std_vec = np.interp(np.linspace(0, 1, len(mean_vec)), np.linspace(0, 1, len(std_vec_full)), std_vec_full)
+
+                nsig_minwids_repl_vecs = [[1, 4, coarse_vec], [2, 2, orig_vec]]
+                combined_vec = np.array(mean_vec)
+                for nsig, min_wid, repl_vec in nsig_minwids_repl_vecs:
+                    for sign in [1., -1]:
+                        i = 0
+                        while i < len(combined_vec):
+                            if sign * noisy_resid_vec[i] - nsig * std_vec[i] > 0.:
+                                i_1 = i
+                                i_2 = i
+                                while (i_2 < len(noisy_resid_vec)) and (sign * noisy_resid_vec[i_2] - nsig * std_vec[i_2] > 0):
+                                    i_2 += 1
+                                if (i_2 - i_1) >= min_wid or (i_1 <= 3 and (i_2 - i_1) >= min_wid / 2):
+                                    # or (i_2==len(noisy_resid_vec) and (i_2 - i_1) >= min_wid/0.1)):
+                                    # find the beginning and the end of the replacement region:
+                                    j_1 = i_1
+                                    while (j_1 - 1 >= 0) and (sign * orig_resid_vec[j_1 - 1] > 0):
+                                        j_1 -= 1
+                                    j_2 = i_2
+                                    while (j_2 < len(noisy_resid_vec)) and (sign * orig_resid_vec[j_2] > 0):
+                                        j_2 += 1  # this is the last slice index, so it can be bigger
+                                    combined_vec[j_1:j_2] = repl_vec[j_1:j_2]
+                                    i = j_2 + 1
+                                else:
+                                    i = i_2 + 1
+                            else:
+                                i += 1
+                self.psds.append(1 / combined_vec ** 2)
+                # we do not want the zeroth freq to be an outlier
+                i = 0
+                while combined_vec[i + 1] < combined_vec[i]:
+                    combined_vec[:i + 1] = combined_vec[i + 1]
+                    i += 1
+                self.wf_fd_meas.append(combined_vec)
 
         else:
-            if rfft:
-                for i in self.quarters:
-                    psds.append([np.abs(np.fft.rfft(windowdict[window] * (self.clean_fluxes[i])[ind1:ind1 + nperseg])
-                                        ) ** 2 for ind1 in
-                                 range(0, len(self.clean_fluxes[i]) - nperseg, nperseg - noverlap
-                                       ) if np.sum((~self.psd_masks[i])[ind1:ind1 + nperseg]) == 0])
-                self.freqs = [np.fft.rfftfreq(len(time), d=self.dt_sec) for time in self.times]
-                self.psdfreqs = [np.fft.rfftfreq(nperseg, d=self.dt_sec) for _ in self.quarters]
-            else:
-                for i in self.quarters:
-                    psds.append([np.abs(np.fft.fft(windowdict[window] * (self.clean_fluxes[i])[ind1:ind1 + nperseg])
-                                        ) ** 2 for ind1 in
-                                 range(0, len(self.clean_fluxes[i]) - nperseg, nperseg - noverlap
-                                       ) if np.sum((~self.psd_masks[i])[ind1:ind1 + nperseg]) == 0])
-                self.freqs = [np.fft.fftfreq(len(time), d=self.dt_sec) for time in self.times]
-                self.psdfreqs = [np.fft.fftfreq(nperseg, d=self.dt_sec) for _ in self.quarters]
+            self.psds = copy.deepcopy(self.orig_psds)
+            self.wf_fd_meas = [1 / self.psds[q] ** 0.5 for q in range(len(self.psds))]
 
-        self.npsds = np.array([len(p) for p in psds])  # number of psds used to take the average
-        self.psds = [np.mean(p, axis=0) for p in psds]
-        self.orig_psds = copy.deepcopy(self.psds)
-
-        if smoothen_psds:
-            for q in self.quarters:
-                fs = np.arange(len(self.psds[q]))
-                sel_ind = np.arange(len(self.psds[q]))[-len(self.psds[q]) // 3 * 2:]
-
-                psd_high = np.array(self.orig_psds[q][sel_ind])
-                fs_high = np.array(fs[sel_ind])
-
-                not_outl = (psd_high - np.nanmedian(psd_high)) < 2 * mad(psd_high, scale='normal')
-
-                fs_high = fs_high[not_outl]
-                psd_high = psd_high[not_outl]
-                p1 = np.median(np.sort(psd_high)[:3])
-                # sol = minimize(lambda x: np.sum((psd_high-x[1]*(fs_high-x[0]))**2), [np.mean(psd_high), 0])
-                # trend =  sol.x[1]*(fs - sol.x[0])
-
-                # constructing fit in such a way that we avoid negative psds and increasing psds
-                sol = minimize(
-                    lambda x: np.sum((psd_high - (-np.abs(x[1]) * (fs_high - fs_high[-1]) + (np.abs(x[0]) + p1))) ** 2),
-                    np.array([0., 0.]))
-                trend = (-np.abs(sol.x[1]) * (fs - fs_high[-1]) + (np.abs(sol.x[0]) + p1))
-
-                residuals = self.orig_psds[q] - trend
-                mad_residuals = mad(residuals[sel_ind], scale='normal')
-                new_psd = []
-                if residuals[0] < mad_residuals * 3.:
-                    new_psd.append(0.)
-                else:
-                    new_psd.append(residuals[0])
-                for i in range(1, len(residuals) - 1):
-                    if residuals[i] >= mad_residuals * 3.:
-                        new_psd.append(residuals[i])
-                    elif residuals[i] >= 2 * mad_residuals:
-                        if (residuals[i - 1] >= mad_residuals * 2.) or (residuals[i + 1] >= mad_residuals * 2.):
-                            new_psd.append(residuals[i])
-                        else:
-                            new_psd.append(0)
-                    else:
-                        new_psd.append(0)
-                if residuals[-1] < mad_residuals * 3.:
-                    new_psd.append(0.)
-                else:
-                    new_psd.append(residuals[-1])
-                psd_cut = np.array(new_psd) + trend
-                self.psds[q] = np.array(psd_cut)
-
-        self.nperseg = nperseg
-
+        #############################################################################################################
+        # Whitening filter
+        #############################################################################################################
+        assert self.support % 2 == 0, 'self.support assumed to be even!'
         self.wf_td = []
         self.wf_fd = []
-        for i in self.quarters:
-            if self.support is not None:
-                wf_td, wf_fd = ut.psd2wf(self.psds[i], self.support, rfft=rfft)
-            else:
-                wf_td, wf_fd = ut.psd2wf(self.psds[i], len(self.fluxes[i]), rfft=rfft)
+        for wpsd in self.wf_fd_meas:
+            wf_td = ifftfun(wpsd)
+            meas_len = len(wf_td)
+            wf_td = np.fft.ifftshift(np.fft.fftshift(wf_td) * ut.tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
+            mid_point = len(wf_td) // 2
+            result = np.zeros(self.support, dtype=dtype_res)
+            result[:mid_point] = wf_td[:mid_point]
+            result[-mid_point:] = wf_td[-mid_point:]
+
+            wf_td = np.fft.fftshift(result)
+            wf_fd = np.abs(np.fft.rfft(result))  # It is complex, which is weird, but what can we do
+            if ((conditional_zero_zeroth_freq and (
+                    np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < 0.3))
+                    or always_zero_zeroth_freq):
+                first_measured_bin = int(np.ceil(self.support / meas_len))
+                lentuk = 4 * first_measured_bin
+                wf_fd[:2 * first_measured_bin] = wf_fd[:2 * first_measured_bin] * ut.tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
+                                                                                           sym=True)[:2 * first_measured_bin]
+                wf_td = np.fft.fftshift(ifftfun(wf_fd))
             self.wf_td.append(wf_td)
             self.wf_fd.append(wf_fd)
         self.wf_td = np.array(self.wf_td)  # for numba need numpy.arrays
@@ -2071,14 +2102,25 @@ class KeplerLightCurve(object):
 
     def correct_score(self):
         # TODO: think how zeros in the masked region influence the period-summed distribution
-        all_stat = np.array([])
+        # all_stat = np.array([])
+        # for k in range(len(self.statistics_snr)):
+        #     for q in range(len(self.statistics_snr[k])):
+        #         all_stat = np.concatenate((all_stat, self.statistics_snr[k][q][self.stat_masks[k][q]]))
+        # #  all_stat_c, transform = ut.score_correction(all_stat, return_function=True, negative_values=True)
+        # all_stat_c, transform = ut.score_correction(all_stat, return_function=True, two_sided_distr=True)
+        # # -> we do not use one-sided distr or do????????
+        # for k in range(len(self.statistics_snr)):
+        #     for q in range(len(self.statistics_snr[k])):
+        #         self.statistics_snr[k][q][self.stat_masks[k][q]] = transform(
+        #             self.statistics_snr[k][q][self.stat_masks[k][q]])
+        #         self.statistics_raw_cor[k][q][self.stat_masks[k][q]] = (self.statistics_snr[k][q][self.stat_masks[k][q]] /
+        #                                                                 self.stat_moving_vars[k][q][self.stat_masks[k][q]] ** 0.5
+        #                                                                 * np.nanmean(self.stat_moving_vars[k][q][self.stat_masks[k][q]]))
+
+        # Now (27/07/2023), do it per template:
         for k in range(len(self.statistics_snr)):
-            for q in range(len(self.statistics_snr[k])):
-                all_stat = np.concatenate((all_stat, self.statistics_snr[k][q][self.stat_masks[k][q]]))
-        #  all_stat_c, transform = ut.score_correction(all_stat, return_function=True, negative_values=True)
-        all_stat_c, transform = ut.score_correction(all_stat, return_function=True, two_sided_distr=True)
-        # -> we do not use one-sided distr or do????????
-        for k in range(len(self.statistics_snr)):
+            all_stat = np.concatenate([self.statistics_snr[k][q][self.stat_masks[k][q]] for q in range(len(self.statistics_snr[k]))])
+            all_stat_c, transform = ut.score_correction(all_stat, return_function=True, two_sided_distr=True)
             for q in range(len(self.statistics_snr[k])):
                 self.statistics_snr[k][q][self.stat_masks[k][q]] = transform(
                     self.statistics_snr[k][q][self.stat_masks[k][q]])
@@ -2861,6 +2903,7 @@ class KeplerLightCurve(object):
         self.best_templ_depths = np.array(best_templ_depths)
 
     def measure_depths(self):
+        # TODO DOOOOOOOOOOOOOO
         #TODO: MAKE SURE IT WAS NOT USED BECUASE IT USES WRONG STAT
         #TODO: get rid of the redundancies, because there is a similar function in target_class!
         if self.best_raw_stats is None:
