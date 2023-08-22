@@ -440,7 +440,7 @@ class KeplerLightCurve(object):
         self.pad_by_zeros()
         self.make_big_hole_masks(max_small_hole=max_small_hole, exclude_individual_points=True)
         self.interpolate_fluxes()
-        self.subtract_low_trends(nperseg=nperseg_psd)
+        self.subtract_low_trends(nperseg=2*nperseg_psd)
         self.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
                                 nsig_negative=nsig_outliers_0_neg,
                                 nsig_clean=nsig_outliers_psd, detr_length_outliers=Detr_length_outliers,
@@ -1187,69 +1187,83 @@ class KeplerLightCurve(object):
         #############################################################################################################
         if smoothen_psds:
             nperseg_two = 2 * nperseg
-            nperseg_half = nperseg // 2
-            nperseg_quart = nperseg // 8
-            psds_res_two = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                         nperseg=nperseg_two, noverlap=noverlap, window=window, rfft=rfft,
-                                         return_freqs=False, dt=self.dt_sec, return_npsds=False)
-            psds_res_half = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                          nperseg=nperseg_half, noverlap=noverlap, window=window, rfft=rfft,
-                                          return_freqs=False, dt=self.dt_sec, return_npsds=False)
-            psds_res_quart = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                           nperseg=nperseg_quart, noverlap=noverlap, window=window, rfft=rfft,
-                                           return_freqs=False, dt=self.dt_sec, return_npsds=False)
+            nperseg_coarse = nperseg // 2
+            nperseg_rude = nperseg // 4
+            nperseg_smooth = nperseg // 8
+            psds_two = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                     nperseg=nperseg_two, noverlap=noverlap, window=window, rfft=rfft,
+                                     return_freqs=False, dt=self.dt_sec, return_npsds=False)
+            psds_coarse = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                        nperseg=nperseg_coarse, noverlap=noverlap, window=window, rfft=rfft,
+                                        return_freqs=False, dt=self.dt_sec, return_npsds=False)
+            psds_smooth = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                        nperseg=nperseg_smooth, noverlap=noverlap, window=window, rfft=rfft,
+                                        return_freqs=False, dt=self.dt_sec, return_npsds=False)
+            psds_rude = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
+                                      nperseg=nperseg_rude, noverlap=noverlap, window=window, rfft=rfft,
+                                      return_freqs=False, dt=self.dt_sec, return_npsds=False)
 
             self.psdfreqs = [freqfun(nperseg_two, d=self.dt_sec) for _ in range(len(self.orig_psds))]
             self.psds = []
             self.wf_fd_meas = []
             for q in range(len(self.orig_psds)):
-                noisy_vec = 1 / psds_res_two[q] ** 0.5
-                mean_vec = ut.sinc_interp(1 / psds_res_quart[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+                noisy_vec = 1 / psds_two[q] ** 0.5
+                mean_vec = ut.sinc_interp(1 / psds_smooth[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
                 noisy_resid_vec = noisy_vec - mean_vec
                 orig_vec = ut.sinc_interp(1 / self.orig_psds[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
                 orig_resid_vec = orig_vec - mean_vec
-                coarse_vec = ut.sinc_interp(1 / psds_res_half[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+                coarse_vec = ut.sinc_interp(1 / psds_coarse[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+                coarse_resid_vec = coarse_vec - mean_vec
+                rude_vec = ut.sinc_interp(1 / psds_rude[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+                rude_resid_vec = rude_vec - mean_vec
 
-                hwin = nperseg // 8
-                std_vec = np.array([ut.outlier_free_std(noisy_resid_vec[max(0, i - hwin):min(len(noisy_resid_vec), i + hwin)],
-                                                        nsig=3, n_iterations=2) for i in np.arange(hwin, len(noisy_resid_vec), 2 * hwin)])
-                std_vec_iter = ((std_vec + np.roll(std_vec, 1)) / 2)[1:]
-                std_vec_full = np.vstack((std_vec[:-1], std_vec_iter)).flatten(order='F')
-                std_vec_full = np.concatenate(([std_vec[0]], std_vec_full, [std_vec[-1], std_vec[-1]]))
-                std_vec = np.interp(np.linspace(0, 1, len(mean_vec)), np.linspace(0, 1, len(std_vec_full)), std_vec_full)
+                std_noisy = ut.outlier_free_std(noisy_resid_vec, nsig=3, n_iterations=2)
 
-                nsig_minwids_repl_vecs = [[1, 4, coarse_vec], [2, 2, orig_vec]]
+                nsig_sign_minwids_res_repl_vecs_res_repl = [[0.6, +1., 20, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
+                                                            [0.5, +1., 20, rude_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
+                                                            [0.6, -1., 20, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
+                                                            [1, +1., 10, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # mismatch behav
+                                                            [1, -1., 10, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low freq bend
+                                                            [2, -1., 2, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low freq bend
+                                                            [1, -1., 10, orig_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
+                                                            [1, +1., 10, orig_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
+                                                            [2.5, -1., 4, orig_resid_vec, orig_vec, orig_resid_vec],  # for real features
+                                                            [2.5, +1., 4, orig_resid_vec, orig_vec, orig_resid_vec],  # for real features
+                                                            [2, -1., 2, noisy_resid_vec, orig_vec, orig_resid_vec],  # for lowest freqs
+                                                            [2.5, -1., 2, noisy_resid_vec, noisy_vec,  # for lowest freqs
+                                                             noisy_resid_vec]]  # [1, 4, coarse_vec]
                 combined_vec = np.array(mean_vec)
-                for nsig, min_wid, repl_vec in nsig_minwids_repl_vecs:
-                    for sign in [1., -1]:
-                        i = 0
-                        while i < len(combined_vec):
-                            if sign * noisy_resid_vec[i] - nsig * std_vec[i] > 0.:
-                                i_1 = i
-                                i_2 = i
-                                while (i_2 < len(noisy_resid_vec)) and (sign * noisy_resid_vec[i_2] - nsig * std_vec[i_2] > 0):
-                                    i_2 += 1
-                                if (i_2 - i_1) >= min_wid or (i_1 <= 3 and (i_2 - i_1) >= min_wid / 2):
-                                    # or (i_2==len(noisy_resid_vec) and (i_2 - i_1) >= min_wid/0.1)):
-                                    # find the beginning and the end of the replacement region:
-                                    j_1 = i_1
-                                    while (j_1 - 1 >= 0) and (sign * orig_resid_vec[j_1 - 1] > 0):
-                                        j_1 -= 1
-                                    j_2 = i_2
-                                    while (j_2 < len(noisy_resid_vec)) and (sign * orig_resid_vec[j_2] > 0):
-                                        j_2 += 1  # this is the last slice index, so it can be bigger
-                                    combined_vec[j_1:j_2] = repl_vec[j_1:j_2]
-                                    i = j_2 + 1
-                                else:
-                                    i = i_2 + 1
+                for nsig, sign, min_wid, res_vec, repl_vec, res_repl in nsig_sign_minwids_res_repl_vecs_res_repl:
+                    i = 0
+                    while i < len(combined_vec):
+                        if sign * res_vec[i] - nsig * std_noisy > 0.:
+                            i_1 = i
+                            i_2 = i
+                            while (i_2 < len(res_vec)) and (sign * res_vec[i_2] - nsig * std_noisy > 0):
+                                i_2 += 1
+                            if (i_2 - i_1) >= min_wid or (i_1 <= 2 and (i_2 - i_1) >= min_wid / 2):
+                                # find the beginning and the end of the replacement region:
+                                j_1 = i_1
+                                while (j_1 - 1 >= 0) and (sign * res_repl[j_1 - 1] > 0):
+                                    j_1 -= 1
+                                j_2 = i_2
+                                while (j_2 < len(res_vec)) and (sign * res_repl[j_2] > 0):
+                                    j_2 += 1  # this is the last slice index, so it can be bigger
+                                combined_vec[j_1:j_2] = repl_vec[j_1:j_2]
+                                i = j_2 + 1
                             else:
-                                i += 1
-                self.psds.append(1 / combined_vec ** 2)
+                                i = i_2 + 1
+                        else:
+                            i += 1
                 # we do not want the zeroth freq to be an outlier
-                i = 0
-                while combined_vec[i + 1] < combined_vec[i]:
-                    combined_vec[:i + 1] = combined_vec[i + 1]
-                    i += 1
+                for j in [1, 2, 3]:
+                    i = 0
+                    while combined_vec[i + j] < combined_vec[i]:
+                        combined_vec[:i + j] = combined_vec[i + j]
+                        i += 1
+                        if i >= len(combined_vec) - j - 2:
+                            break
+                self.psds.append(1 / combined_vec ** 2)
                 self.wf_fd_meas.append(combined_vec)
 
         else:
@@ -1581,8 +1595,7 @@ class KeplerLightCurve(object):
                                                                           shifts_num=3,
                                                                           return_shifts=True)
                 self.initial_templates[template_ind] = initial_templates[template_ind]
-                self.shifts[template_ind] = shifts[
-                    template_ind]  # Careful: only one template, still more than one index!!!
+                self.shifts[template_ind] = shifts[template_ind]  # Careful: only one template, still more than one index!!!
             else:
                 self.initial_templates = [tm.template_bank(dt=self.dt_days)[template_ind]]
                 self.shifts = [[0.] for _ in range(len(self.initial_templates))]

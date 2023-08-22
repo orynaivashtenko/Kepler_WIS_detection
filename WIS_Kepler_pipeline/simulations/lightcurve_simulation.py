@@ -18,6 +18,50 @@ import utils as ut
 dt_lc = tm.dt_lc
 
 
+def get_saved_psd(freqs, dt=tm.dt_lc):
+    """
+
+    :param freqs: the frequencies that we want to get  in the end
+    :type freqs: ndarray(float)
+    :param dt: The sampling rate that was allegedly used in the saved fft. By default, the Kepler long cadence.
+    :type dt: float
+    :return:
+    :rtype:
+    """
+    rfft_med = np.array(fop.read_csv_file(os.path.join(os.path.dirname(__file__), 'stored_smoothed_asd_from_fft.txt')))
+    fr = np.fft.rfftfreq(2 * (len(rfft_med) - 1), d=dt)
+    psd = np.abs(np.interp(freqs, fr, rfft_med))**2
+    return psd
+
+
+def get_red_noise(support, n_vectors=0, dt=tm.dt_lc, psd='saved'):
+    """
+    Simulate the simplest red noise with the psd by default saved in the file
+    :param support:
+    :type support:
+    :param n_vectors: If 0, then one vector will be given. If >=1, then it will be a matrix
+    :type n_vectors:
+    :param dt: Time resolution (sampling rate) of the `psd`
+    :type dt: float
+    :param psd:
+    :type psd:
+    :return:
+    :rtype:
+    """
+    freqs = np.fft.rfftfreq(support, d=dt)
+    if psd == 'saved':
+        get_saved_psd(freqs, dt=dt)
+    if n_vectors > 0:
+        noise = np.random.normal(0, 1, (n_vectors, support))
+        f_noise = np.fft.rfft(noise, axis=1, norm='ortho')
+        noise = np.fft.irfft(f_noise * psd**0.5, axis=1, norm='ortho')
+    else:
+        noise = np.random.normal(0, 1, support)
+        f_noise = np.fft.rfft(noise, norm='ortho')
+        noise = np.fft.irfft(f_noise * psd**0.5, norm='ortho')
+    return noise
+
+
 def generate_lc_quarters(T=1400, t_min=0., t_max=None, dt=tm.dt_lc, flux0=1e5,
                          source='stored_psd', asd_max=10000., asd_min=7.5, pow_asd=-3., freq_shift=0.02e-5,
                          variations_relative=0.05, variations_absolute=1e3, std_mean_quarters=0.1, sensitivity_std=0.1,
@@ -457,106 +501,5 @@ def scramble_data(times, fluxes, numbers, std_time=4.):
         times[i] = np.array(times[i]) + numbers[i]
     return times, fluxes
 
-# def scramble_data(times, fluxes, shift_times=True, std_time=4., invert_fluxes=True, mix_quarters=True, invert_times=True):
-#     if shift_times:
-#         r = np.abs(np.random.normal(0,std_time,len(times)))
-#         r = np.cumsum(r)
-#         for i in range(len(times)):
-#             times[i] = np.array(times[i]) + r[i]
-#     if invert_fluxes:
-#         for i in range(len(fluxes)):
-#             mean = np.nanmean(fluxes[i])
-#             fluxes[i] = mean - (np.array(fluxes[i])-mean)
-#     if invert_times:
-#         for i in range(len(fluxes)):
-#             f = bool(np.random.randint(0, 2))
-#             if f:
-#                 fluxes[i] = fluxes[i][::-1]
-#     if mix_quarters:
-#         indices = np.arange(len(fluxes))
-#         np.random.shuffle(indices)
-#         fluxes = [fluxes[i] for i in indices]
-#     return times, fluxes
 
 
-# def flgen(t=tm.time(), NT=1000, maxdur=9):
-#     """
-#     Generates random fluxes from a feasible parameter range
-#     Needed for testing the template bank to have good angles
-#     returns fluxes and
-
-#     Parameters
-#     ----------
-#     t : TYPE, optional
-#         DESCRIPTION. The default is np.concatenate(((-1)*np.arange(0, T_ban, dt_lc)[:0:-1],np.arange(0, T_ban, dt_lc))).
-#     NT : TYPE, optional
-#         DESCRIPTION. The default is 1000.
-#     maxdur : TYPE, optional
-#         DESCRIPTION. The default is 9.
-
-#     Returns
-#     -------
-#     None.
-
-#     """
-#     per1=50; per2=500 # days #take more to cover extreme cases of other parameters
-#     nper = 501
-#     pers = np.linspace(per1, per2, nper)
-#     rp1 = 0.005; rp2 = 0.05; nrp = 201
-#     rps = np.linspace(rp1, rp2, nrp)
-#     ecc1 = 0.; ecc2 = 0.9; necc = 201
-#     eccs = np.linspace(ecc1, ecc2, necc)
-#     w1 = 90.; w2 = w1 + 360.; nw = 401
-#     ws = np.linspace(w1, w2, nw)
-
-#     #different variables are taken to be independent
-#     #generating uniform distributions of parameters:
-#     #(we generate twice more of them because we will then filter them out if they are bad)
-#     pergen = rangen(pers, 2*NT)
-#     Ms = np.linspace(0.5, 2.5, 201)
-#     Mgen = rangen(Ms, 2*NT)
-#     #Rs = np.linspace(1,10,10)
-#     #Rsgen = rangen(Rs, 2*NT)
-#     Rsgen = np.ones(len(Mgen))
-#     agen = (pergen/365)**(2/3) * Mgen**(1/3) * 215/Rsgen
-#     rpgen = rangen(rps, 2*NT)/Rsgen
-#     eccgen = rangen(eccs, 2*NT)
-#     wgen = rangen(ws, 2*NT)
-#     #generating uniform inclinations from the range that we are able to observe
-#     incgen = np.array([])
-# #     eccgen = np.array([])
-#     for i in range(2*NT):
-# #         # the eccentricity is bounded from above by the radius of the star
-# #         #Rs-rp < agen * (1 - eccgen)
-# #         #1+rp' < agen' * (1 - eccgen)
-# #         ecc1 = 0.0; ecc2 = np.min([0.9,1-(1+rpgen[i])/agen[i]]); necc = 101
-# #         eccs = np.linspace(ecc1, ecc2, necc)
-# #         ecc = rangen(eccs, 1)[0]
-# #         eccgen = np.append(eccgen, ecc)
-
-#         #the distance from the planet to the star:
-#         #R = agen[i] * (1 - eccgen[i]**2)/(1+eccgen[i] * np.cos(np.pi/180*(wgen[i]-90)))
-#         ecc=eccgen[i]
-#         R = agen[i] * (1 - ecc**2)/(1+ecc * np.cos(np.pi/180*(wgen[i]-90)))
-#         inc2 = 90.
-#         inc1 = 90. - np.arcsin((1+rpgen[i])/R)/np.pi*180.
-#         ninc = int((inc2-inc1)*200)
-#         incs = np.linspace(inc1, inc2, ninc)
-#         incgen = np.append(incgen, rangen(incs, 1)[0])
-
-#     argen = np.vstack((pergen,rpgen, agen, incgen, eccgen, wgen)).T
-#     flgen = np.array(list(map(
-#         lambda v: flux_par(t, *v), argen)))
-
-#     #cleaning out the generated fluxes.
-#     #we only need symmetric and fitting the time.
-#     t1 = t>=-maxdur/2
-#     t2 = t<=maxdur/2
-#     ttrun = t[t1 & t2]
-#     shapes = np.array(list(map(lambda x: t_shape(ttrun,1-x[t1 & t2]),flgen)))
-#     flgen = np.delete(flgen, np.where(shapes.T[0]<=2 * (t[1]-t[0])), axis=0)
-#     argen = np.delete(argen, np.where(shapes.T[0]<=2 * (t[1]-t[0])), axis=0)
-#     #we filtered out empty or non-symmwtric samples that could have occurred by chance
-#     flgen = flgen[0:NT]
-#     argen = argen[0:NT]
-#     return flgen, argen

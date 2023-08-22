@@ -427,8 +427,7 @@ def template_bank_subbin_shift(dt=dt_lc, dp=None, t_mission=1400., pmin=per1,
                     t_int = time(dt=dt_int)
             else:
                 shifts_done = False
-                for k in np.arange(2,
-                                   n_shifts_p):  # fine-graining the partition and checking whether the templates get close enough
+                for k in np.arange(2, n_shifts_p):  # fine-graining the partition and checking whether the templates get close enough
                     if template_int @ np.roll(template_int, int(
                             dt / k / dt_int)) >= 0.95:  # if densely sampled templates ate too far, just take smaller partition
                         temp_shif1 = integ_interp(t, t_int, tb_int0[i])[1]

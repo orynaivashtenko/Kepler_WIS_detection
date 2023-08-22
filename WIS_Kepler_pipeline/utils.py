@@ -29,6 +29,23 @@ def dec_to_bin(num, return_list=False, return_str=False):
         return int(''.join([str(b) for b in bits[::-1]]))
 
 
+def cos_vec(h1, h2, wf_fd=None, freqmask=None):
+    """
+    Calculate cosine angle between two vectors
+    """
+    if freqmask is None:
+        freqmask = np.ones(len(h1) // 2 + 1)  # .astype(float)
+    else:
+        freqmask = freqmask.astype(float)
+    if wf_fd is None:
+        wf_fd = np.ones(len(freqmask))
+
+    norm_1 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))) ** 2)
+    norm_2 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2))) ** 2)
+    return (np.sum(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))
+                   * np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2)))
+            / (norm_1 ** 0.5 * norm_2 ** 0.5))
+
 def unb_var(arr):
     """
     Calculates the unbiased variance estimate (numpy.var is biased!).
@@ -576,6 +593,46 @@ def inpaint_fluxes_fun(fluxes, masks, wf_tds):
     return inpainted_fluxes
 
 
+def nan_average_filt(ar, kernel_size=3, method='mean'):
+    """
+    Return moving average of the data with the kernel_size.
+    The average is either mean or median, defined by method.
+
+    Parameters
+    ----------
+    ar : np.array
+        the input array to filter.
+    kernel_size : int, optional
+        the size of subarray around each point to find the mean, should be odd. The default is 3.
+    method : str, 'mean' or 'median'
+        the method of how to compute the average
+    Returns
+    -------
+    arfilt : np.array
+        the array where each bin is the mean over kernel_size neighbors with
+        ignoring nans (unless all the subarray is nans)
+    """
+    arfilt = np.array([ar[0]])
+    if method == 'mean':
+        for i in np.arange(1, kernel_size // 2):
+            arfilt = np.append(arfilt, np.nanmean(ar[0: 2 * i + 1]))
+        for i in np.arange(kernel_size // 2, len(ar) - kernel_size // 2 - 1):
+            arfilt = np.append(arfilt, np.nanmean(ar[i - kernel_size // 2: i + kernel_size // 2 + 1]))
+        for i in np.arange(len(ar) - kernel_size // 2 - 1, len(ar)):
+            arfilt = np.append(arfilt, np.nanmean(ar[2 * i - 1 - len(ar):]))
+    elif method == 'median':
+        for i in np.arange(1, kernel_size // 2):
+            arfilt = np.append(arfilt, np.nanmedian(ar[0: 2 * i + 1]))
+        for i in np.arange(kernel_size // 2, len(ar) - kernel_size // 2 - 1):
+            arfilt = np.append(arfilt, np.nanmedian(ar[i - kernel_size // 2: i + kernel_size // 2 + 1]))
+        for i in np.arange(len(ar) - kernel_size // 2 - 1, len(ar)):
+            arfilt = np.append(arfilt, np.nanmedian(ar[2 * i - 1 - len(ar):]))
+    else:
+        raise AssertionError('Undefined averaging method specified!')
+    arfilt[-1] = ar[-1]
+    return arfilt
+
+
 def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continue', mitigate_hole_ends=False,
                           endhole_method='median', mit_length=10):
     """
@@ -611,46 +668,6 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
     numpy.array 1d of float
         Interpolated flux
     """
-
-    def nan_average_filt(ar, kernel_size=3, method='mean'):
-        """
-        Return moving average of the data with the kernel_size.
-        The average is either mean or median, defined by method.
-
-        Parameters
-        ----------
-        ar : np.array
-            the input array to filter.
-        kernel_size : int, optional
-            the size of subarray around each point to find the mean, should be odd. The default is 3.
-        method : str, 'mean' or 'median'
-            the method of how to compute the average
-        Returns
-        -------
-        arfilt : np.array
-            the array where each bin is the mean over kernel_size neighbors with
-            ignoring nans (unless all the subarray is nans)
-        """
-        arfilt = np.array([ar[0]])
-        if method == 'mean':
-            for i in np.arange(1, kernel_size // 2):
-                arfilt = np.append(arfilt, np.nanmean(ar[0: 2 * i + 1]))
-            for i in np.arange(kernel_size // 2, len(ar) - kernel_size // 2 - 1):
-                arfilt = np.append(arfilt, np.nanmean(ar[i - kernel_size // 2: i + kernel_size // 2 + 1]))
-            for i in np.arange(len(ar) - kernel_size // 2 - 1, len(ar)):
-                arfilt = np.append(arfilt, np.nanmean(ar[2 * i - 1 - len(ar):]))
-        elif method == 'median':
-            for i in np.arange(1, kernel_size // 2):
-                arfilt = np.append(arfilt, np.nanmedian(ar[0: 2 * i + 1]))
-            for i in np.arange(kernel_size // 2, len(ar) - kernel_size // 2 - 1):
-                arfilt = np.append(arfilt, np.nanmedian(ar[i - kernel_size // 2: i + kernel_size // 2 + 1]))
-            for i in np.arange(len(ar) - kernel_size // 2 - 1, len(ar)):
-                arfilt = np.append(arfilt, np.nanmedian(ar[2 * i - 1 - len(ar):]))
-        else:
-            raise AssertionError('Undefined averaging method specified!')
-        arfilt[-1] = ar[-1]
-        return arfilt
-
     if mask is None:
         mask = ~np.isnan(flux)
     else:
