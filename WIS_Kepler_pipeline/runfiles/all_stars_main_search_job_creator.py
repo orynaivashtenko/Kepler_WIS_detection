@@ -7,8 +7,9 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 from pipeline_parameters import *
 from runfiles.runfiles_parameters import *
 import file_operations as fop
-tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_had_problems.txt'
-                  #'/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_lacked_space.txt'
+tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/tids_to_run_first_timeslides_runs_6_7_pastro_0_9.txt'
+                  # '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_had_problems.txt'
+                  # '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_lacked_space.txt'
 
 with open(tid_to_run_file, 'r') as ttrf:
     target_ids = ttrf.readlines()
@@ -18,7 +19,7 @@ for target_id in target_ids:
     fop.write_job_file(code_file=None,
                        code_filename=Main_search_runfile_filename,
                        code_file_dir=Run_files_folder,
-                       jobname=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
+                       jobname=target_id + '_' + Main_search_job_filename_prefix + '.bsub',
                        job_file=None,
                        job_filename=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
                        job_file_dir=Job_files_folder,
@@ -40,7 +41,7 @@ for target_id in target_ids:
 #         fop.write_job_file(code_file=None,
 #                            code_filename=Main_search_runfile_filename,
 #                            code_file_dir=Run_files_folder,
-#                            jobname=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
+#                            jobname=target_id + '_' + Main_search_job_filename_prefix + '.bsub',
 #                            job_file=None,
 #                            job_filename=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
 #                            job_file_dir=Job_files_folder,

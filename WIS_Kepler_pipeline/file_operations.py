@@ -22,10 +22,10 @@ def is_int(string):
 
 
 def is_simple_num(string):
-    '''
+    """
     Checks whether the function is a simple number, that is float
     not in scientific"e+..." format
-    '''
+    """
 
     if is_int(string):
         return True
@@ -51,14 +51,14 @@ def is_float(string):
     string = string.lower()
     if is_float_number(string):
         return True
-    elif (string == 'nan' or string == 'inf' or string == '-inf'):
+    elif string == 'nan' or string == 'inf' or string == '-inf':
         return True
     else:
         return False
 
 
 def is_bool(string):
-    if (string == 'True' or string == 'False'):
+    if string == 'True' or string == 'False':
         return True
     else:
         return False
@@ -106,7 +106,7 @@ def variables_from_file(file):
             name, val = text.split('=')[0:2]
             name = name.strip()
             val = val.strip()
-            if ((name != '') and (val != '')):
+            if name != '' and val != '':
                 if val == 'None':
                     val = None
                 elif val == 'True':
@@ -139,11 +139,15 @@ def read_lists_from_file(file, location=None, dimension=2, to_array=True):
 
     Parameters
     ----------
-     name : str
+     file : str
         Name of the file ('.txt' is not needed).
     location : str
         Location where to create the file. If None, the current local directory
         will be used
+    dimension : int
+        3, 2, maybe 1. Dimensionality of the array to be read
+    to_array : bool
+        whether to convert to numpy array or stay with list
 
     Returns
     -------

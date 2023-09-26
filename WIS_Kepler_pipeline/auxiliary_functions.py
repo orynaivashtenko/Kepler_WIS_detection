@@ -156,14 +156,32 @@ def connect_quarters_fun(time_quarters, data_quarters, zero_padding_ends=None, i
     return time_connected, data_connected
 
 
-def write_quarters_to_file(name, var=None, location=None):
+def get_values_from_txt(file_dir=None, filename=None):
+    """Returns template bank templates durations in hours
+
+    :param file_dir:
+    :type file_dir:
+    :param filename:
+    :type filename:
+    :return:
+    :rtype:
+    """
+    if file_dir is None:
+        file_dir = os.path.join(os.path.dirname(__file__), filename)
+    with open(file_dir, 'r') as fil1:
+        res = (fil1.read().strip()).split()
+        res = np.array([float(val) for val in res])
+    return res
+
+
+def write_quarters_to_txt(file_name, var, location=None):
     """
     Prints array (list or numpy.array of float) variable var to file named name in the location location.
     If the var is not given, the name of the variable is the same as name
 
     Parameters
     ----------
-    name : str
+    file_name : str
         Name of the file ('.txt' is not needed). If var is None, it is also
         the name of the variable to be printed to the file.
     var : list or array
@@ -178,32 +196,44 @@ def write_quarters_to_file(name, var=None, location=None):
     None.
 
     """
-    if name[-4:] == '.txt':
-        name = name[-4:]
-    if var == None:
-        var = globals()[name]
+    if location is None:
+        if os.path.split(file_name)[0] != '':
+            file_dir = file_name
+        else:
+            location = os.getcwd()
+            file_dir = os.path.join(location, file_name)
+    else:
+        file_dir = os.path.join(location, file_name)
+    if file_dir[-4:] != '.txt':
+        file_dir = file_dir + '.txt'
+    # if var == None:
+    #     var = globals()[file_dir]
     if location is None:
         location = os.getcwd()
-        fileloc = os.path.join(location, name) + '.txt'
+        fileloc = os.path.join(location, file_dir) + '.txt'
     else:
-        fileloc = name + '.txt'
+        fileloc = file_dir + '.txt'
     with open(fileloc, 'w') as file:
         print(*var, file=file)
 
 
 # noinspection PyTypeChecker
-def read_quarters_from_file(name, location='', dimension=2, to_array=True):
+def read_quarters_from_file(file_name, location='', dimension=2, to_array=True):
     """
     Reads an array (numpy.array or list of float, maximum 2d) printed to the txt file
     named name and returns the output in form of list.
 
     Parameters
     ----------
-     name : str
+     file_name : str
         Name of the file ('.txt' is not needed).
     location : str
         Location where to create the file. If None, the current local directory
         will be used
+    dimension : int
+        The dimensionality of the array to be read. either 2 or 3, maybe 1.
+    to_array : bool
+    Whether convert to array
 
     Returns
     -------
@@ -212,15 +242,17 @@ def read_quarters_from_file(name, location='', dimension=2, to_array=True):
 
     """
     if location is None:
-        location = os.getcwd()
-        fileloc = os.path.join(location, name)
+        if os.path.split(file_name)[0] != '':
+            file_dir = file_name
+        else:
+            location = os.getcwd()
+            file_dir = os.path.join(location, file_name)
     else:
-        fileloc = name
+        file_dir = os.path.join(location, file_name)
+    if file_dir[-4:] != '.txt':
+        file_dir = file_dir + '.txt'
 
-    if name[-4:] != '.txt':
-        fileloc = name + '.txt'
-
-    with open(fileloc, 'r') as file:
+    with open(file_dir, 'r') as file:
         res = file.read()
         if dimension < 3:
             res = res.replace('array', '')
@@ -257,7 +289,7 @@ def read_quarters_from_file(name, location='', dimension=2, to_array=True):
     return res
 
 
-def get_correct_tid_folder(target_id, location, allow_creation=True):
+def get_correct_tid_folder(target_id, location, allow_creation=False):
     """
     Looks around the given folder and finds or creates the correct directory,
     so that the structure is General_all_stars_folder/target_id[:4]/target_id[:4]
@@ -293,9 +325,31 @@ def get_correct_tid_folder(target_id, location, allow_creation=True):
         elif os.path.split(location)[-1] == target_id[:4]:
             if target_id not in os.listdir(location):
                 raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
+            else:
+                location = os.path.join(location, target_id)
         else:
             if target_id[:4] not in os.listdir(location):
                 raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id[:4]))
+            else:
+                location = os.path.join(location, target_id[:4])
+                if target_id not in os.listdir(location):
+                    raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
+                else:
+                    location = os.path.join(location, target_id)
+        return location
+
+
+def get_saving_file_path(output_location, target_id, filename_postfix, file_format):
+    filename_postfix = filename_postfix.strip('_')
+    if file_format[0] != '.':
+        file_format = '.' + file_format
+    if filename_postfix[-len(file_format):] != file_format:
+        filename_postfix = filename_postfix + file_format
+    if target_id is not None:
+        file_dir = os.path.join(output_location, str(target_id) + '_' + filename_postfix)
+    else:
+        file_dir = os.path.join(output_location, str(target_id) + '_' + filename_postfix)
+    return file_dir
 
 
 def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 * 3,
@@ -465,6 +519,10 @@ def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
 def mask_ephemeris(times, fluxes, period=None, durations=None, transit_times=None, absolute_phase=None, time_edges_to_mask=None):
     """
     Adds `False` to the mask where there are transits.
+    :param times:
+    :type times:
+    :param fluxes:
+    :type fluxes:
     :param period: Period in days of transits that should be masked. Used only if `time_edges_to_mask` is None
     and `transit_times` is None. This is useful when there are no TTVs or TDVs.
     :type period: float
@@ -529,7 +587,6 @@ def mask_ephemeris(times, fluxes, period=None, durations=None, transit_times=Non
                     ind1 = np.nanargmin(np.abs(times[q] - transit_times[j]))
                     masks[q][max(0, ind1 - half_dur_bins): min(len(times[q]), ind1 + half_dur_bins + 1)] = False
     return
-
 
 
 def plot_many(list_times, list_values=None, first_index=0, prefix='quarter',
@@ -711,7 +768,7 @@ def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None
 
 def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=False, remove_quarter_17=False, return_aperture_masks=False):
     target_id = str(target_id).rjust(9, "0")
-    data_folder = get_correct_tid_folder(target_id=target_id, location=data_folder)
+    data_folder = get_correct_tid_folder(target_id=target_id, location=data_folder, allow_creation=True)
 
     if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
         download_target_pixel_files(target_id, data_folder)
@@ -764,7 +821,7 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
 
 def download_target_pixel_files(target_id, saving_folder):
     target_id = str(target_id).rjust(9, "0")
-    saving_folder = get_correct_tid_folder(target_id=target_id, location=saving_folder)
+    saving_folder = get_correct_tid_folder(target_id=target_id, location=saving_folder, allow_creation=True)
 
     webdir = 'https://archive.stsci.edu/pub/kepler/target_pixel_files/'
     # webdir = 'https://archive.stsci.edu/missions/kepler/lightcurves/'
@@ -902,7 +959,7 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_
         ampls = np.zeros(len(summed_raw_stats)) * np.nan
         ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
         normalized_ampls = np.zeros(len(summed_raw_stats)) * np.nan
-        normalized_ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
+        # normalized_ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
         ppms = np.zeros(len(summed_raw_stats)) * np.nan
         ppms_stds = np.zeros(len(summed_raw_stats)) * np.nan
 
@@ -932,6 +989,7 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_
 
 
 def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time):
+    # TODO revisit!
     nsig_outliers_0_pos = 5.
     nsig_outliers_0_neg = 15.
     # making the lightcurve out of the sap data and doing search:
@@ -940,7 +998,7 @@ def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time)
                            nsig_outliers_0_neg=nsig_outliers_0_neg,
                            nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
                            nsig_outliers_w_neg=nsig_outliers_0_neg)
-    klc_sap.condition_templates(template_ind=best_temp)
+    klc_sap.condition_templates(template_index=best_temp)
     klc_sap.matched_filtering()
     klc_sap.cut_zero_padding_ends()
     klc_sap.connect_quarters()
@@ -965,7 +1023,7 @@ def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time)
         summed_transit_times = np.array(klc_sap.time_interleaved[summed_transit_points])
         summed_raw_stats = klc_sap.statistics_interleaved[ti][summed_transit_points]
         summed_trends = klc_sap.trend_orig_flux_interleaved[summed_transit_points]
-        summed_vars = klc_sap.stat_vars_interleaved[ti][summed_transit_points]
+        # summed_vars = klc_sap.stat_vars_interleaved[ti][summed_transit_points]
 
     else:
         phase_index = np.argmin(np.abs(klc_sap._phases_not_interleaved + klc_sap.tmin - best_first_transit_time))
@@ -980,7 +1038,7 @@ def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time)
         summed_transit_times = np.array(klc_sap.time_not_interleaved[summed_transit_points])
         summed_raw_stats = klc_sap.statistics_not_interleaved[ti][summed_transit_points]
         summed_trends = klc_sap.trend_orig_flux_not_interleaved[summed_transit_points]
-        summed_vars = klc_sap.stat_vars_not_interleaved[ti][summed_transit_points]
+        # summed_vars = klc_sap.stat_vars_not_interleaved[ti][summed_transit_points]
 
     summed_stat_denoms = np.ones(len(summed_transit_times)) * np.inf
     # summed_mean_flux_variances = np.ones(len(summed_transit_times)) * np.nan
@@ -997,10 +1055,10 @@ def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time)
     ppms = np.zeros(len(summed_raw_stats))
     vars_of_ppms = np.zeros(len(summed_raw_stats)) * np.nan
     ppms[not_missed_transit_mask] = (summed_raw_stats[not_missed_transit_mask] / summed_stat_denoms[not_missed_transit_mask]
-                                     / summed_trends[not_missed_transit_mask] * np.max(np.abs(klc_sap.templates[ti_sh])) * 1e6)
+                                     / summed_trends[not_missed_transit_mask] * np.max(np.abs(klc_sap.tb.templates_shifts[ti_sh])) * 1e6)
     vars_of_ppms[not_missed_transit_mask] = (
                 1 / summed_stat_denoms[not_missed_transit_mask] * np.var(summed_trends[not_missed_transit_mask]) / summed_trends[
-                    not_missed_transit_mask] ** 4 * np.max(np.abs(klc_sap.templates[ti_sh])) ** 2 * 1e12)
+                    not_missed_transit_mask] ** 4 * np.max(np.abs(klc_sap.tb.templates_shifts[ti_sh])) ** 2 * 1e12)
     # ppm_std = np.nanmean(vars_of_ppms) ** 0.5
     return ppms, vars_of_ppms ** 0.5
 
@@ -1174,7 +1232,7 @@ def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_tim
         max_stat = None
         std_stat_max = None
         templ_sh_ind = None
-        max_templ = None
+        # max_templ = None
         for q in klc.quarters:
             if klc.times[q][~np.isnan(klc.times[q])][0] <= tt <= klc.times[q][~np.isnan(klc.times[q])][-1]:
                 ind_tr = np.nanargmin(np.abs(klc.times[q] - tt))
@@ -1239,6 +1297,7 @@ def make_bool_aperture_mask(bit_aperture_mask, bit=1):
 
 def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summed_transit_times, best_temp,
                             bins_mismatch_allowed=2):
+    # TODO reexamine
     # Make optimal aperture masks by taking bin 1 value
     aperture_masks = [make_bool_aperture_mask(msk, bit=1) for msk in bit_aperture_masks]
 
@@ -1272,22 +1331,23 @@ def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summ
         for tpf in [target_pixels_flt[q][:, i] for i in range(len(target_pixels_flt[q][0])) if aperture_masks_flt[q][i]]:
             lcp = spip.KeplerLightCurve(times=[times[q]], fluxes=[tpf], get_data=False)
             lcp.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BECAUSE WE NEED TO INVERT FAIRLY.
-            lcp.condition_templates(template_ind=best_temp)
+            lcp.condition_templates(template_index=best_temp)
             lcp.detect_single_transits(apply_score_correction=False, apply_veto=False)
             for tt in times_needed_quarters[iq]:
                 ind_tr = np.nanargmin(np.abs(times[q] - tt))
-                std_stat = ut.outlier_free_std(lcp.statistics_snr[0][0], nsig=3, mask=lcp.masks[0], detrend=False, detr_len=128)
+                # std_stat = ut.outlier_free_std(lcp.statistics_snr[0][0], nsig=3, mask=lcp.masks[0], detrend=False, detr_len=128)
                 ti0 = max(0, ind_tr - bins_mismatch_allowed)
-                time_index = ti0 + np.nanargmax(np.abs(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]))
+                # time_index = ti0 + np.nanargmax(np.abs(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]))
                 # -> allow the actual minimum to be a little shifted
                 stat_snr_here = np.nanmin(
-                    [np.nanmin(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]) for k in range(len(lcp.statistics_snr))])
+                    [np.nanmin(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]) for _ in range(len(lcp.statistics_snr))])
                 stat_raw_here = np.nanmin(
-                    [np.nanmin(lcp.statistics_raw[0][0][ti0:ind_tr + bins_mismatch_allowed]) for k in range(len(lcp.statistics_raw))])
+                    [np.nanmin(lcp.statistics_raw_cor[0][0][ti0:ind_tr + bins_mismatch_allowed])
+                     for _ in range(len(lcp.statistics_raw_cor))])
                 ppm_here = (stat_raw_here / lcp.stat_denoms[0][0] / lcp.trends_orig_fluxes[0][ind_tr] * np.max(
-                    np.abs(lcp.templates[0])) * 1e6)
+                    np.abs(lcp.tb.templates_shifts[0])) * 1e6)
                 std_of_ppm = (1 / lcp.stat_denoms[0][0] ** 0.5 * np.std(lcp.trends_orig_fluxes[0])
-                              / lcp.trends_orig_fluxes[0][ind_tr] ** 2 * np.max(np.abs(lcp.templates[0])) * 1e6)
+                              / lcp.trends_orig_fluxes[0][ind_tr] ** 2 * np.max(np.abs(lcp.tb.templates_shifts[0])) * 1e6)
                 target_pixels_stats_pxl.append(stat_snr_here)
                 target_pixels_means_pxl.append(lcp.means[0])
                 target_pixels_ppms_pxl.append(ppm_here)
@@ -1297,4 +1357,3 @@ def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summ
         target_pixels_ppms.append(target_pixels_ppms_pxl)
         target_pixels_stds_of_ppms.append(target_pixels_stds_of_ppms_pxl)
     return target_pixels_stats, target_pixels_means, target_pixels_ppms, target_pixels_stds_of_ppms
-

@@ -16,7 +16,7 @@ targ = target_class.KeplerTarget(target_id=Target_id,
                                  load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
 # read the fields
 targ.unpickle_small_attributes()
-# targ.generate_injection_parameters()
+targ.generate_injection_parameters()
 
-if len([ff for ff in os.listdir(targ.output_location) if Injection_parameters_filename_postfix in ff]) == 0:
-    targ.generate_injection_parameters()
+# if len([ff for ff in os.listdir(targ.output_location) if Injection_parameters_filename_postfix in ff]) == 0:
+#     targ.generate_injection_parameters()

@@ -3,7 +3,8 @@ astropy~=5.1
 matplotlib~=3.6.0
 scipy~=1.9.1
 numba~=0.56.2
-wget~=3.2batman-package>=2.4.8
+wget~=3.2
+batman-package>=2.4.8
 multiprocess>=0.70.12.2
 setuptools~=47.1.0
 requests~=2.28.1

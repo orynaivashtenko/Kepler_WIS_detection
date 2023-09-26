@@ -1,5 +1,6 @@
 import numpy as np
 import os
+from scipy.interpolate import RegularGridInterpolator
 
 ######################################################################################################################################
 # PHYSICAL CONSTANTS AND RATES
@@ -12,22 +13,20 @@ M_sun = 1.989e33  # g #solar mass
 G = 6.67430e-8  # dyn⋅cm2/g2 #gravitational constant
 R_sun_R_e = 109.076  # sun radii to Earth radii
 
-_this_file_dirname = os.path.dirname(__file__)
+Pipeline_folder = os.path.dirname(__file__)
 Working_place = None  # On which machine it is running: my office Mac ('Home'), Marvin or WEXAC
 # Working_place = 'Home' # 'Marvin'  # 'WEXAC'
 if Working_place is None:
-    if '/Users/orynaivashtenko/Work/Kepler_Project' in _this_file_dirname:
+    if '/Users/orynaivashtenko/Work/Kepler_Project' in Pipeline_folder:
         Working_place = 'Home'
-    elif '/SMALLDATA' in _this_file_dirname or '/home/orynai/' in _this_file_dirname:
+    elif '/SMALLDATA' in Pipeline_folder or '/home/orynai/' in Pipeline_folder:
         Working_place = 'Marvin'
-    elif '/home/labs/barakz' in _this_file_dirname:
+    elif '/home/labs/barakz' in Pipeline_folder:
         Working_place = 'WEXAC'
-
-del _this_file_dirname
 
 
 # Way to use the occurrence table:
-def get_occurrence_table(stellar_radius):
+def get_occurrence_table_old(stellar_radius):
     """
     Per one star
     :param stellar_radius:
@@ -37,7 +36,8 @@ def get_occurrence_table(stellar_radius):
     """
     # We are not putting the following occurrence rate info to a separate file because it is easier like this.
     # Generating rp according to the prior
-    log_rp_edges = np.log(np.array([0.5, 1, 2, 4, 8, 20]) / stellar_radius / R_sun_R_e)  # This was measured in Earth radii
+    log_rp_edges = np.log(np.array([0.5, 1, 2, 4, 8, 20]) / stellar_radius / R_sun_R_e)
+    # -> This was measured in Earth radii, we convert to stellar radii
     period_edges = 10 ** (np.linspace(1, 3, 11))[2:9]  # An exact empirical formula for the values in the table.
     occurrences_table = np.array([
         # zhu and dong, planets per 100 stars (WARNING: WE ONLY DETECT ONE PER STAR, DISTRIBUTION CAN BE DIFFERENT!)
@@ -51,11 +51,89 @@ def get_occurrence_table(stellar_radius):
     return log_rp_edges, period_edges, occurrences_table
 
 
+# Way to use the occurrence table:
+def get_occurrence_table():
+    """
+    Per one star
+    :return:
+    :rtype:
+    """
+    # We are not putting the following occurrence rate info to a separate file because it is easier like this.
+    # Generating rp according to the prior
+    log2_rp_re_edges = np.array([-1, 0, 1, 2, 3, np.log2(20)])  # planetary radius in Earth radii
+    log10_per_edges = np.linspace(1, 3, 11)[2:9]  # days # An exact empirical formula for the values in the table.
+    occurrences_table = np.array([
+        # zhu and dong, planets per 100 stars (WARNING: WE ONLY DETECT ONE PER STAR, DISTRIBUTION CAN BE DIFFERENT!)
+        [4.7, 4.1, 7.2, 0.66, 0.23],  # P = 25.1  - 39.8  days
+        [4.2, 4.2, 8.1, 0.58, 0.52],  # P = 39.8  - 63.1  days
+        [3.1, 3.1, 6.9, 1.50, 0.44],  # P = 63.0  - 100.0 days
+        [4.2, 4.2, 6.2, 1.30, 1.30],  # P = 100.0 - 158.5 days
+        [4.9, 4.9, 7.5, 2.40, 1.20],  # P = 158.5 - 251.2 days
+        [10.0, 10.0, 6.9, 1.70, 1.70]]  # P = 251.2 - 398.1 days
+    ) / 100
+    return log2_rp_re_edges, log10_per_edges, occurrences_table
+
+
+def get_occurrence_rate(stellar_radius, per_days, rp_rearth, rp_rstar=None):
+    """
+    Per one star
+    :param stellar_radius:
+    :type stellar_radius: floar, in solar radii
+    :param per_days: desired period or periods in days
+    :type per_days: ndarray(float) or float
+    :param rp_rearth: desired planetary radius in Earth radii. if None, `rp_rstar` will be used
+    :type rp_rearth: ndarray(float) or float or None
+    :param rp_rstar: desired planetary radius in stellar radii. Will be used if `rp_rearth` is None
+    :type rp_rstar: ndarray(float) or float or None
+    :return:
+    :rtype:
+    """
+    # We are not putting the following occurrence rate info to a separate file because it is easier like this.
+    # zhu and dong, planets per 100 stars (WARNING: WE ONLY DETECT ONE PER STAR, DISTRIBUTION CAN BE DIFFERENT!)
+    # I repeated some rows to extrapolate in order to interpolate
+    occurrences_table_enlarged = np.array([
+        [0.052, 0.052, 0.046, 0.064, 0.0045, 0.0017, 0.0017],
+        [0.047, 0.047, 0.041, 0.072, 0.0066, 0.0023, 0.0023],
+        [0.042, 0.042, 0.042, 0.081, 0.0058, 0.0052, 0.0052],
+        [0.031, 0.031, 0.031, 0.069, 0.015, 0.0044, 0.0044],
+        [0.042, 0.042, 0.042, 0.062, 0.013, 0.013, 0.013],
+        [0.049, 0.049, 0.049, 0.075, 0.024, 0.012, 0.012],
+        [0.1, 0.1, 0.1, 0.069, 0.017, 0.017, 0.017],
+        [0.1, 0.1, 0.1, 0.069, 0.017, 0.017, 0.017]])
+    # the following comes from the zhu and dong table labels, periods are in days
+    period_bin_centers_enlarged = 10 ** (np.array([1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.4, 2.6, 2.8]) + 0.1)[:-1]
+    # -> An exact empirical formula for the values in the table.
+    log10_period_bin_centers_enlarged = np.log10(period_bin_centers_enlarged)
+    # the planetary radius from the table was given in the earth radii
+    log2_rp_re_edges_enlarged = [-2, -1, 0., 1, 2, 3, 4, 5]
+    log2_rp_re_bin_centers_enlarged = (log2_rp_re_edges_enlarged + np.roll(log2_rp_re_edges_enlarged, -1))[:-1] / 2
+
+    oc_tab_enl_interp = RegularGridInterpolator(points=(log10_period_bin_centers_enlarged, log2_rp_re_bin_centers_enlarged),
+                                                values=occurrences_table_enlarged,
+                                                method='linear')  # occurrence table enlarged interpolated
+    if rp_rearth is None:
+        rp_rearth = rp_rstar * stellar_radius * R_sun_R_e
+    if not hasattr(rp_rearth, '__len__'):
+        rp_rearth = [rp_rearth]
+    if not hasattr(per_days, '__len__'):
+        per_days = [per_days]
+    points = [[np.log10(per_days[i]), np.log2(rp_rearth[i])] for i in range(len(per_days))]
+    result = oc_tab_enl_interp(points)
+    if len(result) == 1:
+        result = result[0]
+    return result
+
+
 # TARGET CLASS PARAMETERS
 P_min_search = 30  # days
 P_max_search = 500  # days
-P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle
-N_periods_per_chunk = 500  # will give 1.2GB per core, and I don't know why the previous line is so (it would give 222 periods per chunk)
+# this one is used for the main search
+# P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
+# -> this one used to be when I had 25 templates. Now I have more, so we must increase
+P_chunks_search = 1440
+# this one is used for the timeslides
+N_periods_per_chunk = 2000  # will give 1.2GB per core, and
+# I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
 Mes_candidate_search = 40**0.5  # mes in units of SNR (not squared)
 N_broad_slides = 5  # for all templates and periods
 N_slides_total = 100000  # for one template and narrow periods for all the runs
@@ -69,7 +147,8 @@ Per_wing_injection_and_slides_relative = 2 / 30  # Range to the left and to the 
 # to generate injections and time slides with variable periods around the best one
 N_per_temp_saving_slides = 4  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
-Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
+# Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
+Max_phase_mismatch_to_dur = 0.3  # Maximal relative phase difference for defining successful injections
 Default_min_plot_mes2 = 10
 Default_max_plot_mes2 = 140
 
@@ -82,7 +161,7 @@ Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a f
 Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
 Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
-Run_name = 'run_7'
+Run_name = 'run_8'
 
 if Working_place == 'Home':
     Gaia_kepler_file = '/Users/orynaivashtenko/Work/Kepler_Project/kepler_dr3_good.fits'
@@ -133,6 +212,8 @@ Summary_target_txt_filename_postfix = 'target_summary.txt'
 Dict_target_txt_filename_postfix = 'target_class_dict.txt'
 Pickle_target_small_attributes_filename_postfix = 'target_class_small_attributes.pickle'
 Conditioned_data_filename_postfix = 'conditioned_data'
+No_veto_no_score_cor_stats_filename_postfix = 'no_veto_no_cor_stats'
+Connected_statistic_data_filename_postfix = 'connected_stats'
 Best_periodic_scores_filename_postfix = 'best_periodic_scores_all_p'
 Best_inverted_periodic_scores_filename_postfix = 'best_inverted_periodic_scores_all_p'
 Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
@@ -147,3 +228,26 @@ Slides_first_times_inv_filename_postfix = 'scramble_first_times_inversion_scramb
 Slides_first_times_filename_postfix = 'scramble_first_times_scramble'  # 'slides_first_times_slides'
 
 Histogram_mes2_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
+
+#########################################################################################################################
+# Template Bank
+#########################################################################################################################
+Template_bank_folder_name = 'template_bank'
+Default_template_bank_folder = os.path.join(os.path.dirname(__file__), Template_bank_folder_name)
+Default_templates_filename = 'templates.npy'
+Default_templates_shifts_filename = 'templates_shifts.npy'
+Default_shifts_filename = 'shifts.npy'
+Default_durations_filename = 'durations.npy'  # days
+Default_indices_of_templates_filename = 'indices_of_templates.npy'
+Default_templates_of_indices_filename = 'templates_of_indices.npy'
+Default_templates_fd_for_injections_filename = 'templates_whitened_normalized_fd_for_injections.npy'
+Default_template_params_filename = 'params_templates.npy'
+# -> effective_filter_whitened normalized to have unit time-domain norm, shifter all to have peaks to the left
+# (even the subbin shifts are forcefully shifted, as will the models be)
+
+#########################################################################################################################
+# Simulations
+#########################################################################################################################
+Simulations_folder_name = 'simulations'
+Default_stored_asd_file_filename = 'stored_smoothed_asd_from_fft.txt'  # Median of many measurements
+Default_effective_wf_fd_filename = 'effective_whitening_filter_fourier_domain.npy'  # it is better to use this, it is with Tuckey

@@ -2,7 +2,7 @@ import numpy as np
 import copy
 import warnings
 from scipy.optimize import minimize
-from scipy.stats import chi2
+from scipy.stats import chi2, norm
 from scipy.special import erfc, erfinv
 from scipy.interpolate import interp1d
 from scipy.signal import iirnotch, tf2sos, tf2zpk
@@ -45,6 +45,7 @@ def cos_vec(h1, h2, wf_fd=None, freqmask=None):
     return (np.sum(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))
                    * np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2)))
             / (norm_1 ** 0.5 * norm_2 ** 0.5))
+
 
 def unb_var(arr):
     """
@@ -119,7 +120,6 @@ def moving_var(signal, mask=None, nperseg=Nperseg_moving_var, ngap=Ngap_moving_v
 
     all_done = False
     if (nperseg > len(signal) / 2) or (nsamples_min * 4 > len(np.where(mask)[0])):
-        # TODO: write this normally, not draft for pipeline
         if adjustable_slices:
             if len(np.where(mask)[0]) / 2 > nsamples_min * 2:
                 nperseg = len(signal) // 2 + 1
@@ -402,7 +402,7 @@ def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, r
         return data_padded
 
 
-def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, return_freqs=False, dt=1, return_npsds=False):
+def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, return_freqs=False, dt=1., return_npsds=False):
     """
     Function for measuring psd of the signal with Welch method.
 
@@ -577,19 +577,21 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
     return C
 
 
-def inpaint_fluxes_fun(fluxes, masks, wf_tds):
-    L = len(fluxes[0])
-    inpainted_fluxes = np.zeros((len(fluxes), L))
+def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32):
+    length = len(fluxes[0])
+    # I was afraid that wf_tds are fftshifted to the center, but since here we have the inner product, it is not important
+    # fluxes = np.array(fluxes)  # , dtype=dtype)
+    inpainted_fluxes = np.zeros((len(fluxes), length), dtype=dtype)
     for q in range(len(fluxes)):
         # filter2cov_matrix:
-        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(L)])
-        Cinv = np.array([[prod[k - j] for k in range(L)] for j in range(L)])
+        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])  # , dtype=dtype)
+        c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)])  # , dtype=dtype)
 
-        AtCinv = Cinv[~masks[q]]
-        Minv = np.linalg.inv(AtCinv[:, ~masks[q]])
-        F = np.zeros((L, L))
-        F[~masks[q]] = np.dot(Minv, AtCinv)
-        inpainted_fluxes[q] = fluxes[q] - np.dot(F, fluxes[q])
+        a_t_c_inv = c_inv[~masks[q]]
+        m_inv = np.linalg.inv(a_t_c_inv[:, ~masks[q]])
+        f = np.zeros((length, length), dtype=dtype)
+        f[~masks[q]] = np.dot(m_inv, a_t_c_inv)
+        inpainted_fluxes[q] = fluxes[q] - np.dot(f, fluxes[q])
     return inpainted_fluxes
 
 
@@ -1220,7 +1222,7 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
             for i in np.arange(len(data) - l2, len(data)):
                 if (mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]).any():
                     m = np.nanmean((data[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]
-                                   )[mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]])
+                                    )[mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]])
                     trend.append(m)
                     res.append(data[i] - m)
                 else:
@@ -1627,9 +1629,8 @@ def interpolate_time(time, mask=None):
 
 def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
                   zero_ends_len_abs=3, zero_ends_len_rel=0.1,
-                  return_amplitude=True, return_reason=True, inn_prod_min=Inn_prod_min_veto,
+                  return_amplitude=True, return_reason=True, inn_prod_min=0.2,
                   return_scores=False):
-    # TODO check how it works for positive
     """
     Checks the goodness of fit of data by the template by chi squared and maximum deviation.
     Fits the best amplitude for the template. Performs a chi squared test with this
@@ -1727,7 +1728,6 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     elif spare_ind_right > 0:
         dat = dat - np.mean(dat[len(dat) - spare_ind_right:])  # although we detrended, we subtract local median
 
-    # TODO: THINK WHETHER WE NEED THE INNER PRODUCT VETO
     inn_prod = dat @ temp / ((dat @ dat) * (temp @ temp)) ** 0.5
     if np.abs(inn_prod) < inn_prod_min:
         reason += 'inner_product '
@@ -1783,9 +1783,69 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
                 return is_good
 
 
-def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
-               fn=0.01, n_parts=4, nsig_outliers_var=3., nperseg_psd=Nperseg_psd,
-               return_amplitudes=False, return_scores=False, splitting='snr'):
+def veto_step_linear_fit(data, indices_center_exclude=None):
+    if indices_center_exclude is None:
+        indices_all = np.arange(len(data))
+        indices_left = indices_all[:len(data) // 2]
+        indices_right = indices_all[len(data) // 2:]
+    else:
+        indices_left = np.arange(0, indices_center_exclude[0])
+        indices_right = np.arange(indices_center_exclude[-1] + 1, len(data))
+    support_left = indices_left - len(data) // 2
+    support_right = indices_right - len(data) // 2
+    indices_all = np.concatenate((indices_left, indices_right))
+    support_all = np.concatenate((support_left, support_right))
+    fit_total = minimize(lambda x: np.sum((data[indices_all] - x[0] - support_all * x[1]) ** 2),
+                         x0=np.array([0., 0.]))  # find linear trend from the left
+    fit_left = minimize(lambda x: np.sum((data[indices_left] - x[0] - support_left * x[1]) ** 2),
+                        x0=np.array([0., 0.]))  # find linear trend from the left
+    fit_right = minimize(lambda x: np.sum((data[indices_right] - x[0] - support_right * x[1]) ** 2),
+                         x0=np.array([0., 0.]))  # find linear trend from the left
+    residuals_left = data[indices_left] - fit_left.x[0] - support_left * fit_left.x[1]
+    residuals_right = data[indices_right] - fit_right.x[0] - support_right * fit_right.x[1]
+    var_left = unb_var(residuals_left)
+    var_right = unb_var(residuals_right)
+    residuals_left_total = data[indices_left] - fit_total.x[0] - support_left * fit_total.x[1]
+    residuals_right_total = data[indices_right] - fit_total.x[0] - support_right * fit_total.x[1]
+    statistic = (- np.sum(residuals_left ** 2) / var_left - np.sum(residuals_right ** 2) / var_right
+                 + np.sum(residuals_left_total ** 2) / var_left + np.sum(residuals_right_total ** 2) / var_right)
+    p_value = chi2.sf(statistic, loc=0, scale=1, df=2)
+    return p_value
+
+
+def veto_step(data, indices_center_exclude=None, mask=None, min_len_to_process=3):
+    if mask is None:
+        mask = np.ones(len(data), dtype=bool)
+    if indices_center_exclude is None:
+        indices_all = np.arange(len(data))
+        indices_left = indices_all[:len(data) // 2]
+        indices_right = indices_all[len(data) // 2:]
+    else:
+        indices_left = np.arange(0, indices_center_exclude[0])
+        indices_right = np.arange(indices_center_exclude[-1] + 1, len(data))
+    indices_all = np.concatenate((indices_left, indices_right))
+    data_left = data[indices_left][mask[indices_left]]
+    data_right = data[indices_right][mask[indices_right]]
+    if len(data_left) >= min_len_to_process and len(data_right) >= min_len_to_process:
+        data_total = data[indices_all][mask[indices_all]]
+        mean_total = np.mean(data_total)  #
+        residuals_left = data_left - np.mean(data_left)
+        residuals_right = data_right - np.mean(data_right)
+        var_left = unb_var(residuals_left)
+        var_right = unb_var(residuals_right)
+        residuals_left_total = data_left - mean_total
+        residuals_right_total = data_right - mean_total
+        statistic = (- np.sum(residuals_left ** 2) / var_left - np.sum(residuals_right ** 2) / var_right
+                     + np.sum(residuals_left_total ** 2) / var_left + np.sum(residuals_right_total ** 2) / var_right)
+        p_value = chi2.sf(statistic, loc=0, scale=1, df=1)
+        return p_value
+    else:
+        return None
+
+
+def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
+               tlen=None, hlen_if_short=5, fn=0.01, n_parts=4, nperseg_psd=Nperseg_psd,
+               splitting='snr', lobe_hlen=5):
     """
     Parameters:
     ---------------------------
@@ -1811,208 +1871,223 @@ def veto_parts(data_wh_full, template_wh_full, indices, mask=None, tlen=None,
 
     Returns
     ---------------------------
-
-    If return_scores:
-        If return_amplitudes:
-            is_goods : list of bool
-                Veto result. If True, then the signal is good.
-            amplitudes : list of float,
-                Estimated amplitudes of transith at every index.
-            chi2_scores : list of lists of float
-                Values of chi square for every index for all the parts ans the total (the last value)
-        Else:
-            is_goods, chi2_scores
-    Else:
-        If return_amplitudes:
-            is_goods, amplitudes
-        Eles:
-            is_goods
+    :return: is_goods
+    :rtype: ndarray[bool]
     """
-    assert (splitting == 'snr' or splitting == 'len'), "`splitting` must be 'snr' or 'len'!"
-    data_wh_full = np.array(data_wh_full)
-    template_wh_full = np.array(template_wh_full)
-    if tlen is None:
-        temp_smthnd = np.abs(template_wh_full)
-        temp_smthnd = (temp_smthnd + np.roll(temp_smthnd, 1) + np.roll(temp_smthnd, -1)) / 3
-        # -> averaging the rolled template making it smooth
-        inds_small = np.where((temp_smthnd / np.max(temp_smthnd) < 0.001))[0]  # choosing where the tamplate is close to zero
-        # TODO: maybe change 0.001 to 0.0001 in furhter runs!
-        inds_small = inds_small[np.where((inds_small > nperseg_psd // 4) & (inds_small <= len(template_wh_full) - nperseg_psd // 4))[0]]
-        # -> if suddenly there is zero in the beginning, ignore
-        tlen = inds_small[0] + (len(temp_smthnd) - inds_small[-1])  # taking parts where the template is not close to zero
-        # this weird procedure is needed because we are dealing with the whitened template, and its shape can be complex, so at some point
-        # it can reach zero, but it does not mean that it is the end of the transit.
-        # We are smoothening it, so that if it is zero only in one point,
-        # the smoothened one will be nonzero.
-        # then, we are setting a threshold and selecting everything non-zero
-        # note the rolling! the transit center should be in the zeroth index!
+    # for parts snr do the entire template
+    # for parts len, do the manually selected template maybe? in the meas_len
+    # make partial templates and matched-filter them. maybe indeed easier with the convolution than fft, although not sure
 
-    if mask is None:
-        mask = ~np.isnan(data_wh_full).astype(bool)
+    # maybe make two different sets of splittings. for example, one of them may focus on the central petal of the whitened template
+    # and just fit its shape. Yes, take a certain number of central points and make their fit.
 
-    local_th = chi2.ppf(1 - fn / (n_parts + 1), df=1)  # local threshold, chi2 of parts will be compared to it
-    total_th = chi2.ppf(1 - fn / (n_parts + 1), df=4)  # total threshold, sum of chi2 of all parts will be compared to it
+    # make then partial veto in the frequency domain, split by snr. do fft of a small frequency range
 
-    template_cut_centered = np.roll(template_wh_full, tlen // 2)[:tlen]  # put the transit center in the center
-    stat_for_var = np.convolve(template_cut_centered, data_wh_full, mode='valid')
-    # -> make a small sample of statistic to estimate the variance
-    stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)
-                                 ) & mask[tlen // 2:len(mask) - ((tlen - 1) // 2)]]
-    # quarter std correction so that the SNR of matched filtering the template is in units.
-    var_stat_global = np.nanvar(stat_for_var)
+    # Indices are assumed to be given in the padded coordinates!
+    template_wh_full = np.array(template_wh_full)  # this is template in Time domain
+    if mask_padded is None:
+        mask_padded = ~np.ones(len(template_wh_full)).astype(bool)  # data is given in Fourier, do there will be no nans in time
     if splitting == 'snr':
-        chi2_temp_indices = [0] + list(np.searchsorted(
-            np.cumsum(template_cut_centered ** 2) / np.dot(template_cut_centered, template_cut_centered),
-            (np.arange(n_parts) / n_parts)[1:])) + [len(template_cut_centered)]
-    else:
-        chi2_temp_indices = list((len(template_cut_centered) * np.arange(n_parts) / n_parts).astype(int)) + [
-            len(template_cut_centered)]
-    chi2_temp_indices = list(set(chi2_temp_indices))  # remove repetitions
-    chi2_temp_indices.sort()
-    n_parts = len(chi2_temp_indices) - 1
-    while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < 4).any():  # want every piece to be at least 4 Bins
-        n_parts -= 1
-        if splitting == 'snr':
-            chi2_temp_indices = [0] + list(np.searchsorted(
-                np.cumsum(template_cut_centered ** 2) / np.dot(template_cut_centered, template_cut_centered),
-                (np.arange(n_parts) / n_parts)[1:])) + [len(template_cut_centered)]
-        else:
-            chi2_temp_indices = list((len(template_cut_centered) * np.arange(n_parts) / n_parts).astype(int)) + [
-                len(template_cut_centered)]
-
-    if len(chi2_temp_indices) <= 2:
-        if return_scores:
-            if return_amplitudes:
-                return np.ones(len(indices)).astype(bool), np.ones(len(indices)) * np.nan, np.ones(
-                    len(indices)) * np.nan, local_th, total_th
-            else:
-                return np.ones(len(indices)).astype(bool), np.ones(len(indices)) * np.nan, local_th, total_th
-        else:
-            if return_amplitudes:
-                return np.ones(len(indices)).astype(bool), np.ones(len(indices)) * np.nan
-            else:
-                return np.ones(len(indices)).astype(bool)
-
-    n_parts = len(chi2_temp_indices) - 1
-    templates_wh_local = []
-    vars_stat_local = []
-    actual_Vs = []
-    for i in range(1, len(chi2_temp_indices)):
-        i1 = chi2_temp_indices[i - 1]
-        i2 = chi2_temp_indices[i]
-        template_wh_local = np.array(template_cut_centered[i1:i2])
-        stat_for_var = np.convolve(template_wh_local, data_wh_full, mode='valid')
-        stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)
-                                     ) & mask[len(template_wh_local) // 2: len(mask) - ((len(template_wh_local) - 1) // 2)]]
-        # quarter std correction so that the SNR of matched filtering the template is in units.
-        var_stat_local = np.nanvar(stat_for_var)
-        templates_wh_local.append(template_wh_local)
-        vars_stat_local.append(var_stat_local)
-        actual_Vs.append(1 / var_stat_local - 1 / var_stat_global)
-
-    is_goods = []
-    chi2_scores = []
-    amplitudes = []
-    for index in indices:
-        if (index >= tlen // 2) and (index < len(data_wh_full) - (tlen + 1) // 2):
-            data_wh = data_wh_full[index - tlen // 2:index + (tlen + 1) // 2]
-            A_global = np.dot(template_cut_centered, data_wh) / var_stat_global  # global amplitude
-            amplitudes.append(A_global)
-            chi2_total = 0
-            is_good = True
-            chi2_scores_index = []
-            for i in range(len(chi2_temp_indices) - 1):
-                i1 = chi2_temp_indices[i]
-                i2 = chi2_temp_indices[i + 1]
-                template_wh_local = np.array(template_cut_centered[i1:i2])
-                A_local = np.dot(template_wh_local, data_wh[i1:i2]) / vars_stat_local[i]  # np.dot(template_wh[i1:i2],template_wh[i1:i2])
-                chi2_local = (A_local - A_global) ** 2 / (actual_Vs[i])
-                chi2_scores_index.append(chi2_local)
-                if chi2_local > local_th:
-                    is_good = False
-                chi2_total += chi2_local
-            chi2_scores_index.append(chi2_total)
-            if chi2_total > total_th:
-                is_good = False
-
-        elif (index >= tlen // 2) or (index < len(data_wh_full) - (tlen + 1) // 2):
-            if index < len(data_wh_full) - (tlen + 1) // 2:  # it is in the beginning
-                data_wh = data_wh_full[:index + (tlen + 1) // 2]
-                template_not_full = template_cut_centered[:index + (tlen + 1) // 2]
-            else:  # it is in the end
-                data_wh = data_wh_full[index - tlen // 2:]
-                template_not_full = template_cut_centered[len(template_cut_centered) - (len(data_wh_full) - index) - tlen // 2:]
-            stat_for_var = np.convolve(template_not_full, data_wh_full, mode='valid')
-            stat_for_var = stat_for_var[(np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)) & mask[
-                                                            len(template_not_full) // 2:len(mask) - ((len(template_not_full) - 1) // 2)]]
-            # quarter std correction so that the SNR of matched filtering the template is in units.
-            var_stat_global_not_full = np.nanvar(stat_for_var)
-            A_global_not_full = np.dot(template_not_full, data_wh) / var_stat_global_not_full  # global amplitude
-            amplitudes.append(A_global_not_full)
-            n_parts_not_full = int(np.round(n_parts / tlen * len(template_not_full)))
-            if splitting == 'snr':
-                chi2_temp_indices_not_full = [0] + list(
-                    np.searchsorted(np.cumsum(template_not_full ** 2) / var_stat_global_not_full,
-                                    (np.arange(n_parts_not_full) / n_parts_not_full)[1:])) + [len(template_not_full)]
-            else:
-                chi2_temp_indices_not_full = list(
-                    (len(template_not_full) * np.arange(n_parts_not_full) / n_parts_not_full).astype(int)) + [len(template_not_full)]
-            chi2_temp_indices_not_full = list(set(chi2_temp_indices_not_full))  # remove repetitions
-            chi2_temp_indices_not_full.sort()
-            n_parts_not_full = len(chi2_temp_indices_not_full) - 1
-
-            while ((chi2_temp_indices_not_full - np.roll(chi2_temp_indices_not_full, 1))[1:] < 4).any():
-                n_parts_not_full -= 1
-                if splitting == 'snr':
-                    chi2_temp_indices_not_full = [0] + list(np.searchsorted(
-                        np.cumsum(template_not_full ** 2) / np.dot(template_not_full, template_not_full),
-                        (np.arange(n_parts_not_full) / n_parts_not_full)[1:])) + [len(template_not_full)]
+        # reason = 'inconsistent_parts_time '
+        if tlen is None:
+            temp_smthnd = np.abs(template_wh_full - template_wh_full[len(template_wh_full) // 2])
+            # -> the value in the middle is supposed to be close to zero, but sometines no
+            temp_smthnd = (temp_smthnd + np.roll(temp_smthnd, 1) + np.roll(temp_smthnd, -1)) / 3
+            # -> averaging the rolled template making it smooth
+            inds_small = np.where((temp_smthnd / np.max(temp_smthnd) < 0.001))[0]  # choosing where the template is close to zero
+            inds_small = inds_small[np.where((inds_small > nperseg_psd) & (inds_small <= len(template_wh_full) - nperseg_psd))[0]]
+            # -> if suddenly there is zero in the beginning, ignore
+            tlen = inds_small[0] + (len(temp_smthnd) - inds_small[-1])  # taking parts where the template is not close to zero
+            # this weird procedure is needed because we are dealing with the whitened template, and its shape can be complex, so at some point
+            # it can reach zero, but it does not mean that it is the end of the transit.
+            # We are smoothening it, so that if it is zero only in one point,
+            # the smoothened one will be nonzero.
+            # then, we are setting a threshold and selecting everything non-zero
+            # note the rolling! the transit center should be in the zeroth index!
+        template_wh_full[tlen // 2: len(template_wh_full) - tlen // 2] = 0.
+        template_wh_full = template_wh_full / np.linalg.norm(template_wh_full)
+        cs = np.cumsum(template_wh_full ** 2)
+        chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
+        # # this was len split, I'm removing it because I don't want to fit zeros.
+        # nonzero_inds = np.nonzero(template_wh_full)[0]
+        # chi2_temp_indices = list(nonzero_inds[(len(nonzero_inds) * np.arange(n_parts) / n_parts).astype(int)]
+        #                          ) + [nonzero_inds[-1] + 1]
+        chi2_temp_indices = list(set(chi2_temp_indices))  # remove repetitions
+        chi2_temp_indices.sort()
+        n_parts = len(chi2_temp_indices) - 1
+        while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < 4).any():  # want every piece to be at least 4 Bins
+            n_parts -= 1
+            cs = np.cumsum(template_wh_full ** 2)
+            chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
+        # if the template is so short that there is only one part, we will just make one vetting on it and not parts.
+        if len(chi2_temp_indices) <= 2:
+            # reason = 'inconsistent_chi2_lobe '
+            hlen = hlen_if_short
+            data_wh_full = np.fft.irfft(data_wh_fd)
+            template_for_fit = np.array(template_wh_full)
+            template_for_fit[hlen: len(template_for_fit) - hlen] = 0
+            template_for_fit = template_for_fit / np.linalg.norm(template_for_fit)
+            template_cut_td = np.concatenate((template_for_fit[-hlen:], template_for_fit[: hlen]))
+            template_for_fit = np.fft.rfft(template_for_fit)
+            stat = np.real(np.fft.irfft(np.conjugate(template_for_fit) * data_wh_fd))
+            stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
+            # -> this is supposed to ensure the template normalization, although formally this biases amplitude
+            p_values = []
+            for ind in indices_padded:
+                residuals = (data_wh_full[ind - hlen: ind + hlen] - template_cut_td * stat[ind])
+                residuals = residuals[mask_padded[ind - hlen: ind + hlen]]
+                score = np.sum(residuals ** 2)
+                df = len(residuals) - 1
+                if df > 1:
+                    p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
                 else:
-                    chi2_temp_indices_not_full = list(
-                        (len(template_not_full) * np.arange(n_parts_not_full) / n_parts_not_full).astype(int)) + [len(template_not_full)]
+                    p_values.append(0.)
+            is_good = np.array(p_values) >= fn
+        else:
+            n_parts = len(chi2_temp_indices) - 1
+            templates_parts = np.zeros((n_parts, len(template_wh_full)))
+            for i in range(n_parts):
+                templates_parts[i][chi2_temp_indices[i]: chi2_temp_indices[i+1]] = template_wh_full[chi2_temp_indices[i]:
+                                                                                                    chi2_temp_indices[i+1]]
+            norms_templates_parts = [np.linalg.norm(templates_parts[i]) for i in range(len(templates_parts))]
+            templates_parts = np.fft.rfft(templates_parts, axis=1)
+            scores = []
+            for i in range(n_parts):
+                stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
+                stat = stat / norms_templates_parts[i]  # outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
+                # -> this is supposed to ensure the templ normalization, although formally this biases amplitude
+                # stat = stat[zero_padding_ends[0]: len(stat) - zero_padding_ends[1]]  # indices are provided in padded coordinates now!
+                # this will give a biased amplitude, but since we only look at the amplitudes differences, maybe it is not so bad?
+                scores.append(stat)
+            stat_full = np.real(np.fft.irfft(np.conjugate(np.fft.rfft(template_wh_full)) * data_wh_fd))
+            # -> norm is one, templ and data were norm
+            stat_full = stat_full[indices_padded]
+            scores = np.array(scores)[:, indices_padded]
+            scores_parts = np.abs(scores - stat_full)
+            p_values_parts = norm.sf(scores_parts, scale=(1 - 1 / n_parts) ** 0.5, loc=0) * 2
+            is_good_parts = np.sum((p_values_parts >= fn / n_parts).astype(float), axis=0) >= n_parts // 2
 
-            if n_parts_not_full < 2:  # or ((chi2_temp_indices_not_full-np.roll(chi2_temp_indices_not_full, 1))[1:]<3).any():
-                is_good = True
-                chi2_scores_index = [np.nan, np.nan]
+            scores = np.sum(scores ** 2, axis=0) - stat_full ** 2
+            p_values = chi2.sf(scores, loc=0, scale=1, df=n_parts - 1)
+            is_good = np.array(p_values) >= fn
+            is_good = is_good & is_good_parts
+    # TODO measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5 -> IF NEEDED
+    elif splitting == 'lobe':
+        # reason = 'veto_lobe '
+        hlen = lobe_hlen
+        data_wh_full = np.fft.irfft(data_wh_fd)
+        template_for_fit = np.array(template_wh_full)
+        template_for_fit[hlen: len(template_for_fit) - hlen] = 0
+        template_for_fit = template_for_fit / np.linalg.norm(template_for_fit)
+        template_cut_td = np.concatenate((template_for_fit[-hlen:], template_for_fit[: hlen]))
+        template_for_fit = np.fft.rfft(template_for_fit)
+        stat = np.real(np.fft.irfft(np.conjugate(template_for_fit) * data_wh_fd))
+        stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
+        # -> this is supposed to ensure the template normalization, although formally this biases amplitude
+        p_values = []
+        for ind in indices_padded:
+            residuals = (data_wh_full[ind - hlen: ind + hlen] - template_cut_td * stat[ind])
+            residuals = residuals[mask_padded[ind - hlen: ind + hlen]]
+            score = np.sum(residuals ** 2)
+            df = len(residuals) - 1
+            if df > 1:
+                p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
             else:
-                chi2_total = 0
-                is_good = True
-                chi2_scores_index = []
-                for i in range(1, len(chi2_temp_indices_not_full)):
-                    i1 = chi2_temp_indices_not_full[i - 1]
-                    i2 = chi2_temp_indices_not_full[i]
-                    template_wh_local = np.array(template_not_full[i1:i2])
-                    stat_for_var = np.convolve(template_wh_local, data_wh_full, mode='valid')
-                    stat_for_var = stat_for_var[
-                        (np.abs(stat_for_var) < nsig_outliers_var * np.nanstd(stat_for_var)) & mask[
-                                                       len(template_wh_local) // 2:len(mask) - ((len(template_wh_local) - 1) // 2)]]
-                    # quarter std correction so that the SNR of matched filtering the template is in units.
-                    var_stat_local = np.nanvar(stat_for_var)
-                    actual_V = 1 / var_stat_local - 1 / var_stat_global_not_full
-                    A_local = np.dot(template_wh_local, data_wh[i1:i2]) / var_stat_local  # np.dot(template_wh[i1:i2],template_wh[i1:i2])
-                    chi2_local = (A_local - A_global_not_full) ** 2 / actual_V
-                    chi2_scores_index.append(chi2_local)
-                    if chi2_local > local_th:
-                        is_good = False
-                    chi2_total += chi2_local
-                chi2_scores_index.append(chi2_total)
-                if chi2_total > total_th:
-                    is_good = False
-        else:
-            raise ValueError('Invalid template size!')
-        chi2_scores.append(chi2_scores_index)
-        is_goods.append(is_good)
-
-    if return_scores:
-        if return_amplitudes:
-            return is_goods, amplitudes, chi2_scores, local_th, total_th
-        else:
-            return is_goods, chi2_scores, local_th, total_th
+                p_values.append(0.)
+        is_good = np.array(p_values) >= fn
     else:
-        if return_amplitudes:
-            return is_goods, amplitudes
-        else:
-            return is_goods
+        raise ValueError("`splitting` must be 'snr' or 'lobe'!")
+    # reason = reason[:-1] + '_' + str(n_parts) + ' '
+    return is_good  # , reason
+
+
+def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=None, n_parts=3, fn=0.1,
+                       wind_len_overlap=64):
+    """
+
+    The template in the Fourier domain is cut into several parts which undergo windowing in order not to be too long in the time
+    domain. The minimal size of a piece is bounded by the window size. If the piece is too big, the number of pieces is decreased.
+
+    :param data_wh_fd:data must be really white, including the constant multiple!
+    :type data_wh_fd:
+    :param template_wh_fd: template should be normalized to have unit norm in the time domain! I do not to waste time and renormalize it inside the functions!ß
+    warnings: data can be blue because we oversuppress the low frequencies.
+    :type template_wh_fd:
+    :param indices_padded:
+    :type indices_padded:
+    :param mask_padded:
+    :type mask_padded:
+    :param n_parts:
+    :type n_parts:
+    :param fn:
+    :type fn:
+    :param wind_len_overlap: must be even!
+    :type wind_len_overlap:
+    :return:
+    :rtype: ndarray[bool]
+    """
+    data_wh_fd = np.array(data_wh_fd)
+    template_wh_fd_full = np.array(template_wh_fd)
+    # template_wh_fd_full = template_wh_fd_full / np.linalg.norm(np.fft.irfft(template_wh_fd_full))  # must be normalized initially!
+    wind_len = wind_len_overlap  # must be even!
+    half_wind_len = wind_len // 2
+    window = 0.5 * (1 - np.cos(0.5 * 2 * np.pi * np.arange(wind_len) / wind_len))  # Hann window
+    window = 1. - window / np.max(window)
+
+    cs = np.cumsum(template_wh_fd_full ** 2)
+    chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_fd_full)]
+    while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < wind_len).any():  # want every piece to be at least to support window
+        n_parts -= 1
+        cs = np.cumsum(template_wh_fd_full ** 2)
+        chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_fd_full)]
+    n_parts = len(chi2_temp_indices) - 1
+
+    if n_parts <= 1:
+        return np.ones(len(indices_padded)).astype(bool)
+
+    ##########################################################################################
+    templates_parts = np.zeros((n_parts, len(template_wh_fd_full)), dtype=np.complex64)  # here it is all in the fourier domain
+    i = 0
+    templates_parts[i][chi2_temp_indices[i]: chi2_temp_indices[i + 1] + half_wind_len
+                       ] = template_wh_fd_full[chi2_temp_indices[i]: chi2_temp_indices[i + 1] + half_wind_len]
+    templates_parts[i][chi2_temp_indices[i + 1] - half_wind_len: chi2_temp_indices[i + 1] + half_wind_len] *= window
+
+    for i in range(1, n_parts - 1):
+        templates_parts[i][chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i + 1] + half_wind_len
+                           ] = template_wh_fd_full[chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i + 1] + half_wind_len]
+        templates_parts[i][chi2_temp_indices[i + 1] - half_wind_len: chi2_temp_indices[i + 1] + half_wind_len] *= window
+        templates_parts[i][chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i] + half_wind_len] *= (1 - window)
+    i = n_parts - 1
+    templates_parts[i][chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i + 1]
+                       ] = template_wh_fd_full[chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i + 1]]
+    templates_parts[i][chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i] + half_wind_len] *= (1 - window)
+    ##########################################################################################
+    templates_parts_td = np.fft.irfft(templates_parts, axis=1)
+    templ_prod_matrix = np.zeros((n_parts, n_parts))
+    for i in range(n_parts):
+        for j in range(n_parts):
+            prodct = templates_parts_td[i] @ templates_parts_td[j]
+            templ_prod_matrix[i, j] = prodct
+            if j != i:
+                templ_prod_matrix[j, i] = prodct
+    templ_prod_matrix_inv = np.linalg.inv(templ_prod_matrix)
+    ##########################################################################################
+    scores = np.zeros_like(templates_parts_td)
+    for i in range(n_parts):
+        stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
+        # no need to apply any norm because it will be divided by the normalization afterwards
+        scores[i] = stat
+    stat_full = np.real(np.fft.irfft(np.conjugate(template_wh_fd_full) * data_wh_fd))
+    # No need to renormalize, it is already in good norm because the template and the noise were normalized initially
+    scores = (np.array([scores[:, j] @ templ_prod_matrix_inv @ scores[:, j] for j in range(len(scores[0]))]) - stat_full ** 2)
+    # they all have the same names to save some memory (if it works like that...)
+    measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5
+    # -> since the noise may be too blue, the distribution may not be with unit variance, so chi squared
+    # will have a different scale.
+    scores = scores[indices_padded]
+    p_values = chi2.sf(scores, loc=0, scale=measured_scale, df=n_parts - 1)
+    is_good = np.array(p_values) >= fn
+    return is_good
 
 
 def score_correction(scores_i, return_function=False, two_sided_distr=True):
@@ -2161,7 +2236,7 @@ def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_
             inds_pieces.append([ind_hp[0] + len_cut, ind_hp[1]])
         else:
             inds_pieces.append(ind_hp)
-    return inds_pieces
+    return np.array(inds_pieces)
 
 
 def gen_uniform_piece_lengths(tot_len, n_pieces):
@@ -2186,7 +2261,8 @@ def gen_uniform_piece_lengths(tot_len, n_pieces):
     return lens
 
 
-def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0):
+def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target=None,
+                     return_inds_target_res=False):
     """
     Cuts `data` into pieces according to `inds_pieces` (which can have any order) and then glues pieces together
     interleaving them with holes of lengths `hole_lens` filled with `fill_hole_with` values.
@@ -2201,21 +2277,278 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0):
     :type hole_lens:
     :param fill_hole_with:
     :type fill_hole_with:
+    :param inds_target: If not None, the pieces from inds_pieces will put into places of inds_target
+    :type inds_target:
     :return: `new_data`, the rearranged pieces of the `data` interleaved with the holes
     :rtype: ndarray
     """
     data = np.array(data)
     new_data = np.array([fill_hole_with for _ in range(len(data))])
-    pos = 0  # current pisition
-    for i, ip in enumerate(inds_pieces):
-        # print(ip[0] , ip[1])
+    if inds_target is None:
+        inds_target_res = []
+        pos = 0  # current position
+        for i, ip in enumerate(inds_pieces[:-1]):
+            piece = data[ip[0]: ip[1]]
+            pos_1 = pos + len(piece)
+            new_data[pos: pos_1] = piece
+            inds_target_res.append([pos, pos_1])
+            pos = pos_1 + hole_lens[i]
+            new_data[pos_1: pos] = fill_hole_with
+        i = len(inds_pieces) - 1
+        ip = inds_pieces[-1]
         piece = data[ip[0]: ip[1]]
         pos_1 = pos + len(piece)
-        # print(pos, pos_1)
         new_data[pos: pos_1] = piece
-        pos = pos_1 + hole_lens[i]
-        # print(pos_1, pos, hole_lens[i])
-        new_data[pos_1: pos] = fill_hole_with
-    return new_data
+        inds_target_res.append([pos, pos_1])
+        if i < len(hole_lens):  # if the number of holes was equal to the number of pieces and not one less
+            pos = pos_1 + hole_lens[i]
+            new_data[pos_1: pos] = fill_hole_with
+        if return_inds_target_res:
+            return new_data, np.array(inds_target_res)
+        else:
+            return new_data
+    else:
+        for i, ip in enumerate(inds_pieces):
+            it = inds_target[i]
+            new_data[it[0]: it[1]] = data[ip[0]: ip[1]]
+        return new_data
 
+
+def measure_psds_func(fluxes, masks=None, nperseg=128, noverlap=64, window='hann', support=8192,
+                      subtract_mean=True, rfft=True, smoothen_psds=True,
+                      tukey_steps_len=16, conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False,
+                      zero_to_high_freq_thresh_wf_ratio=0.6, dt=0.02043368):
+    """
+    PSDS as function of quarter id.
+    The PSD measuring algotithm makes the evenly sampled steps and not adjust the search for
+    good pieces according to the placement of the zeros in mask.
+
+    :param nperseg: the length of a sample used in Welch method
+    :type nperseg: int
+    :param noverlap: If int: length of overlap of slices in Welch method.
+        If float<1 : relative overlap to nperseg.
+        Length of overlap will be int(nperseg*noverlap)
+    :type noverlap: int or float<1
+    :param window: window function by which the signals are multiplied to avoid boundary effects and crosstalk
+        Possible options: 'hann', 'boxcar', where 'boxcar' is just normalized bow, or no window
+        Default is 'hann'. It is not recommended to use 'boxcar'.
+    :type window: str
+    :param subtract_mean: If True, the mean of the signal is subtracted. It is recommended to do it because
+        otherwise unwanted power may appear in the zero frequency
+        Default is True
+    :type subtract_mean: bool
+    :param rfft: If True, the signal is treated as real, and all ffts are rffts. The length of the frequency samples
+        are the nperseg//2+1.
+        Default is True
+    :type rfft: bool
+    :param smoothen_psds: whether to apply multi-resolution smoothing to mitigate the noise effects
+    :type smoothen_psds: bool
+    :param tukey_steps_len: length taken for zeroing in the tukey windowing
+    :type tukey_steps_len: int or float
+    :param conditional_zero_zeroth_freq: Whether to put the low frequencies to zero if they deviate too much
+    :type conditional_zero_zeroth_freq: bool
+    :param always_zero_zeroth_freq: whether to always put the lowest frequencies to zero
+    :type always_zero_zeroth_freq: bool
+    :param zero_to_high_freq_thresh_wf_ratio : the ratio between the whitening filter in the Fourier domain above which
+        the filter is considered to be quickly decaying. Then, Tukey window will be applied to the lowest frequencies.
+        It is done because the lowest frequencies often have orders of magnitude spike of PSD which is not resolved by Welch.
+    :type zero_to_high_freq_thresh_wf_ratio : float
+    :return: creates self.psds, self.psdfreqs, self.wf_td, self.wf_fd, self.freqs, seld.npsds.
+    :rtype:
+    """
+    if rfft:
+        fftfun = np.fft.rfft
+        ifftfun = np.fft.irfft
+        freqfun = np.fft.rfftfreq
+        dtype_res = np.float64
+    else:
+        fftfun = np.fft.fft
+        ifftfun = np.fft.ifft
+        freqfun = np.fft.fftfreq
+        dtype_res = np.complex128
+    if masks is None:
+        masks = [~np.isnan(fluxes[i]) for i in range(len(fluxes))]
+    if subtract_mean:
+        fluxes = [fluxes[i] - np.nanmean(fluxes[i][masks[i]]) for i in range(len(fluxes))]
+
+    orig_psds, psdfreqs = welch_psds(clean_fluxes=fluxes, psd_masks=masks,
+                                     nperseg=nperseg, noverlap=noverlap, window=window, rfft=rfft,
+                                     return_freqs=True, dt=dt, return_npsds=False)
+
+    freqs = [freqfun(len(flux), d=dt) for flux in fluxes]
+
+    #############################################################################################################
+    # Smoothing
+    #############################################################################################################
+    if smoothen_psds:
+        nperseg_two = 2 * nperseg
+        nperseg_coarse = nperseg // 2
+        nperseg_rude = nperseg // 4
+        nperseg_smooth = nperseg // 8
+        psds_two = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
+                              nperseg=nperseg_two, noverlap=noverlap, window=window, rfft=rfft,
+                              return_freqs=False, dt=dt, return_npsds=False)
+        psds_coarse = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
+                                 nperseg=nperseg_coarse, noverlap=noverlap, window=window, rfft=rfft,
+                                 return_freqs=False, dt=dt, return_npsds=False)
+        psds_smooth = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
+                                 nperseg=nperseg_smooth, noverlap=noverlap, window=window, rfft=rfft,
+                                 return_freqs=False, dt=dt, return_npsds=False)
+        psds_rude = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
+                               nperseg=nperseg_rude, noverlap=noverlap, window=window, rfft=rfft,
+                               return_freqs=False, dt=dt, return_npsds=False)
+
+        psdfreqs = [freqfun(nperseg_two, d=dt) for _ in range(len(orig_psds))]
+        psds = []
+        wf_fd_meas = []
+
+        for q in range(len(orig_psds)):
+            noisy_vec = 1 / psds_two[q] ** 0.5
+            mean_vec = sinc_interp(1 / psds_smooth[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+            noisy_resid_vec = noisy_vec - mean_vec
+            orig_vec = sinc_interp(1 / orig_psds[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+            orig_resid_vec = orig_vec - mean_vec
+            coarse_vec = sinc_interp(1 / psds_coarse[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+            coarse_resid_vec = coarse_vec - mean_vec
+            rude_vec = sinc_interp(1 / psds_rude[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
+            rude_resid_vec = rude_vec - mean_vec
+
+            std_noisy = outlier_free_std(noisy_resid_vec[len(noisy_resid_vec) // 2:], nsig=3, n_iterations=2)
+
+            nsig_sign_minwids_res_repl_vecs_res_repl = [[0.6, +1., 20, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
+                                                        [0.5, +1., 20, rude_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
+                                                        [0.6, -1., 20, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
+                                                        [1, +1., 10, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # mismatch behav
+                                                        [1, -1., 10, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low freq bend
+                                                        [2, -1., 2, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low freq bend
+                                                        [1, -1., 10, orig_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
+                                                        [1, +1., 10, orig_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
+                                                        [2.5, -1., 4, orig_resid_vec, orig_vec, orig_resid_vec],  # for real features
+                                                        [2.5, +1., 4, orig_resid_vec, orig_vec, orig_resid_vec]]  # for lowest freqs
+            combined_vec = np.array(mean_vec)
+            for nsig, sign, min_wid, res_vec, repl_vec, res_repl in nsig_sign_minwids_res_repl_vecs_res_repl:
+                i = 0
+                while i < len(combined_vec):
+                    if sign * res_vec[i] - nsig * std_noisy > 0.:
+                        i_1 = i
+                        i_2 = i
+                        while (i_2 < len(res_vec)) and (sign * res_vec[i_2] - nsig * std_noisy > 0):
+                            i_2 += 1
+                        if (i_2 - i_1) >= min_wid or (i_1 <= 2 and (i_2 - i_1) >= min_wid / 2):
+                            # find the beginning and the end of the replacement region:
+                            j_1 = i_1
+                            while (j_1 - 1 >= 0) and (sign * res_repl[j_1 - 1] > 0):
+                                j_1 -= 1
+                            j_2 = i_2
+                            while (j_2 < len(res_vec)) and (sign * res_repl[j_2] > 0):
+                                j_2 += 1  # this is the last slice index, so it can be bigger
+                            combined_vec[j_1:j_2] = repl_vec[j_1:j_2]
+                            i = j_2 + 1
+                        else:
+                            i = i_2 + 1
+                    else:
+                        i += 1
+            ########################################################################################################################
+            # Special treatment for the lowest freqs
+            ########################################################################################################################
+
+            # 1. Using better resolution if drops fast
+
+            # Compare value of the wf_fd at low and high freqs. If the low one drops too fast, we will use the
+            # nore exact measurement to avoid unresolved residual low-freq red noise.
+            low_bin = 4  # below this, we take the low frequencies
+            high_bin = len(orig_vec) - 20  # From here on is what we compare to
+            if ((conditional_zero_zeroth_freq and (
+                    np.mean(np.abs(orig_vec[0:3])) / np.mean(np.abs(orig_vec[high_bin:])) < zero_to_high_freq_thresh_wf_ratio))
+                    or always_zero_zeroth_freq):
+                i = low_bin
+                while orig_vec[i] < combined_vec[i]:
+                    i += 1
+                combined_vec[:i] = orig_vec[:i]
+
+            # 2. Making the lowest freqs wf_fd non-decreasing
+
+            # We do not want the zeroth freq to be an outlier.
+            # We assume that the PSD should not drop towards the zero bin. If it does in reality, it is anyway
+            # not well-measured and is prone to under-whitening. So we make it non-decreasing by punishing more
+            # the lowest frequencies
+            for j in [1, 2, 3]:  # Fix at these indices
+                i = 0
+                while combined_vec[i + j] < combined_vec[i]:
+                    combined_vec[:i + j] = combined_vec[i + j]
+                    i += 1
+                    if i >= len(combined_vec) - j - 2:
+                        break
+
+            # 3. Checking the whitening residuals
+
+            # Same thing of replacing the low freqs by the exact measurement, but by looking at the residuals (chi2)
+            # (I am by far not sure all this is really needed)
+            std_noisy_high = np.std(noisy_resid_vec[len(noisy_resid_vec) // 2:])
+            low_freq_bin = 8
+            low_resid_2_sum = np.sum((noisy_resid_vec[:low_freq_bin] / std_noisy_high) ** 2)
+            if low_resid_2_sum >= chi2.isf(low_freq_bin / len(noisy_resid_vec), df=low_freq_bin - 1):
+                j_2 = low_freq_bin
+                sign_1 = np.sign(orig_vec[j_2] - combined_vec[j_2])
+                sign_2 = np.sign(orig_vec[j_2 + 1] - combined_vec[j_2 + 1])
+                while (not np.isclose(sign_1, 0.)) and (np.sign(sign_1 * sign_2) != -1.) and j_2 < len(combined_vec) - 1:
+                    j_2 += 1
+                    sign_1 = np.sign(orig_vec[j_2] - combined_vec[j_2])
+                    sign_2 = np.sign(orig_vec[j_2 + 1] - combined_vec[j_2 + 1])
+                combined_vec[:j_2] = orig_vec[:j_2]
+
+            psds.append(1 / combined_vec ** 2)
+            wf_fd_meas.append(combined_vec)
+    else:
+        psds = copy.deepcopy(orig_psds)
+        wf_fd_meas = [1 / psds[q] ** 0.5 for q in range(len(psds))]
+
+    #############################################################################################################
+    # Whitening filter
+    #############################################################################################################
+    # compare value of the wf_fd at low and high freqs. If the low one drops too fast, we will apply the Tukey
+    # window and zero the wf_fd around zero. This will help to avoid unresolved residual low-freq red noise.
+    assert support % 2 == 0, 'self.support assumed to be even!'
+    wf_tds = []
+    wf_fds = []
+    for q, wpsd in enumerate(wf_fd_meas):
+        wf_td = ifftfun(wpsd)
+        meas_len = len(wf_td)
+        wf_td = np.fft.ifftshift(np.fft.fftshift(wf_td) * tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
+        mid_point = len(wf_td) // 2
+        result = np.zeros(support, dtype=dtype_res)
+        result[:mid_point] = wf_td[:mid_point]
+        result[-mid_point:] = wf_td[-mid_point:]
+
+        wf_fd = fftfun(result)
+        wf_fd[0] = 0.  # MAYBE THIS IS WRONG! also, the flux was already supposed to have zero mean. see below what I did.
+        wf_fd = np.abs(wf_fd)  # anyway in the formula it appears twice, so the phase will get canceled
+        # but maybe this exactly means that we should not take this abs?
+
+        # It would be good to have a filter which has both a zero at the zero frequency and at the large correlation length,
+        # but this is hard
+        # Now check maybe we need more:
+        whitened_clean_flux_fd = fftfun(fluxes[q]) * wf_fd
+        first_measured_bin = 2 * int(np.ceil(support / nperseg))
+        if ((np.max(np.abs(whitened_clean_flux_fd[:2 * first_measured_bin])) ** 2 / np.mean(
+                np.abs(whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2
+                    ) > chi2.isf(1 / len(whitened_clean_flux_fd), df=1))  # if the whitening was not enough
+                or (conditional_zero_zeroth_freq and (np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(
+                    wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < zero_to_high_freq_thresh_wf_ratio))  # if too steep drop of wf
+                or always_zero_zeroth_freq):  # if we just asked to
+            lentuk = first_measured_bin * 4  # 4 * first_measured_bin
+            wf_fd[:2 * first_measured_bin] = wf_fd[:2 * first_measured_bin] * tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
+                                                                                    sym=True)[:2 * first_measured_bin]
+        else:
+            # even if it is okay, we need to zero a bit more than this in order to avoid non-zero values of wf_tf,
+            # because it is ill-defined when we pad and unpad
+            first_measured_bin = int(np.ceil(support / nperseg))
+            lentuk = first_measured_bin * 2  # 4 * first_measured_bin
+            wf_fd[:first_measured_bin] = wf_fd[:first_measured_bin] * tukey(lentuk, alpha=3 * first_measured_bin / 2 / lentuk,
+                                                                            sym=True)[:first_measured_bin]
+        wf_td = np.fft.fftshift(ifftfun(wf_fd))  # we need wf_fd for inpainting
+        wf_tds.append(np.array(wf_td, dtype=Dtype_r))
+        wf_fds.append(np.array(wf_fd, dtype=Dtype_c))
+    wf_tds = np.array(wf_tds, dtype=Dtype_r)  # for numba need numpy.arrays
+    return psds, wf_fds, wf_tds
 

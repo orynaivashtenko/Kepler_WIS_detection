@@ -1,4 +1,6 @@
 import os
+# -> this is needed!
+import numpy as np
 
 # PARAMETERS INITIALIZATION
 
@@ -14,7 +16,7 @@ Nsig_outliers_w_pos = 6.
 Nsig_outliers_w_neg = 6.
 Nsig_outliers_stat = 3.
 # Masking. Detrending in outliers detection:
-Detr_length_outliers = 128
+Detr_length_outliers = 256
 Detr_method_outliers = 'median'
 Detr_endmethod_outliers = 'mean'
 Detr_ends_outliers = 'symmetric'
@@ -33,7 +35,7 @@ Conditional_zero_zeroth_freq_wf = True
 Always_zero_zeroth_freq_wf = False
 
 # Notch:
-Nsig_notch = 5.
+Nsig_notch = 5.  # this means that such a deviation will happen more rarely than once per 10 stars
 Irl_notch = 3000.
 Htol_notch = 1e-5
 Minval_notch = 0
@@ -53,16 +55,16 @@ Templates_subbin_shift = True
 Template_ind_detection = 'all'
 Margin_snr_veto = 2.
 Fn_fit_veto = 0.01
-Maxdev_fit_veto = 4.0
-Zero_ends_len_abs_fit_veto = None  # this means that zero_ends_len_rel_fit_veto will be used
-Zero_ends_len_rel_fit_veto = 1  # this means that it will be equal to the 1 transit (template) duration
-Threshold_mes_veto = 5.
-Veto_threshold_for_mes = 2.05  # false alarm 5%
+Fn_step_veto = 1e-5
+Min_len_step_checking_veto = 4
+Max_len_step_checking_veto = 10
 N_parts_veto_snr = 4
-N_parts_veto_len = 6
-Inn_prod_min_veto = 0.2
-Delta_snr2_wide_templ_veto = 4.  # should correspond to 2 sigma
-Threshold_to_std_veto = 35 ** 0.5
+N_parts_veto_fourier = 3
+Wind_len_overlap_fourier = 64
+Delta_snr_wide_templ_veto = 2.  # should correspond to 2 sigma
+Threshold_peak_sigma_veto = 3.  # there will also be look-elsewhere
+Veto_threshold_for_mes = 2.05  # false alarm 5%
+Threshold_mes_veto = 5.
 
 # Processing the statistic
 Nperseg_moving_var = 512
@@ -78,7 +80,7 @@ Std_time_scrambling = 10.  # days # for time slides
 Max_hole_pieces_scrampling = 30  # <1 day # Hole which is considered a reason to split the statistic to two pieces which can be shuffled
 Max_piece_scrambling = int(50 * 24 * 2)  # 50 days # Maximal possible length of a piece which will be shuffled
 Min_piece_scrambling = int(5 * 24 * 2)  # 5 days # Minimal possible length of a piece which will be shuffled
-N_per_temp_saving = 10  # how many best candidates per template to save
+N_per_temp_saving = 1  # how many best candidates per template to save
 # track_process = False
 
 Search_results_index_per = 0
@@ -87,15 +89,21 @@ Search_results_index_sum_tr_times = 2
 Search_results_index_sum_stats = 3
 Search_results_index_sum_trends = 4
 Search_results_index_sum_vars = 5
-Search_results_index_shifts = 6
+Search_results_index_slides = 6
 Search_results_index_per_list = 7
 Search_results_length = 8
+
+Dtype_r = np.float32
+Dtype_c = np.complex64
 
 Default_output_location = os.getcwd()  # os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Outputs_of_pipeline')
 Default_data_location = os.getcwd()
 
+Default_conditioned_data_filename_postfix = 'conditioned_data.npy'
+Default_no_veto_no_score_cor_stats_filename_postfix = 'no_veto_no_cor_stats'
+Default_connected_statistic_data_filename_postfix = 'connected_stats.npy'
+Default_best_candidates_filename_postfix_period = 'best_periodic_scores_P='
+Default_inverted_best_candidates_filename_postfix_period = 'best_inverted_periodic_scores_P='
 # parameters_file = os.path.join(os.path.dirname(__file__), 'pipeline_parameters.txt')
 # PARAMETERS CAN BE SPECIFIED IN THE FILE, AND THEY WILL BE READ FROM IT
 # variables_from_file(parameters_file)
-Template_bank_file = os.path.join(os.path.dirname(__file__), 'templates', 'template_bank.txt')
-Shifts_template_bank_file = os.path.join(os.path.dirname(__file__), 'templates', 'shifts_template_bank.txt')
