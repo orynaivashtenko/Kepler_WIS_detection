@@ -33,6 +33,7 @@ Smoothen_psds = True
 Tukey_steps_len_psd = 16
 Conditional_zero_zeroth_freq_wf = True
 Always_zero_zeroth_freq_wf = False
+Wf_td_window_extension_coef = 2.5
 
 # Notch:
 Nsig_notch = 5.  # this means that such a deviation will happen more rarely than once per 10 stars

@@ -480,6 +480,28 @@ def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, re
             return psds, [freqfun(nperseg, d=dt) for _ in range(len(psds))], npsds
 
 
+def window_wf_td_fun(wf_fd,  extension_coef=2.5, meas_len=256):
+    """
+    applies the tukey window to one whitening template in the time domain to make it smooth but preserve the mean zero
+    because this will ensure that the lowest frequency gets zero in the Fourier domain whitening filter.
+    :param extension_coef:
+    :type extension_coef:
+    :return:
+    :rtype:
+        """
+    wf_td = np.fft.irfft(wf_fd)
+    wind = np.zeros(len(wf_td))
+    len_to_save = meas_len  # it is 2 nperseg
+    tuk = tukey(int(2 * extension_coef * len_to_save), alpha=1 - 1 / extension_coef, sym=True)
+    wind[:len(tuk) // 2] = tuk[-len(tuk) // 2:]
+    wind[-len(tuk) // 2:] = tuk[:len(tuk) // 2]
+    wf_td = wf_td * wind
+    wf_td -= np.mean(wf_td) * wind / np.mean(wind)
+    wf_fd = np.abs(np.fft.rfft(wf_td))
+    wf_td = np.fft.irfft(wf_fd)  # we need wf_fd for inpainting
+    return wf_td, wf_fd
+
+
 def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
            conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False):
     """
@@ -2313,242 +2335,4 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target
             new_data[it[0]: it[1]] = data[ip[0]: ip[1]]
         return new_data
 
-
-def measure_psds_func(fluxes, masks=None, nperseg=128, noverlap=64, window='hann', support=8192,
-                      subtract_mean=True, rfft=True, smoothen_psds=True,
-                      tukey_steps_len=16, conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False,
-                      zero_to_high_freq_thresh_wf_ratio=0.6, dt=0.02043368):
-    """
-    PSDS as function of quarter id.
-    The PSD measuring algotithm makes the evenly sampled steps and not adjust the search for
-    good pieces according to the placement of the zeros in mask.
-
-    :param nperseg: the length of a sample used in Welch method
-    :type nperseg: int
-    :param noverlap: If int: length of overlap of slices in Welch method.
-        If float<1 : relative overlap to nperseg.
-        Length of overlap will be int(nperseg*noverlap)
-    :type noverlap: int or float<1
-    :param window: window function by which the signals are multiplied to avoid boundary effects and crosstalk
-        Possible options: 'hann', 'boxcar', where 'boxcar' is just normalized bow, or no window
-        Default is 'hann'. It is not recommended to use 'boxcar'.
-    :type window: str
-    :param subtract_mean: If True, the mean of the signal is subtracted. It is recommended to do it because
-        otherwise unwanted power may appear in the zero frequency
-        Default is True
-    :type subtract_mean: bool
-    :param rfft: If True, the signal is treated as real, and all ffts are rffts. The length of the frequency samples
-        are the nperseg//2+1.
-        Default is True
-    :type rfft: bool
-    :param smoothen_psds: whether to apply multi-resolution smoothing to mitigate the noise effects
-    :type smoothen_psds: bool
-    :param tukey_steps_len: length taken for zeroing in the tukey windowing
-    :type tukey_steps_len: int or float
-    :param conditional_zero_zeroth_freq: Whether to put the low frequencies to zero if they deviate too much
-    :type conditional_zero_zeroth_freq: bool
-    :param always_zero_zeroth_freq: whether to always put the lowest frequencies to zero
-    :type always_zero_zeroth_freq: bool
-    :param zero_to_high_freq_thresh_wf_ratio : the ratio between the whitening filter in the Fourier domain above which
-        the filter is considered to be quickly decaying. Then, Tukey window will be applied to the lowest frequencies.
-        It is done because the lowest frequencies often have orders of magnitude spike of PSD which is not resolved by Welch.
-    :type zero_to_high_freq_thresh_wf_ratio : float
-    :return: creates self.psds, self.psdfreqs, self.wf_td, self.wf_fd, self.freqs, seld.npsds.
-    :rtype:
-    """
-    if rfft:
-        fftfun = np.fft.rfft
-        ifftfun = np.fft.irfft
-        freqfun = np.fft.rfftfreq
-        dtype_res = np.float64
-    else:
-        fftfun = np.fft.fft
-        ifftfun = np.fft.ifft
-        freqfun = np.fft.fftfreq
-        dtype_res = np.complex128
-    if masks is None:
-        masks = [~np.isnan(fluxes[i]) for i in range(len(fluxes))]
-    if subtract_mean:
-        fluxes = [fluxes[i] - np.nanmean(fluxes[i][masks[i]]) for i in range(len(fluxes))]
-
-    orig_psds, psdfreqs = welch_psds(clean_fluxes=fluxes, psd_masks=masks,
-                                     nperseg=nperseg, noverlap=noverlap, window=window, rfft=rfft,
-                                     return_freqs=True, dt=dt, return_npsds=False)
-
-    freqs = [freqfun(len(flux), d=dt) for flux in fluxes]
-
-    #############################################################################################################
-    # Smoothing
-    #############################################################################################################
-    if smoothen_psds:
-        nperseg_two = 2 * nperseg
-        nperseg_coarse = nperseg // 2
-        nperseg_rude = nperseg // 4
-        nperseg_smooth = nperseg // 8
-        psds_two = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
-                              nperseg=nperseg_two, noverlap=noverlap, window=window, rfft=rfft,
-                              return_freqs=False, dt=dt, return_npsds=False)
-        psds_coarse = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
-                                 nperseg=nperseg_coarse, noverlap=noverlap, window=window, rfft=rfft,
-                                 return_freqs=False, dt=dt, return_npsds=False)
-        psds_smooth = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
-                                 nperseg=nperseg_smooth, noverlap=noverlap, window=window, rfft=rfft,
-                                 return_freqs=False, dt=dt, return_npsds=False)
-        psds_rude = welch_psds(clean_fluxes=fluxes, psd_masks=masks,  # overlap is relative!
-                               nperseg=nperseg_rude, noverlap=noverlap, window=window, rfft=rfft,
-                               return_freqs=False, dt=dt, return_npsds=False)
-
-        psdfreqs = [freqfun(nperseg_two, d=dt) for _ in range(len(orig_psds))]
-        psds = []
-        wf_fd_meas = []
-
-        for q in range(len(orig_psds)):
-            noisy_vec = 1 / psds_two[q] ** 0.5
-            mean_vec = sinc_interp(1 / psds_smooth[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            noisy_resid_vec = noisy_vec - mean_vec
-            orig_vec = sinc_interp(1 / orig_psds[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            orig_resid_vec = orig_vec - mean_vec
-            coarse_vec = sinc_interp(1 / psds_coarse[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            coarse_resid_vec = coarse_vec - mean_vec
-            rude_vec = sinc_interp(1 / psds_rude[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            rude_resid_vec = rude_vec - mean_vec
-
-            std_noisy = outlier_free_std(noisy_resid_vec[len(noisy_resid_vec) // 2:], nsig=3, n_iterations=2)
-
-            nsig_sign_minwids_res_repl_vecs_res_repl = [[0.6, +1., 20, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
-                                                        [0.5, +1., 20, rude_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
-                                                        [0.6, -1., 20, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low f bend
-                                                        [1, +1., 10, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # mismatch behav
-                                                        [1, -1., 10, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low freq bend
-                                                        [2, -1., 2, coarse_resid_vec, coarse_vec, coarse_resid_vec],  # low freq bend
-                                                        [1, -1., 10, orig_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
-                                                        [1, +1., 10, orig_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
-                                                        [2.5, -1., 4, orig_resid_vec, orig_vec, orig_resid_vec],  # for real features
-                                                        [2.5, +1., 4, orig_resid_vec, orig_vec, orig_resid_vec]]  # for lowest freqs
-            combined_vec = np.array(mean_vec)
-            for nsig, sign, min_wid, res_vec, repl_vec, res_repl in nsig_sign_minwids_res_repl_vecs_res_repl:
-                i = 0
-                while i < len(combined_vec):
-                    if sign * res_vec[i] - nsig * std_noisy > 0.:
-                        i_1 = i
-                        i_2 = i
-                        while (i_2 < len(res_vec)) and (sign * res_vec[i_2] - nsig * std_noisy > 0):
-                            i_2 += 1
-                        if (i_2 - i_1) >= min_wid or (i_1 <= 2 and (i_2 - i_1) >= min_wid / 2):
-                            # find the beginning and the end of the replacement region:
-                            j_1 = i_1
-                            while (j_1 - 1 >= 0) and (sign * res_repl[j_1 - 1] > 0):
-                                j_1 -= 1
-                            j_2 = i_2
-                            while (j_2 < len(res_vec)) and (sign * res_repl[j_2] > 0):
-                                j_2 += 1  # this is the last slice index, so it can be bigger
-                            combined_vec[j_1:j_2] = repl_vec[j_1:j_2]
-                            i = j_2 + 1
-                        else:
-                            i = i_2 + 1
-                    else:
-                        i += 1
-            ########################################################################################################################
-            # Special treatment for the lowest freqs
-            ########################################################################################################################
-
-            # 1. Using better resolution if drops fast
-
-            # Compare value of the wf_fd at low and high freqs. If the low one drops too fast, we will use the
-            # nore exact measurement to avoid unresolved residual low-freq red noise.
-            low_bin = 4  # below this, we take the low frequencies
-            high_bin = len(orig_vec) - 20  # From here on is what we compare to
-            if ((conditional_zero_zeroth_freq and (
-                    np.mean(np.abs(orig_vec[0:3])) / np.mean(np.abs(orig_vec[high_bin:])) < zero_to_high_freq_thresh_wf_ratio))
-                    or always_zero_zeroth_freq):
-                i = low_bin
-                while orig_vec[i] < combined_vec[i]:
-                    i += 1
-                combined_vec[:i] = orig_vec[:i]
-
-            # 2. Making the lowest freqs wf_fd non-decreasing
-
-            # We do not want the zeroth freq to be an outlier.
-            # We assume that the PSD should not drop towards the zero bin. If it does in reality, it is anyway
-            # not well-measured and is prone to under-whitening. So we make it non-decreasing by punishing more
-            # the lowest frequencies
-            for j in [1, 2, 3]:  # Fix at these indices
-                i = 0
-                while combined_vec[i + j] < combined_vec[i]:
-                    combined_vec[:i + j] = combined_vec[i + j]
-                    i += 1
-                    if i >= len(combined_vec) - j - 2:
-                        break
-
-            # 3. Checking the whitening residuals
-
-            # Same thing of replacing the low freqs by the exact measurement, but by looking at the residuals (chi2)
-            # (I am by far not sure all this is really needed)
-            std_noisy_high = np.std(noisy_resid_vec[len(noisy_resid_vec) // 2:])
-            low_freq_bin = 8
-            low_resid_2_sum = np.sum((noisy_resid_vec[:low_freq_bin] / std_noisy_high) ** 2)
-            if low_resid_2_sum >= chi2.isf(low_freq_bin / len(noisy_resid_vec), df=low_freq_bin - 1):
-                j_2 = low_freq_bin
-                sign_1 = np.sign(orig_vec[j_2] - combined_vec[j_2])
-                sign_2 = np.sign(orig_vec[j_2 + 1] - combined_vec[j_2 + 1])
-                while (not np.isclose(sign_1, 0.)) and (np.sign(sign_1 * sign_2) != -1.) and j_2 < len(combined_vec) - 1:
-                    j_2 += 1
-                    sign_1 = np.sign(orig_vec[j_2] - combined_vec[j_2])
-                    sign_2 = np.sign(orig_vec[j_2 + 1] - combined_vec[j_2 + 1])
-                combined_vec[:j_2] = orig_vec[:j_2]
-
-            psds.append(1 / combined_vec ** 2)
-            wf_fd_meas.append(combined_vec)
-    else:
-        psds = copy.deepcopy(orig_psds)
-        wf_fd_meas = [1 / psds[q] ** 0.5 for q in range(len(psds))]
-
-    #############################################################################################################
-    # Whitening filter
-    #############################################################################################################
-    # compare value of the wf_fd at low and high freqs. If the low one drops too fast, we will apply the Tukey
-    # window and zero the wf_fd around zero. This will help to avoid unresolved residual low-freq red noise.
-    assert support % 2 == 0, 'self.support assumed to be even!'
-    wf_tds = []
-    wf_fds = []
-    for q, wpsd in enumerate(wf_fd_meas):
-        wf_td = ifftfun(wpsd)
-        meas_len = len(wf_td)
-        wf_td = np.fft.ifftshift(np.fft.fftshift(wf_td) * tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
-        mid_point = len(wf_td) // 2
-        result = np.zeros(support, dtype=dtype_res)
-        result[:mid_point] = wf_td[:mid_point]
-        result[-mid_point:] = wf_td[-mid_point:]
-
-        wf_fd = fftfun(result)
-        wf_fd[0] = 0.  # MAYBE THIS IS WRONG! also, the flux was already supposed to have zero mean. see below what I did.
-        wf_fd = np.abs(wf_fd)  # anyway in the formula it appears twice, so the phase will get canceled
-        # but maybe this exactly means that we should not take this abs?
-
-        # It would be good to have a filter which has both a zero at the zero frequency and at the large correlation length,
-        # but this is hard
-        # Now check maybe we need more:
-        whitened_clean_flux_fd = fftfun(fluxes[q]) * wf_fd
-        first_measured_bin = 2 * int(np.ceil(support / nperseg))
-        if ((np.max(np.abs(whitened_clean_flux_fd[:2 * first_measured_bin])) ** 2 / np.mean(
-                np.abs(whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2
-                    ) > chi2.isf(1 / len(whitened_clean_flux_fd), df=1))  # if the whitening was not enough
-                or (conditional_zero_zeroth_freq and (np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(
-                    wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < zero_to_high_freq_thresh_wf_ratio))  # if too steep drop of wf
-                or always_zero_zeroth_freq):  # if we just asked to
-            lentuk = first_measured_bin * 4  # 4 * first_measured_bin
-            wf_fd[:2 * first_measured_bin] = wf_fd[:2 * first_measured_bin] * tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
-                                                                                    sym=True)[:2 * first_measured_bin]
-        else:
-            # even if it is okay, we need to zero a bit more than this in order to avoid non-zero values of wf_tf,
-            # because it is ill-defined when we pad and unpad
-            first_measured_bin = int(np.ceil(support / nperseg))
-            lentuk = first_measured_bin * 2  # 4 * first_measured_bin
-            wf_fd[:first_measured_bin] = wf_fd[:first_measured_bin] * tukey(lentuk, alpha=3 * first_measured_bin / 2 / lentuk,
-                                                                            sym=True)[:first_measured_bin]
-        wf_td = np.fft.fftshift(ifftfun(wf_fd))  # we need wf_fd for inpainting
-        wf_tds.append(np.array(wf_td, dtype=Dtype_r))
-        wf_fds.append(np.array(wf_fd, dtype=Dtype_c))
-    wf_tds = np.array(wf_tds, dtype=Dtype_r)  # for numba need numpy.arrays
-    return psds, wf_fds, wf_tds
 

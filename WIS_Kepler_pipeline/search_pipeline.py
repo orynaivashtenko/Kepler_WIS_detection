@@ -76,8 +76,7 @@ klc1.detect_single_transits()
 class KeplerLightCurve(object):
     def __init__(self, target_id=None, times=None, fluxes=None, get_data=True, data_location=Default_data_location,
                  output_location=Default_output_location,
-                 remove_zeroth_quarter=True, remove_quarter_17=True,
-                 use_rfft=Use_rfft):  # , load_data_from_file=False
+                 remove_zeroth_quarter=True, remove_quarter_17=True):  # , load_data_from_file=False
         """
         Initializes a kepler light curve object.
 
@@ -209,10 +208,7 @@ class KeplerLightCurve(object):
         tmax = np.max(np.array([len(t) for t in self.orig_times]))  # maximum length of the time
         # the closest (but bigger) power of 2 to the length        Tmax += tm.L_ban
         self.support = 2 ** int(np.ceil(np.log2(tmax)))
-        if use_rfft:
-            self.fft_support = self.support // 2 + 1
-        else:
-            self.fft_support = self.support
+        self.fft_support = self.support // 2 + 1  # use_rfft
 
         self.whitened_fluxes_td = np.zeros((len(self.fluxes), self.support))
         self.whitened_templates_td = None
@@ -250,9 +246,10 @@ class KeplerLightCurve(object):
         self.npsds = None
         self.psds = None
         self.orig_psds = None
-        self.wf_fd_meas = None
-        self.wf_td = None
-        self.wf_fd = None
+        self.wf_fds_meas = None
+        self.wf_tds = None
+        self.wf_fds = None
+        self.wf_fds_unwindowed = None
         self.zero_padding_ends = None
 
         self.notch_mask = None
@@ -357,7 +354,7 @@ class KeplerLightCurve(object):
                        nsig_outliers_psd=Nsig_outliers_psd, nperseg_psd=Nperseg_psd, noverlap_psd=Noverlap_psd,
                        window_psd=Window_psd, npsdsmin=Npsdsmin, subtract_mean_in_psd=Subtract_mean_in_psd,
                        smoothen_psds=Smoothen_psds,
-                       nsig_notch=Nsig_notch, use_rfft=Use_rfft,
+                       nsig_notch=Nsig_notch,
                        nsig_outliers_w=Nsig_outliers_w, nsig_outliers_w_pos=Nsig_outliers_w_pos,
                        nsig_outliers_w_neg=Nsig_outliers_w_neg,
                        max_small_hole=Max_small_hole,
@@ -395,8 +392,6 @@ class KeplerLightCurve(object):
         :param nsig_notch: Minimal deviation from trend of whitened fluxes in Fourier domain
             considered to be outlier (in units of std of whitened fluxes in Fourier space)
         :type nsig_notch: float
-        :param use_rfft: Whether to use rfft (Fourier for real signals) instead of fft
-        :type use_rfft: bool
         :param nsig_outliers_w: Minimal deviation from trend of whitened fluxes in real domain
            considered to be outlier (in units of their std)
         :type nsig_outliers_w: float
@@ -440,17 +435,17 @@ class KeplerLightCurve(object):
         self.pad_by_zeros()
         self.make_big_hole_masks(max_small_hole=max_small_hole, exclude_individual_points=True)
         self.interpolate_fluxes()
-        self.subtract_low_trends(nperseg=2 * self.nperseg_psd)
+        self.subtract_low_trends(nperseg=self.nperseg_psd)
         self.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
                                 nsig_negative=nsig_outliers_0_neg,
                                 nsig_clean=nsig_outliers_psd, detr_length_outliers=detr_length_outliers,
                                 detr_method_outliers=detr_method_outliers, detr_endmethod_outliers=detr_endmethod_outliers,
                                 detr_ends_outliers=detr_ends_outliers, detr_endlen_outliers=detr_endlen_outliers,
                                 in_whitened_fluxes=False, modify_clean_masks=True)
-        self.interpolate_fluxes(interpolate_clean_fluxes=False)  # need to do this again after piecewise detrending
+        self.interpolate_fluxes(interpolate_clean_fluxes=True) # interpolate_clean_fluxes=False)  # need to do this again after piecewise detrending
         self.prepare_for_psd(nperseg=self.nperseg_psd, noverlap=noverlap_psd, npsdsmin=npsdsmin)
         self.measure_psds(nperseg=self.nperseg_psd, noverlap=noverlap_psd, window=window_psd,
-                          subtract_mean=subtract_mean_in_psd, rfft=use_rfft, smoothen_psds=smoothen_psds,
+                          subtract_mean=subtract_mean_in_psd, smoothen_psds=smoothen_psds,
                           tukey_steps_len=tukey_steps_len, conditional_zero_zeroth_freq=conditional_zero_zeroth_freq,
                           always_zero_zeroth_freq=always_zero_zeroth_freq)
         self.whiten_fluxes(whiten_clean_fluxes=True)
@@ -463,6 +458,9 @@ class KeplerLightCurve(object):
         self.interpolate_fluxes()
         self.whiten_fluxes(whiten_clean_fluxes=True)
         self.notch_fluxes(nsig=nsig_notch)
+        #self.whiten_fluxes(whiten_clean_fluxes=True)
+        self.check_low_freq_whitening_residuals(resid_len_permission=3)
+        self.fftshift_wf_fds()
         self.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
                                 nsig_negative=nsig_outliers_0_neg,
                                 nsig_clean=nsig_outliers_psd,
@@ -558,8 +556,8 @@ class KeplerLightCurve(object):
             self.fluxes
             self.whitened_fluxes_td
             self.whitened_fluxes_fd
-            self.wf_td
-            self.wf_fd
+            self.wf_tds
+            self.wf_fds
             self.big_hole_masks
             self.whitened_templates_td
             self.whitened_templates_fd
@@ -602,7 +600,7 @@ class KeplerLightCurve(object):
             conditioned_data[1][ind_last:ind_last + len(self.fluxes[q])] = self.times[q]
             conditioned_data[2][ind_last:ind_last + len(self.fluxes[q])] = self.fluxes[q]
             conditioned_data[3][ind_last:ind_last + len(self.whitened_fluxes_td[q])] = self.whitened_fluxes_td[q]
-            conditioned_data[4][ind_last:ind_last + self.support] = self.wf_td[q]
+            conditioned_data[4][ind_last:ind_last + self.support] = self.wf_tds[q]
             conditioned_data[5][ind_last:ind_last + len(self.fluxes[q])] = self.big_hole_masks[q]
             conditioned_data[6][ind_last:ind_last + len(self.trends_orig_fluxes[q])] = self.trends_orig_fluxes[q]
             for k in range(len(self.whitened_templates_td)):
@@ -627,8 +625,8 @@ class KeplerLightCurve(object):
         self.fluxes
         self.whitened_fluxes_td
         self.whitened_fluxes_fd
-        self.wf_td
-        self.wf_fd
+        self.wf_tds
+        self.wf_fds
         self.big_hole_masks
         self.whitened_templates_td
         self.whitened_templates_fd
@@ -663,8 +661,8 @@ class KeplerLightCurve(object):
         self.fluxes = []
         self.whitened_fluxes_td = []
         self.whitened_fluxes_fd = []
-        self.wf_td = []
-        self.wf_fd = []
+        self.wf_tds = []
+        self.wf_fds = []
         self.big_hole_masks = []
         self.trends_orig_fluxes = []
         self.whitened_templates_td = [[] for _ in range(len(conditioned_data) - 7)]
@@ -688,8 +686,8 @@ class KeplerLightCurve(object):
             self.whitened_fluxes_td.append(whfltd1)
             self.whitened_fluxes_fd.append(np.fft.rfft(whfltd1))
             wftd1 = np.array(conditioned_data[4][ind_last: ind_last + self.support]).astype(float)
-            self.wf_td.append(wftd1)
-            self.wf_fd.append(np.fft.rfft(np.fft.ifftshift(wftd1)))
+            self.wf_tds.append(wftd1)
+            self.wf_fds.append(np.fft.rfft(np.fft.ifftshift(wftd1)))
             self.big_hole_masks.append((conditioned_data[5][ind_last: ind_last + lenflux]).astype(bool))
             self.trends_orig_fluxes.append((conditioned_data[6][ind_last: ind_last + len_orig]).astype(float))
             for k in range(len_whitened_templates_td):
@@ -803,12 +801,10 @@ class KeplerLightCurve(object):
         self.templates_of_indices = np.array([k for k in range(len(self.indices_of_templates))
                                               for _ in range(self.indices_of_templates[k][0], self.indices_of_templates[k][1])])
 
-    def condition_templates(self, use_rfft=Use_rfft, templates=None, shifts=None, template_index='all'):
+    def condition_templates(self, templates=None, shifts=None, template_index='all'):
         """
         Initializes and conditions the template bank. Most of the temlate properties and methods are inside the `TemplateBank` class,
         but notchig, whitening and similar are performed here.
-        :param use_rfft: Whether to use rfft or fft instead. Everywhere, rfft is used by default
-        :type use_rfft: bool
         :param templates: Array of transit models used for detecton, usually produced with Batman pachageCentered at the center
         :type templates:
         :param shifts:
@@ -822,15 +818,13 @@ class KeplerLightCurve(object):
         The documentaton is not written yet. Try consulting descriptions of all the methods
         :param template_index:
         :type template_index:
-        :param use_rfft: Whether to use rfft or not, meaning to use fft. The default is use_rfft=True.
-        :type use_rfft:  bool
         :return:
         :rtype:
         """
         self.initialize_templates(templates=templates, shifts=shifts, template_index=template_index)
         self.notch_templates()  # why notch is before roll, is written inside the method
         self.tb.roll_templates()
-        self.whiten_templates(use_rfft=use_rfft)
+        self.whiten_templates()
 
     def detect_single_transits(self, nsig_outliers_stat=Nsig_outliers_stat,
                                apply_veto=True, apply_score_correction=Apply_score_correction,
@@ -1213,7 +1207,7 @@ class KeplerLightCurve(object):
         self.is_zero_padded = True
 
     def measure_psds(self, nperseg=None, noverlap=Noverlap_psd, window=Window_psd,
-                     subtract_mean=Subtract_mean_in_psd, rfft=Use_rfft, smoothen_psds=True,
+                     subtract_mean=Subtract_mean_in_psd, smoothen_psds=True,
                      tukey_steps_len=16, conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False,
                      zero_to_high_freq_thresh_wf_ratio=0.6):
         """
@@ -1235,10 +1229,6 @@ class KeplerLightCurve(object):
             otherwise unwanted power may appear in the zero frequency
             Default is True
         :type subtract_mean: bool
-        :param rfft: If True, the signal is treated as real, and all ffts are rffts. The length of the frequency samples
-            are the nperseg//2+1.
-            Default is True
-        :type rfft: bool
         :param smoothen_psds: whether to apply multi-resolution smoothing to mitigate the noise effects
         :type smoothen_psds: bool
         :param tukey_steps_len: length taken for zeroing in the tukey windowing
@@ -1251,7 +1241,7 @@ class KeplerLightCurve(object):
             the filter is considered to be quickly decaying. Then, Tukey window will be applied to the lowest frequencies.
             It is done because the lowest frequencies often have orders of magnitude spike of PSD which is not resolved by Welch.
         :type zero_to_high_freq_thresh_wf_ratio : float
-        :return: creates self.psds, self.psdfreqs, self.wf_td, self.wf_fd, self.freqs, seld.npsds.
+        :return: creates self.psds, self.psdfreqs, self.wf_tds, self.wf_fds, self.freqs, seld.npsds.
         :rtype:
         """
         if nperseg is None:
@@ -1263,16 +1253,10 @@ class KeplerLightCurve(object):
         if self.is_fluxes_inpainted:
             warnings.warn("Fluxes have been inpainted, new PSD will make inpainting invalid for detection.")
 
-        if rfft:
-            fftfun = np.fft.rfft
-            ifftfun = np.fft.irfft
-            freqfun = np.fft.rfftfreq
-            dtype_res = np.float64
-        else:
-            fftfun = np.fft.fft
-            ifftfun = np.fft.ifft
-            freqfun = np.fft.fftfreq
-            dtype_res = np.complex128
+        fftfun = np.fft.rfft
+        ifftfun = np.fft.irfft
+        freqfun = np.fft.rfftfreq
+        dtype_res = np.float64
 
         if subtract_mean:
             clean_fluxes = [self.clean_fluxes[i] - np.nanmean((self.clean_fluxes[i])[self.psd_masks[i]]) for i in
@@ -1284,7 +1268,7 @@ class KeplerLightCurve(object):
         # clean_fluxes = [self.clean_fluxes[qq]]
 
         self.orig_psds, self.psdfreqs = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,
-                                                      nperseg=nperseg, noverlap=noverlap, window=window, rfft=rfft,
+                                                      nperseg=nperseg, noverlap=noverlap, window=window,
                                                       return_freqs=True, dt=self.dt_sec, return_npsds=False)
 
         self.freqs = [freqfun(len(time), d=self.dt_sec) for time in self.times]
@@ -1298,21 +1282,21 @@ class KeplerLightCurve(object):
             nperseg_rude = nperseg // 4
             nperseg_smooth = nperseg // 8
             psds_two = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                     nperseg=nperseg_two, noverlap=noverlap, window=window, rfft=rfft,
+                                     nperseg=nperseg_two, noverlap=noverlap, window=window,
                                      return_freqs=False, dt=self.dt_sec, return_npsds=False)
             psds_coarse = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                        nperseg=nperseg_coarse, noverlap=noverlap, window=window, rfft=rfft,
+                                        nperseg=nperseg_coarse, noverlap=noverlap, window=window,
                                         return_freqs=False, dt=self.dt_sec, return_npsds=False)
             psds_smooth = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                        nperseg=nperseg_smooth, noverlap=noverlap, window=window, rfft=rfft,
+                                        nperseg=nperseg_smooth, noverlap=noverlap, window=window,
                                         return_freqs=False, dt=self.dt_sec, return_npsds=False)
             psds_rude = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,  # overlap is relative!
-                                      nperseg=nperseg_rude, noverlap=noverlap, window=window, rfft=rfft,
+                                      nperseg=nperseg_rude, noverlap=noverlap, window=window,
                                       return_freqs=False, dt=self.dt_sec, return_npsds=False)
 
             self.psdfreqs = [freqfun(nperseg_two, d=self.dt_sec) for _ in range(len(self.orig_psds))]
             self.psds = []
-            self.wf_fd_meas = []
+            self.wf_fds_meas = []
 
             for q in range(len(self.orig_psds)):
                 noisy_vec = 1 / psds_two[q] ** 0.5
@@ -1378,22 +1362,8 @@ class KeplerLightCurve(object):
                         i += 1
                     combined_vec[:i] = orig_vec[:i]
 
-                # 2. Making the lowest freqs wf_fd non-decreasing
-
-                # We do not want the zeroth freq to be an outlier.
-                # We assume that the PSD should not drop towards the zero bin. If it does in reality, it is anyway
-                # not well-measured and is prone to under-whitening. So we make it non-decreasing by punishing more
-                # the lowest frequencies
-                for j in [1, 2, 3]:  # Fix at these indices
-                    i = 0
-                    while combined_vec[i + j] < combined_vec[i]:
-                        combined_vec[:i + j] = combined_vec[i + j]
-                        i += 1
-                        if i >= len(combined_vec) - j - 2:
-                            break
-
                 # # We will check the residuals of the whitened flux when making the whitening filter (23.09.2023)
-                # 3. Checking the whitening residuals
+                # 2. Checking the whitening residuals
 
                 # Same thing of replacing the low freqs by the exact measurement, but by looking at the residuals (chi2)
                 # (I am by far not sure all this is really needed)
@@ -1410,11 +1380,25 @@ class KeplerLightCurve(object):
                         sign_2 = np.sign(orig_vec[j_2 + 1] - combined_vec[j_2 + 1])
                     combined_vec[:j_2] = orig_vec[:j_2]
 
+                # 3. Making the lowest freqs wf_fd non-decreasing
+
+                # We do not want the zeroth freq to be an outlier.
+                # We assume that the PSD should not drop towards the zero bin. If it does in reality, it is anyway
+                # not well-measured and is prone to under-whitening. So we make it non-decreasing by punishing more
+                # the lowest frequencies
+                for j in [1, 2, 3]:  # Fix at these indices
+                    i = 0
+                    while combined_vec[i + j] < combined_vec[i]:
+                        combined_vec[:i + j] = combined_vec[i + j]
+                        i += 1
+                        if i >= len(combined_vec) - j - 2:
+                            break
+
                 self.psds.append(1 / combined_vec ** 2)
-                self.wf_fd_meas.append(combined_vec)
+                self.wf_fds_meas.append(combined_vec)
         else:
             self.psds = copy.deepcopy(self.orig_psds)
-            self.wf_fd_meas = [1 / self.psds[q] ** 0.5 for q in range(len(self.psds))]
+            self.wf_fds_meas = [1 / self.psds[q] ** 0.5 for q in range(len(self.psds))]
 
         #############################################################################################################
         # Whitening filter
@@ -1422,11 +1406,12 @@ class KeplerLightCurve(object):
         # compare value of the wf_fd at low and high freqs. If the low one drops too fast, we will apply the Tukey
         # window and zero the wf_fd around zero. This will help to avoid unresolved residual low-freq red noise.
         assert self.support % 2 == 0, 'self.support assumed to be even!'
-        self.wf_td = []
-        self.wf_fd = []
-        for q, wpsd in enumerate(self.wf_fd_meas):
+        self.wf_tds = []
+        self.wf_fds = []
+        self.wf_fds_unwindowed = []
+        for q, wpsd in enumerate(self.wf_fds_meas):
             wf_td = ifftfun(wpsd)
-            meas_len = len(wf_td)
+            meas_len = 2 * nperseg  # len(wf_td)  # because we interpolated like that
             wf_td = np.fft.ifftshift(np.fft.fftshift(wf_td) * ut.tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
             mid_point = len(wf_td) // 2
             result = np.zeros(self.support, dtype=dtype_res)
@@ -1437,48 +1422,108 @@ class KeplerLightCurve(object):
             wf_fd[0] = 0.  # MAYBE THIS IS WRONG! also, the flux was already supposed to have zero mean. see below what I did.
             wf_fd = np.abs(wf_fd)  # anyway in the formula it appears twice, so the phase will get canceled
             # but maybe this exactly means that we should not take this abs?
+            self.wf_fds_unwindowed.append(np.array(wf_fd))  # it is unwindowed in the large-window sense of this world
 
-            # It would be good to have a filter which has both a zero at the zero frequency and at the large correlation length,
-            # but this is hard
-            # Now check maybe we need more:
             whitened_clean_flux_fd = fftfun(self.clean_fluxes[q]) * wf_fd
             first_measured_bin = int(np.ceil(self.support / nperseg))
+            too_noisy = np.where(np.abs(whitened_clean_flux_fd[:first_measured_bin]) ** 2 / np.mean(np.abs(
+                whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (2 * first_measured_bin), df=1))[0]
+            if len(too_noisy) > 0 and not always_zero_zeroth_freq:
+                len_kill = int(np.ceil(too_noisy[-1] * 1.1))
+                lentuk = min(len_kill + 2, first_measured_bin + 2) * 2  # if we need to cover more, we will do that after notch
+                # the multiplication by 2 is because the window is symmetric
+                wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
+            elif always_zero_zeroth_freq:
+                lentuk = first_measured_bin * 2
+                wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
+            self.wf_tds.append(np.array(wf_td, dtype=Dtype_r))
+            self.wf_fds.append(np.array(wf_fd, dtype=Dtype_c))
+        # We want to somehow make the correlation length smaller but still okay in Fourier:
+        self.window_wf_td()
+        # # The following comment was indented
+        # wf_td = ifftfun(wf_fd)
+        # wind = np.zeros(len(wf_td))
+        # len_to_save = meas_len  # it is 2 nperseg
+        # extension_coef = 2.5
+        # tuk = ut.tukey(int(2 * extension_coef * len_to_save), alpha=1 - 1 / extension_coef, sym=True)
+        # wind[:len(tuk) // 2] = tuk[-len(tuk) // 2:]
+        # wind[-len(tuk) // 2:] = tuk[:len(tuk) // 2]
+        # wf_td = wf_td * wind
+        # wf_td -= np.mean(wf_td) * wind / np.mean(wind)
+        # wf_fd = np.abs(fftfun(wf_td))
+        # wf_td = np.fft.fftshift(ifftfun(wf_fd))  # we need wf_fd for inpainting
+        # self.wf_tds.append(np.array(wf_td, dtype=Dtype_r))
+        # self.wf_fds.append(np.array(wf_fd, dtype=Dtype_c))
+        self.wf_tds = np.array(self.wf_tds, dtype=Dtype_r)  # for numba need numpy.arrays
+
+    def check_low_freq_whitening_residuals(self, resid_len_permission=3, wf_td_window_extension_coef=Wf_td_window_extension_coef):
+        wf_fds_new = []
+        wf_tds_new = []
+        for q in self.quarters:
+            whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * self.wf_fds[q]
+            first_measured_bin = int(np.ceil(self.support / self.nperseg_psd))
             too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]) ** 2 / np.mean(np.abs(
                 whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
-            if len(too_noisy) > 0:
-                len_kill = too_noisy[-1]
-                lentuk = int(np.ceil(len_kill * 1.3)) * 2  # cover the outlier and a bit more to kill the outlier
-                wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
-            # (len(too_noisy) > 0  # if the whitening was not enough
-            # or (conditional_zero_zeroth_freq and (np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(
-            #     wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < zero_to_high_freq_thresh_wf_ratio))  # too steep drop of wf
-            # or always_zero_zeroth_freq):  # if we just asked to
-            elif always_zero_zeroth_freq:
-                lentuk = first_measured_bin * 4  # 4 * first_measured_bin
-                wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
-            # else:
-            #     # even if it is okay, we need to zero a bit more than this in order to avoid non-zero values of wf_tf,
-            #     # because it is ill-defined when we pad and unpad
-            #     first_measured_bin = int(np.ceil(self.support / nperseg))
-            #     lentuk = first_measured_bin * 2  # 4 * first_measured_bin
-            #     wf_fd[:first_measured_bin] = wf_fd[:first_measured_bin] * ut.tukey(lentuk, alpha=3 * first_measured_bin / 2 / lentuk,
-            #                                                                        sym=True)[:first_measured_bin]
+            if len(too_noisy) > resid_len_permission:
+                len_kill = int(np.ceil(too_noisy[-1] * 1.1))
+                lentuk = len_kill  # * 2  # cover the outlier and a bit more to kill the outlier
+                wf_fd_new = np.array(self.wf_fds_unwindowed[q])
+                while len(too_noisy) > resid_len_permission:
+                    wf_fd_new = np.array(self.wf_fds_unwindowed[q])
+                    wf_fd_new[:lentuk // 2] = wf_fd_new[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
+                    whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * wf_fd_new
+                    too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]) ** 2 / np.mean(np.abs(
+                        whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
+                    lentuk += resid_len_permission
+                wf_td_new, wf_fd_new = ut.window_wf_td_fun(wf_fd_new, extension_coef=wf_td_window_extension_coef)
+                wf_fds_new.append(wf_fd_new)
+                wf_tds_new.append(wf_td_new)
+            # if len(too_noisy) > resid_len_permission:
+            #     len_kill = int(np.ceil(too_noisy[-1] * 1.1))
+            #     lentuk = len_kill  # * 2  # cover the outlier and a bit more to kill the outlier
+            #     wf_fd_new = np.array(self.wf_fds_unwindowed[q])
+            #     wf_fd_new[:lentuk // 2] = wf_fd_new[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
+            #     whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * wf_fd_new
+            #     too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]) ** 2 / np.mean(np.abs(
+            #         whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
+            #     while len(too_noisy) > resid_len_permission:
+            #         lentuk += resid_len_permission
+            #         wf_fd_new = np.array(self.wf_fds_unwindowed[q])
+            #         wf_fd_new[:lentuk // 2] = wf_fd_new[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
+            #         whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * wf_fd_new
+            #         too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]) ** 2 / np.mean(np.abs(
+            #             whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
+            #     wf_td_new, wf_fd_new = ut.window_wf_td_fun(wf_fd_new, extension_coef=wf_td_window_extension_coef)
+            #     wf_fds_new.append(wf_fd_new)
+            #     wf_tds_new.append(wf_td_new)
+            else:
+                wf_fds_new.append(self.wf_fds[q])
+                wf_tds_new.append(self.wf_tds[q])
+        self.wf_fds = wf_fds_new
+        self.wf_tds = wf_tds_new  #np.array([np.fft.irfft(wf_fds_new[q]) for q in self.quarters])
 
-            # We want to somehow make the correlation length smaller but still okay in Fourier:
-            wf_td = ifftfun(wf_fd)
-            wind = np.zeros(len(wf_td))
-            len_to_save = meas_len  # it is 2 nperseg
-            extension_coef = 2.5
-            tuk = ut.tukey(int(2 * extension_coef * len_to_save), alpha=1 - 1 / extension_coef, sym=True)
-            wind[:len(tuk) // 2] = tuk[-len(tuk) // 2:]
-            wind[-len(tuk) // 2:] = tuk[:len(tuk) // 2]
-            wf_td = wf_td * wind
-            wf_td -= np.mean(wf_td) * wind / np.mean(wind)
-            wf_fd = np.abs(fftfun(wf_td))
-            wf_td = np.fft.fftshift(ifftfun(wf_fd))  # we need wf_fd for inpainting
-            self.wf_td.append(np.array(wf_td, dtype=Dtype_r))
-            self.wf_fd.append(np.array(wf_fd, dtype=Dtype_c))
-        self.wf_td = np.array(self.wf_td, dtype=Dtype_r)  # for numba need numpy.arrays
+    def window_wf_td(self, extension_coef=Wf_td_window_extension_coef):
+        """
+        applies the tukey window to the whitening template in the time domain to make it smooth but preserve the mean zero
+        because this will ensure that the lowest frequency gets zero in the Fourier domain whitening filter.
+        :param extension_coef:
+        :type extension_coef:
+        :return:
+        :rtype:
+        """
+        # We want to somehow make the correlation length smaller but still okay in Fourier:
+        wf_fds_new = []
+        wf_tds_new = []
+        meas_len = 2 * self.nperseg_psd  # len(wf_td) measured  # because we interpolated like that
+        for q in self.quarters:
+            wf_td, wf_fd = ut.window_wf_td_fun(self.wf_fds[q], extension_coef=extension_coef, meas_len=meas_len)
+            wf_tds_new.append(np.array(wf_td, dtype=Dtype_r))
+            wf_fds_new.append(np.array(wf_fd, dtype=Dtype_c))
+        self.wf_tds = np.array(wf_tds_new)  # np.array([np.fft.fftshift(wf_td) for wf_td in wf_td_new])
+        self.wf_fds = wf_fds_new
+
+    def fftshift_wf_fds(self):
+        self.wf_tds = np.array([np.fft.fftshift(wf_td) for wf_td in self.wf_tds])
 
     def interpolate_fluxes(self, interpolate_clean_fluxes=True):
         """
@@ -1605,7 +1650,7 @@ class KeplerLightCurve(object):
 
         """
         self.fluxes = np.array(self.fluxes, dtype=Dtype_r)
-        self.fluxes = self.inpaint_fluxes_fast(self.fluxes, self.masks, self.wf_td, dtype=Dtype_r)
+        self.fluxes = self.inpaint_fluxes_fast(self.fluxes, self.masks, self.wf_tds, dtype=Dtype_r)
         self.is_fluxes_inpainted = True
 
     def whiten_fluxes(self, whiten_clean_fluxes=False):
@@ -1617,7 +1662,7 @@ class KeplerLightCurve(object):
         self.whitened_fluxes_fd = []
         self.whitened_fluxes_td = []
         for q in self.quarters:
-            whitened_flux_fd = np.fft.rfft(self.fluxes[q]) * self.wf_fd[q]
+            whitened_flux_fd = np.fft.rfft(self.fluxes[q]) * self.wf_fds[q]
             self.whitened_fluxes_fd.append(np.array(whitened_flux_fd, dtype=Dtype_c))
             self.whitened_fluxes_td.append(np.array(np.fft.irfft(whitened_flux_fd), dtype=Dtype_r))
 
@@ -1625,7 +1670,7 @@ class KeplerLightCurve(object):
             self.whitened_clean_fluxes_fd = []
             self.whitened_clean_fluxes_td = []
             for q in self.quarters:
-                whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * self.wf_fd[q]
+                whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * self.wf_fds[q]
                 self.whitened_clean_fluxes_fd.append(np.array(whitened_clean_flux_fd, dtype=Dtype_c))
                 self.whitened_clean_fluxes_td.append(np.array(np.fft.irfft(whitened_clean_flux_fd), dtype=Dtype_r))
 
@@ -1761,13 +1806,13 @@ class KeplerLightCurve(object):
         # That is why notching has to be done when the template is centered at the center,
         # and only then the template can be rolled.
 
-    def whiten_templates(self, use_rfft=Use_rfft):
+    def whiten_templates(self):
         """
         Whitens all the templates in self.templates by applying
         the whitening filter calculated after the PSD measurement of the data.
 
         Requires:
-        self.wf_fd : the data should be whitened
+        self.wf_fds : the data should be whitened
         self.support : the data should be zero-padded
 
         Creates:
@@ -1776,8 +1821,6 @@ class KeplerLightCurve(object):
         self.whitened_templates_fd : dict of len(templates) entries, each of length self.quarters
             Dictionary of all the whitened templates for all the quarters in Fourier domain
 
-        :param use_rfft: Whether to use rfft or fft
-        :type use_rfft: bool
         :return: self.whitened_templates_td, self.whitened_templates_fd
         :rtype:
         """
@@ -1786,12 +1829,9 @@ class KeplerLightCurve(object):
                                               dtype=Dtype_c)
         for k in range(len(self.tb.templates_shifts)):  # different template indices
             for q in self.quarters:
-                whitened_temp_fd = np.fft.rfft(self.tb.templates_shifts[k]) * self.wf_fd[q]
+                whitened_temp_fd = np.fft.rfft(self.tb.templates_shifts[k]) * self.wf_fds[q]
                 self.whitened_templates_fd[k][q] = whitened_temp_fd
-                if use_rfft:
-                    self.whitened_templates_td[k][q] = np.fft.irfft(whitened_temp_fd)
-                else:
-                    self.whitened_templates_td[k][q] = np.fft.ifft(whitened_temp_fd)
+                self.whitened_templates_td[k][q] = np.fft.irfft(whitened_temp_fd)
         self.is_template_whitened = True
 
     def matched_filtering(self, detr_length_outliers=Detr_length_outliers,
@@ -2079,7 +2119,7 @@ class KeplerLightCurve(object):
             peak_template[1] = 0.5
             peak_template[-1] = 0.5
             peak_template = np.fft.rfft(peak_template)
-            whitened_peak_temps_fd = [peak_template * self.wf_fd[q] for q in self.quarters]
+            whitened_peak_temps_fd = [peak_template * self.wf_fds[q] for q in self.quarters]
             whitened_peak_temps_td = [np.fft.irfft(whitened_peak_temps_fd[q]) for q in self.quarters]
             stats_peak = [np.real(np.fft.irfft(np.conjugate(whitened_peak_temps_fd[q]) * self.whitened_fluxes_fd[q]))
                           for q in self.quarters]
@@ -2447,9 +2487,9 @@ class KeplerLightCurve(object):
         if hasattr(self, 'notch_soss'):
             del self.notch_soss
         if hasattr(self, 'wf_td'):
-            del self.wf_td
+            del self.wf_tds
         if hasattr(self, 'wf_fd'):
-            del self.wf_fd
+            del self.wf_fds
         # del self.statistics_full #will be deleted later
         # del self.time_full #will be deleted later
         if hasattr(self, 'psd_masks'):

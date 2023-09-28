@@ -41,28 +41,28 @@ trig_ids = [tid.strip() for tid in trig_ids]
 Output_location_wexac = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_8'
 # noinspection DuplicatedCode
 for tid in trig_ids:
-    # for i in range(int(N_slides_total_for_now // N_slides_chunk)  # how many times we need to repeat timeslides
-    #                + int(bool(N_slides_total_for_now % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
-    #     # noinspection DuplicatedCode
-    #     fop.write_job_file(code_file=None,
-    #                        code_filename=Slides_runfile_filename,
-    #                        code_file_dir=Run_files_folder,
-    #                        jobname=Slides_job_filename_prefix + '_' + tid + '.bsub',
-    #                        job_file=None,
-    #                        job_filename=Slides_job_filename_prefix + '_' + tid + '_' + str(i) + '.bsub',
-    #                        job_file_dir=Job_files_folder,
-    #                        queue=Queue,
-    #                        mem_per_job_gb=Mem_per_job_gb,
-    #                        array_indices=None,
-    #                        output_file=None,
-    #                        output_filename=Slides_output_filename_prefix + '_' + tid + '.out',
-    #                        output_file_dir=Output_files_folder,
-    #                        error_file=None,
-    #                        error_filename=Slides_error_filename_prefix + '_' + tid + '.out',
-    #                        error_file_dir=Error_files_folder,
-    #                        output_error_overwrite=False,
-    #                        arg_jobind=False,
-    #                        other_args=[['target_id', tid]])
+    for i in range(int(N_slides_total_for_now // N_slides_chunk)  # how many times we need to repeat timeslides
+                   + int(bool(N_slides_total_for_now % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
+        # noinspection DuplicatedCode
+        fop.write_job_file(code_file=None,
+                           code_filename=Slides_runfile_filename,
+                           code_file_dir=Run_files_folder,
+                           jobname=Slides_job_filename_prefix + '_' + tid + '.bsub',
+                           job_file=None,
+                           job_filename=Slides_job_filename_prefix + '_' + tid + '_' + str(i) + '.bsub',
+                           job_file_dir=Job_files_folder,
+                           queue=Queue,
+                           mem_per_job_gb=Mem_per_job_gb,
+                           array_indices=None,
+                           output_file=None,
+                           output_filename=Slides_output_filename_prefix + '_' + tid + '.out',
+                           output_file_dir=Output_files_folder,
+                           error_file=None,
+                           error_filename=Slides_error_filename_prefix + '_' + tid + '.out',
+                           error_file_dir=Error_files_folder,
+                           output_error_overwrite=False,
+                           arg_jobind=False,
+                           other_args=[['target_id', tid]])
 
     # f_sl = [ff for ff in os.listdir(os.path.join('/home/labs/barakz/Collaboration-Kepler/orynai/output_run_8', tid[:4], tid)) if 'mes_slides' in ff]
     #
@@ -100,8 +100,8 @@ for tid in trig_ids:
     #         if Injection_parameters_filename_postfix in ff]) == 0
     #     and len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid))
     #              if Slides_mes_filename_postfix in ff]) > 0):
-    if (len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid))
-             if Slides_mes_filename_postfix in ff]) > 0):
+    # if (len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid))
+    #          if Slides_mes_filename_postfix in ff]) > 0):
         # # noinspection DuplicatedCode
         # fop.write_job_file(code_file=None,
         #                    code_filename=Injection_parameters_runfile_filename,
@@ -123,27 +123,27 @@ for tid in trig_ids:
         #                    arg_jobind=False,
         #                    other_args=[['target_id', tid]])
 
-        for i in np.arange(int(N_injections_total // N_injections_chunk)  # how many times we need to repeat
-                           + int(bool(N_injections_total % N_injections_chunk))):
-            fop.write_job_file(code_file=None,
-                               code_filename=Injection_detection_runfile_filename,
-                               code_file_dir=Run_files_folder,
-                               jobname=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
-                               job_file=None,
-                               job_filename=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
-                               job_file_dir=Job_files_folder,
-                               queue=Queue,
-                               mem_per_job_gb=Mem_per_job_gb,
-                               array_indices=None,
-                               output_file=None,
-                               output_filename=Injection_detection_output_filename_prefix+'_'+tid+'.out',
-                               output_file_dir=Output_files_folder,
-                               error_file=None,
-                               error_filename=Injection_detection_error_filename_prefix+'_'+tid+'.out',
-                               error_file_dir=Error_files_folder,
-                               output_error_overwrite=False,
-                               arg_jobind=False,
-                               other_args=[['target_id', tid], ['first_injection_load_parameters_index', i]])
+        # for i in np.arange(int(N_injections_total // N_injections_chunk)  # how many times we need to repeat
+        #                    + int(bool(N_injections_total % N_injections_chunk))):
+        #     fop.write_job_file(code_file=None,
+        #                        code_filename=Injection_detection_runfile_filename,
+        #                        code_file_dir=Run_files_folder,
+        #                        jobname=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
+        #                        job_file=None,
+        #                        job_filename=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
+        #                        job_file_dir=Job_files_folder,
+        #                        queue=Queue,
+        #                        mem_per_job_gb=Mem_per_job_gb,
+        #                        array_indices=None,
+        #                        output_file=None,
+        #                        output_filename=Injection_detection_output_filename_prefix+'_'+tid+'.out',
+        #                        output_file_dir=Output_files_folder,
+        #                        error_file=None,
+        #                        error_filename=Injection_detection_error_filename_prefix+'_'+tid+'.out',
+        #                        error_file_dir=Error_files_folder,
+        #                        output_error_overwrite=False,
+        #                        arg_jobind=False,
+        #                        other_args=[['target_id', tid], ['first_injection_load_parameters_index', i]])
 
     # if len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid)) if Injections_filename_postfix in ff]) > 0:
     #     # noinspection DuplicatedCode
