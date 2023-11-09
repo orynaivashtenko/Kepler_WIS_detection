@@ -550,8 +550,7 @@ class KeplerTarget(object):
             output_location = self.output_location
         self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=data_location,
                                          output_location=output_location,
-                                         remove_zeroth_quarter=remove_zeroth_quarter, remove_quarter_17=remove_quarter_17,  # Q17 is removed
-                                         use_rfft=use_rfft)
+                                         remove_zeroth_quarter=remove_zeroth_quarter, remove_quarter_17=remove_quarter_17)  # Q17 is removed
         self.number_of_quarters = len(self.klc.quarters)
 
     def bad_fft_check(self, amp_max_bad_fft=300, dif_max_bad_fft=11):
@@ -878,7 +877,7 @@ class KeplerTarget(object):
         if (threshold_inv_crossing_list_file is None) and (threshold_inv_crossing_list_location is not None):
             threshold_inv_crossing_list_file = os.path.join(threshold_inv_crossing_list_location, threshold_inv_crossing_list_filename)
 
-        self.run_ses_search(save_conditioned_data=False,
+        self.run_ses_search(save_conditioned_data=True,
                             conditioned_data_filename_postfix=conditioned_data_filename_postfix,
                             save_no_veto_no_score_cor_stats=True,
                             no_veto_no_score_cor_filename_postfix=No_veto_no_score_cor_stats_filename_postfix,
@@ -1185,15 +1184,16 @@ class KeplerTarget(object):
             per_wing_injection_relative=Per_wing_injection_and_slides_relative,
             injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
             all_templates_injection_parameters_filename_postfix=All_templates_injection_parameters_filename_postfix,
+            delta_snr_from_best_templ=
             d_ecc=0.1,
             n_w=5,  #
             d_inc=0.02,  # this is in degrees! and often until 85 is fine
             u=(0.47, 0.23),
-            snr=9,  # just some arbitrary number to have noise
+            snr=4.,  # something closer to reality to describe smearing to other templates consistently
             n_per=200
     ):
         """
-
+        TODO: I am not sure about the template factor. Because of the bigger noisiness, a specific template could trigger without a good reason for that, and then the template factor will heavily suppress the result. Maybe I need to account for the specific expected snr of this transit to smear the templates much more. Or I need to also inject other shit, but this is even more complicated.
         :param n_injections: Number of injections to generate in the end. The inner number of generations will be defined by the
         ranges of parameters. `n_injections` is just how many will be returned in the end for the best template
         :type n_injections:
@@ -1324,12 +1324,15 @@ class KeplerTarget(object):
                             args = np.argsort(snrs_or_cos_angles)
                             ind_1 = tm.Templates_of_indices[args[-1]]
                             ind_2 = tm.Templates_of_indices[args[-2]]
-                            ind_3 = tm.Templates_of_indices[args[-2]]
+                            ind_3 = tm.Templates_of_indices[args[-3]]
+                            ind_4 = tm.Templates_of_indices[args[-4]]
                             templates_parameter_sets[ind_1].append([period, a, inc, ecc, w, u[0], u[1]])
                             if ind_2 != ind_1:
                                 templates_parameter_sets[ind_2].append([period, a, inc, ecc, w, u[0], u[1]])
                             if ind_3 != ind_2 and ind_3 != ind_1:
                                 templates_parameter_sets[ind_3].append([period, a, inc, ecc, w, u[0], u[1]])
+                            if ind_4 != ind_3 and ind_4 != ind_2 and ind_4 != ind_1:
+                                templates_parameter_sets[ind_4].append([period, a, inc, ecc, w, u[0], u[1]])
         # Saving the injection parameters for all the templates, although we will only need for one template.
         # Note that the number of injections is different for different templates, and this reflects the template prior.
         # The number of injections in the run will be then renormalized to match the required number.
@@ -1725,29 +1728,45 @@ class KeplerTarget(object):
         self.calculate_significance(remake_histograms=False)
 
     def get_ses_for_postprocessing(self, no_filters=True, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,
+                                   load_no_veto_no_score_cor=True,
+                                   filename_postfix=No_veto_no_score_cor_stats_filename_postfix,
                                    template_index='all', apply_score_correction=True, apply_veto=False):
-        if no_filters:
-            self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location)
-            self.klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
-                                    nsig_outliers_0_neg=nsig_outliers_0_neg,
-                                    nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
-                                    nsig_outliers_w_neg=nsig_outliers_0_neg)
-            self.klc.condition_templates(template_index=template_index)
-            self.klc.detect_single_transits(apply_score_correction=False, apply_veto=False)
-        else:
-            self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location)
+        if load_no_veto_no_score_cor:
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                filename_postfix=Conditioned_data_filename_postfix, file_format='npy')
-            if not os.path.exists(file_path):
-                self.klc.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BEC. WE NEED TO INVERT FAIRLY
+                                                filename_postfix=filename_postfix, file_format='npy')
+            self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location)
+            self.klc.subtract_means()
+            self.klc.initialize_templates(template_index=template_index)
+            self.klc.stats_raw_no_veto_no_score_cor, self.klc.stat_denoms = np.load(file_path, allow_pickle=True)
+            if template_index != 'all':
+                if not hasattr(template_index, '__len__'):
+                    template_index = [template_index]
+                indices = [kk for k in template_index for kk in tm.Indices_of_templates[k]]
+                self.klc.stats_raw_no_veto_no_score_cor = self.klc.stats_raw_no_veto_no_score_cor[indices]
+            self.klc.statistics_raw_cor = self.klc.stats_raw_no_veto_no_score_cor
+        else:
+            if no_filters:
+                self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location)
+                self.klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
+                                        nsig_outliers_0_neg=nsig_outliers_0_neg,
+                                        nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
+                                        nsig_outliers_w_neg=nsig_outliers_0_neg)
                 self.klc.condition_templates(template_index=template_index)
+                self.klc.detect_single_transits(apply_score_correction=False, apply_veto=False)
             else:
+                self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location)
                 file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                                     filename_postfix=Conditioned_data_filename_postfix, file_format='npy')
-                self.klc.load_conditioned_data(file=file_path)
-            self.klc.initialize_templates(template_index=template_index)
-            # template_ind=targ.best_temp # we need two templates, therefore we have to initialize all
-            self.klc.detect_single_transits(apply_score_correction=apply_score_correction, apply_veto=apply_veto)
+                if not os.path.exists(file_path):
+                    self.klc.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BEC. WE NEED TO INVERT FAIRLY
+                    self.klc.condition_templates(template_index=template_index)
+                else:
+                    file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                        filename_postfix=Conditioned_data_filename_postfix, file_format='npy')
+                    self.klc.load_conditioned_data(file=file_path)
+                self.klc.initialize_templates(template_index=template_index)
+                # template_ind=targ.best_temp # we need two templates, therefore we have to initialize all
+                self.klc.detect_single_transits(apply_score_correction=apply_score_correction, apply_veto=apply_veto)
 
     # def get_summed_values_no_filters_freedom(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15, ttv_hours_allowed=5):
     #     """
@@ -1840,6 +1859,7 @@ class KeplerTarget(object):
     def get_summed_values_no_filters(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
         # TODO: revision
         self.get_ses_for_postprocessing(no_filters=True, nsig_outliers_0_pos=nsig_outliers_0_pos, nsig_outliers_0_neg=nsig_outliers_0_neg,
+                                        load_no_veto_no_score_cor=True,
                                         template_index=self.best_temp, apply_score_correction=False, apply_veto=False)
         klc = self.klc
         best_raw_stats = []

@@ -524,6 +524,10 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
     :rtype: tuple(ndarray, ndarray)
     """
     wf_fd_meas = 1 / np.array(psd)**0.5
+    was_vector = False
+    if not hasattr(wf_fd_meas[0], '__len__'):
+        wf_fd_meas = np.array([wf_fd_meas])
+        was_vector = True
     if rfft:
         ifftfun = np.fft.irfft
         dtype_res = np.float64
@@ -554,12 +558,17 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
                 or always_zero_zeroth_freq):
             first_measured_bin = int(np.ceil(support / meas_len))
             # wf_fd[:first_measured_bin] = 0.
-            lentuk = 4 * first_measured_bin
-            wf_fd[:2 * first_measured_bin] = wf_fd[:2 * first_measured_bin] * tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
-                                                                                    sym=True)[:2 * first_measured_bin]
+            lentuk = 2 * first_measured_bin
+            wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
+                                                              sym=True)[:lentuk // 2]
             wf_td = np.fft.fftshift(ifftfun(wf_fd))
         wf_tds.append(wf_td)
         wf_fds.append(wf_fd)
+
+    if was_vector:
+        wf_tds = wf_tds[0]
+        wf_fds = wf_fds[0]
+
     return wf_tds, wf_fds
 
 
@@ -2335,4 +2344,45 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target
             new_data[it[0]: it[1]] = data[ip[0]: ip[1]]
         return new_data
 
+
+def replace_if_deviating(vector, replacement, tester=None, mindev=1, minwid=1):
+    sign = np.sign(mindev)
+    mindev = np.abs(mindev)
+    new_vector = np.array(vector)
+    if tester is None:
+        tester = replacement - vector
+    i = 0
+    while i < len(vector):
+        if sign * tester[i] - mindev > 0.:
+            i_1 = i
+            i_2 = i
+            while (i_2 < len(vector)) and (sign * tester[i_2] - mindev > 0):
+                i_2 += 1
+            if (i_2 - i_1) >= minwid or (i_1 <= 2 and (i_2 - i_1) >= minwid / 2):
+                # find the beginning and the end of the replacement region:
+                j_1 = i_1
+                while (j_1 - 1 >= 0) and (sign * tester[j_1 - 1] > 0):
+                    j_1 -= 1
+                j_2 = i_2
+                while (j_2 < len(vector)) and (sign * tester[j_2] > 0):
+                    j_2 += 1  # this is the last slice index, so it can be bigger
+                new_vector[j_1:j_2] = replacement[j_1:j_2]
+                i = j_2 + 1
+            else:
+                i = i_2 + 1
+        else:
+            i += 1
+    return new_vector
+
+
+def replace_beginning(vector, replacement, min_repl_size):
+    ind_temp = min_repl_size  # 2 * fmb_int * int(nperseg / npersegs_lim[i])
+    sign_0 = np.sign(vector[ind_temp] - replacement[ind_temp])
+    ind_temp += 1
+    sign = np.sign(vector[ind_temp] - replacement[ind_temp])
+    while sign == sign_0 and ind_temp < len(vector) - 1:
+        ind_temp += 1
+        sign = np.sign(vector[ind_temp] - replacement[ind_temp])
+    vector[: ind_temp] = replacement[: ind_temp]
+    return vector
 

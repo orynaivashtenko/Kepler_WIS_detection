@@ -26,8 +26,9 @@ while (time.time() < timeout_start + Max_work_time) and (
     if time.time() - timeout_start > time_counter * 10 * 60:  # check every 10 min
         wc = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder)
         for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-            os.replace(os.path.join(Job_files_folder, ff), os.path.join(Running_jobs_folder, ff))  # move the jobs to the running folder
-            os.system('bsub < '+os.path.join(Running_jobs_folder, ff))
+            os.system('bsub < '+os.path.join(Job_files_folder, ff))
+            # os.replace(os.path.join(Job_files_folder, ff), os.path.join(Running_jobs_folder, ff))  # move the jobs to the running folder
+            os.remove(os.path.join(Job_files_folder, ff))
         time_counter += 1
 
     # simultaneously, this loop should take care of the outputs. maybe make that when it takes the output, it deletes the job file
