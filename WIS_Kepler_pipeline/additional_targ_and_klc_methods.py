@@ -234,13 +234,13 @@ def veto_stat_outliers(klc, threshold_to_std=threshold_to_std_veto):
     whitened_template_widths = [[len(np.where(
         np.abs(klc.whitened_templates_td[tt][q]) > 0.5 * np.abs(np.min(klc.whitened_templates_td[tt][q])))[0])
                                  for q in klc.quarters] for tt in range(len(klc.initial_templates))]
-    for tt in range(len(klc.statistics_raw_cor)):
-        for q in range(len(klc.statistics_raw_cor[tt])):
+    for tt in range(len(klc.statistics_raw)):
+        for q in range(len(klc.statistics_raw[tt])):
             half_wid = (whitened_template_widths[tt][q] + 1) // 2
-            var_stat = np.var(klc.statistics_raw_cor[tt][q][klc.stat_masks[tt][q]])
-            outlier_mask = klc.statistics_raw_cor[tt][q] ** 2 < 3 ** 2 * var_stat  # for variance measurement only
-            var_stat = np.var(klc.statistics_raw_cor[tt][q][outlier_mask & klc.stat_masks[tt][q]])
-            outlier_indices = np.where(klc.statistics_raw_cor[tt][q] ** 2 > threshold_to_std ** 2 * var_stat)[
+            var_stat = np.var(klc.statistics_raw[tt][q][klc.stat_masks[tt][q]])
+            outlier_mask = klc.statistics_raw[tt][q] ** 2 < 3 ** 2 * var_stat  # for variance measurement only
+            var_stat = np.var(klc.statistics_raw[tt][q][outlier_mask & klc.stat_masks[tt][q]])
+            outlier_indices = np.where(klc.statistics_raw[tt][q] ** 2 > threshold_to_std ** 2 * var_stat)[
                 0]  # the actual measurement
 
             length = len(klc.stat_masks[tt][q])
@@ -254,20 +254,20 @@ def veto_around_min(klc):
     whitened_template_widths = [[len(np.where(
         np.abs(klc.whitened_templates_td[tt][q]) > 0.5 * np.abs(np.min(klc.whitened_templates_td[tt][q])))[0])
                                  for q in klc.quarters] for tt in range(len(klc.initial_templates))]
-    for tt in range(len(klc.statistics_raw_cor)):
-        for q in range(len(klc.statistics_raw_cor[tt])):
+    for tt in range(len(klc.statistics_raw)):
+        for q in range(len(klc.statistics_raw[tt])):
             wid = whitened_template_widths[tt][q]
             half_wid = (whitened_template_widths[tt][q] + 1) // 2
-            for ind in np.arange(0, len(klc.statistics_raw_cor[tt][q]) - half_wid, half_wid):
-                indmin = ind + np.nanargmin(klc.statistics_raw_cor[tt][q][ind: ind + wid])
+            for ind in np.arange(0, len(klc.statistics_raw[tt][q]) - half_wid, half_wid):
+                indmin = ind + np.nanargmin(klc.statistics_raw[tt][q][ind: ind + wid])
                 if not klc.stat_masks[tt][q][indmin]:
-                    if klc.statistics_raw_cor[tt][q][indmin] == np.nanmin(klc.statistics_raw_cor[tt][q][
-                                                                           max(0, indmin - half_wid): min(
+                    if klc.statistics_raw[tt][q][indmin] == np.nanmin(klc.statistics_raw[tt][q][
+                                                                      max(0, indmin - half_wid): min(
                                                                                indmin + half_wid, len(
-                                                                                   klc.statistics_raw_cor[tt][
+                                                                                   klc.statistics_raw[tt][
                                                                                        q]))]):
                         klc.stat_masks[tt][q][max(0, indmin - half_wid): min(indmin + half_wid, len(
-                            klc.statistics_raw_cor[tt][q]))] = False
+                            klc.statistics_raw[tt][q]))] = False
 
 
 
@@ -897,9 +897,9 @@ def save_ses_quarters(self, path=None):
     as .npy file that can be read with `load_ses_quarters` funtion:
         self.times
         self.trends_orig_fluxes
-        self.statistics_raw_cor
+        self.statistics_raw
         self.stat_masks
-        self.stat_vars
+        self.stat_tot_vars
 
     Parameters
     ----------
@@ -929,23 +929,23 @@ def save_ses_quarters(self, path=None):
         ses_quarter_data[1][ind_last + 0] = self.zero_padding_ends[q][0]
         ses_quarter_data[1][ind_last + 1] = self.zero_padding_ends[q][1]
         ses_quarter_data[1][ind_last + 2] = len(
-            self.statistics_raw_cor[0][q])  # this depends on whether data is cut from zeros or not
+            self.statistics_raw[0][q])  # this depends on whether data is cut from zeros or not
         ses_quarter_data[1][ind_last + 3] = len(self.times[q])
         for tn in range(self.templ_num_shifts):
-            ses_quarter_data[1][ind_last + 4 + tn] = self.stat_vars[tn][q]
+            ses_quarter_data[1][ind_last + 4 + tn] = self.stat_tot_vars[tn][q]
         ses_quarter_data[2][ind_last:ind_last + len(self.times[q])] = self.times[q]
         ses_quarter_data[3][ind_last:ind_last + len(self.times[q])] = self.trends_orig_fluxes[q]
         row_pos = 4
         for k in range(self.templ_num_shifts):
-            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw_cor[k][q])] = \
-                self.statistics_raw_cor[k][q]
+            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw[k][q])] = \
+                self.statistics_raw[k][q]
         row_pos += self.templ_num_shifts
         for k in range(self.templ_num_shifts):
-            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw_cor[k][q])] = \
+            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw[k][q])] = \
                 self.stat_masks[k][q]
         row_pos += self.templ_num_shifts
         for k in range(self.templ_num_shifts):
-            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw_cor[k][q])] = \
+            ses_quarter_data[k + row_pos][ind_last:ind_last + len(self.statistics_raw[k][q])] = \
                 self.statistics_snr_no_rank[k][q]
         ind_last += self.support
     if self.target_id is not None:
@@ -964,9 +964,9 @@ def load_ses_quarters(self, filename=None):
     Sets:
     self.times
     self.trends_orig_fluxes
-    self.statistics_raw_cor
+    self.statistics_raw
     self.stat_masks
-    self.stat_vars
+    self.stat_tot_vars
     self.dt_days
 
     :param filename: path to the .npy file where the data is stored.
@@ -992,8 +992,8 @@ def load_ses_quarters(self, filename=None):
     self.zero_padding_ends = [[0, 0] for _ in self.quarters]
     self.whitened_fluxes_td = []
     self.times = []
-    self.stat_vars = [[] for _ in range(self.templ_num_shifts)]
-    self.statistics_raw_cor = [[] for _ in range(self.templ_num_shifts)]
+    self.stat_tot_vars = [[] for _ in range(self.templ_num_shifts)]
+    self.statistics_raw = [[] for _ in range(self.templ_num_shifts)]
     self.stat_masks = [[] for _ in range(self.templ_num_shifts)]
     self.statistics_snr_no_rank = [[] for _ in range(self.templ_num_shifts)]
     for q in self.quarters:
@@ -1002,12 +1002,12 @@ def load_ses_quarters(self, filename=None):
         len_time = ses_quarter_data[1][ind_last + 2]
         len_stat = ses_quarter_data[1][ind_last + 3]
         for tn in range(self.templ_num_shifts):
-            self.stat_vars[tn].append(ses_quarter_data[1][ind_last + 4 + tn])
+            self.stat_tot_vars[tn].append(ses_quarter_data[1][ind_last + 4 + tn])
         self.times.append(ses_quarter_data[2][ind_last:ind_last + len_time])
         self.trends_orig_fluxes.append(ses_quarter_data[3][ind_last:ind_last + len_time])
         row_pos = 4
         for k in range(self.templ_num_shifts):
-            self.statistics_raw_cor[k].append(ses_quarter_data[k + row_pos][ind_last:ind_last + len_stat])
+            self.statistics_raw[k].append(ses_quarter_data[k + row_pos][ind_last:ind_last + len_stat])
         row_pos += self.templ_num_shifts
         for k in range(self.templ_num_shifts):
             self.stat_masks[k].append(ses_quarter_data[k + row_pos][ind_last:ind_last + len_stat])
@@ -1206,3 +1206,458 @@ def determine_mins(self, ngap_moving_var=spip.Ngap_moving_var):
                 imin = i
                 minval = np.abs(t - self.times[qmin][i])
         self.origrnal_transit_indices[qmin].append(imin)
+
+
+def find_moving_averages(self, interpolate=True, detr_length=Detr_length, detr_method=Detr_method,
+                         detr_endmethod=Detr_endmethod, detr_ends=Detr_ends,
+                         detr_endlen=Detr_endlen, keep_overall_level=False,
+                         remove_outliers=False, nsig_outliers=Nsig_outliers_0):
+    """
+    Calculates the large trends of the original fluxes by taking the moving average of
+    type detr_method ('mean' or 'median') of slices of size detr_length.
+    Saves the trends (quarter-specific) and saves the detrended original fluxes separately.
+    :param interpolate: Whether to interpolate the data in the holes containing numpy.nan.
+        The interpolation will be linear, the holes in the ends of the data will
+        be filled by a constant.
+    :type interpolate: bool
+    :param detr_length: Detrending length. Size of a slice to take the moving average
+    :type detr_length: int
+    :param detr_method: The type of moving average to take. Median is less sensitive to
+        outliers, and mean is less sensitive to small number of samples.
+        Median is preferred in the middle of the data.
+    :type detr_method: str : 'mean' or 'median'
+    :param detr_endmethod: The type of moving average to take in the ends of the data.
+        Mean is less sensitive to small number of samples, so it is preferred
+        in the ends of the data.
+    :type detr_endmethod: str : 'mean' or 'median'
+    :param detr_ends: How to make slices on the ends of the data. Read details in detrend_mov_ave().
+        'symmetric' and 'asymmetric' preserve the size of the data,
+        'cut' decreases the size of the data by detr_length.
+    :type detr_ends: str : 'symmetric' or 'asymmetric' or 'cut'
+    :param detr_endlen: Minimal slice taken in the end of the data. If None, will be taken
+        as detr_len//4
+    :type detr_endlen: int or None
+    :param keep_overall_level: Whether to preserve the overall average (mean or median, defined by
+        detr_method) of the data
+    :type keep_overall_level: bool
+    :param remove_outliers:
+    :type remove_outliers:
+    :param nsig_outliers:
+    :type nsig_outliers:
+    :return: creates self.detrended_orig_fluxes and self.trends_orig_fluxes
+    :rtype:
+    """
+    self.detrended_orig_fluxes = []
+    self.trends_orig_fluxes = []
+    for q in self.quarters:
+        msk = ~np.isnan(self.orig_fluxes[q])
+        if interpolate:
+            o_f = ut.interpolate_over_mask(np.array(self.orig_fluxes[q]), msk, interp_method='linear', ends='continue',
+                                           mitigate_hole_ends=False, endhole_method='median')
+            detr, trend = ut.detrend_mov_ave(np.array(o_f), length=detr_length, mask=None, method=detr_method,
+                                             endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen,
+                                             return_trend=True,
+                                             keep_overall_level=keep_overall_level, remove_outliers=remove_outliers,
+                                             nsig_outliers=nsig_outliers)
+        else:
+            detr, trend = ut.detrend_mov_ave(np.array(self.orig_fluxes[q]), length=detr_length, mask=msk,
+                                             method=detr_method,
+                                             endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen,
+                                             return_trend=True,
+                                             keep_overall_level=keep_overall_level, remove_outliers=remove_outliers,
+                                             nsig_outliers=nsig_outliers)
+        detr[~msk] = np.nan
+        self.detrended_orig_fluxes.append(detr)
+        self.trends_orig_fluxes.append(trend)
+
+
+def veto_mes(self, mes_threshold=Threshold_mes_veto, veto_threshold=Veto_threshold_for_mes):
+    # WARNING: this veto, if done after the periodicity search on the score-corrected data, will destroy the
+    # distribution. Therefore, we are removing this veto from the search and will do it after the search and after
+    # the time-slides and p_periodic estimation as a post-processing veto. Also, we make sure to do it on the
+    # non-score-corrected data.
+    if len(self.interleaved_numbers) > 0:
+        self.mes_veto_masks_interleaved = np.ones(np.shape(self.statistics_periodic_interleaved)).astype(bool)
+        indices = np.array(np.where(self.statistics_periodic_interleaved < -np.abs(mes_threshold))).T
+        for pi, ti, phi in indices:
+            expected_transit_times = [self.tmin + self._phases_interleaved[phi] + i * self.periods[pi]
+                                      for i in range(
+                    int(np.ceil((self.tmax - self.tmin - self._phases_interleaved[phi]) / self.periods[pi])))]
+
+            summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in
+                                     range(len(expected_transit_times))]
+            summed_stats = np.array(self.statistics_interleaved[ti][summed_transit_points])  # raw
+            summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
+            summed_vars = np.array(self.stat_vars_interleaved[ti][summed_transit_points])
+            amplitude_vars = []
+            amplitudes_normalized = []
+            for si in range(len(summed_vars)):
+                if not np.isclose(summed_stats[si], 0):
+                    amplitude_vars.append(1 / summed_vars[si])
+                    amplitudes_normalized.append(
+                        summed_stats[si] / summed_vars[si] / summed_trends[si] * self.mean_total)
+                else:
+                    amplitude_vars.append(np.inf)
+                    amplitudes_normalized.append(0.)
+            veto_score = ut.unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars,
+                                                   A_all=None, indmax=None, A_1=None)
+            if veto_score > veto_threshold:
+                self.statistics_periodic_interleaved[pi][ti][phi] = 0.
+                self.mes_veto_masks_interleaved[pi][ti][phi] = False
+
+    if len(self.not_interleaved_numbers) > 0:
+        self.mes_veto_masks_not_interleaved = np.ones(np.shape(self.statistics_periodic_not_interleaved)).astype(
+            bool)
+        indices = np.array(np.where(self.statistics_periodic_not_interleaved < -np.abs(mes_threshold))).T
+        for pi, ti, phi in indices:
+            expected_transit_times = [self.tmin + self._phases_not_interleaved[phi] + i * self.periods[pi]
+                                      for i in range(
+                    int(np.ceil((self.tmax - self.tmin - self._phases_not_interleaved[phi]) / self.periods[pi])))]
+
+            summed_transit_points = [np.argmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i
+                                     in range(len(expected_transit_times))]
+            summed_stats = np.array(self.statistics_not_interleaved[ti][summed_transit_points])  # raw
+            summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
+            summed_vars = np.array(self.stat_vars_not_interleaved[ti][summed_transit_points])
+            amplitude_vars = []
+            amplitudes_normalized = []
+            for si in range(len(summed_vars)):
+                if not np.isclose(summed_stats[si], 0) and not np.isinf(summed_vars[si]):
+                    amplitude_vars.append(1 / summed_vars[si])
+                    amplitudes_normalized.append(
+                        summed_stats[si] / summed_vars[si] / summed_trends[si] * self.mean_total)
+                else:
+                    amplitude_vars.append(np.inf)
+                    amplitudes_normalized.append(0.)
+            if len(np.array(amplitudes_normalized)) < 3:
+                veto_score = np.inf
+            else:
+                veto_score = ut.unequal_amplitude_veto(values=-np.array(amplitudes_normalized),
+                                                       variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
+            if veto_score > veto_threshold:
+                self.statistics_periodic_not_interleaved[pi][ti][phi] = 0.
+                self.mes_veto_masks_not_interleaved[pi][ti][phi] = False
+
+
+
+"""DRAFTS"""
+
+"""
+# # # EXPLICIT COLLECTION
+            # for ti in range(len(stats_periodic[0])):  # over templates
+            #     phase_ind_min_per = []
+            #     scores_max_per = []
+            #     for pi in range(len(stats_periodic)):  # over periods
+            #         valid_idx = np.where(stats_periodic[pi][ti] < 0)[0]
+            #         ph_i_min = valid_idx[np.nanargmax(coh_scores[pi][ti][valid_idx])]
+            #         phase_ind_min_per.append(ph_i_min)
+            #         scores_max_per.append(coh_scores[pi][ti][ph_i_min])
+            #     score_best_per_inds = (np.argsort(scores_max_per)[::-1])[:n_per_temp]
+            #     scores_sel = np.array(scores_max_per)[score_best_per_inds]
+            #     per_sel = self.periods[score_best_per_inds]
+            #     phase_ind_sel = np.array(phase_ind_min_per)[score_best_per_inds]
+            #     phases_sel = np.array(phases)[phase_ind_sel]  # relative phases wrt the beginning of this data
+            #     phases_abs = (np.array(times)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
+            #     stats_sel = np.array(stats_periodic)[phase_ind_sel]
+            #     vol_priors_sel = np.array(vol_priors)[phase_ind_sel]
+            #
+            #
+            #     summed_transit_times_per = []
+            #     summed_stats_raw_per = []
+            #     # summed_trends_per = []
+            #     summed_vars_per = []
+            #     summed_corrections_per = []
+            #     for j in range(len(score_best_per_inds)):
+            #         period = per_sel[j]
+            #         phase = phases_sel[j]
+            #         expected_transit_times = [self.tmin + phase + i * period  # i am not sure tmin does not miss some nan in the beginning
+            #                                   for i in range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
+            #         summed_transit_points = [np.nanargmin(np.abs(times - expected_transit_times[i])) for
+            #                                  i in range(len(expected_transit_times))]
+            #         summed_transit_times_per.append(times[summed_transit_points])
+            #         summed_stats_raw_per.append(stats[ti][summed_transit_points])
+            #         # summed_trends_per.append(self.trend_orig_flux_interleaved[summed_transit_points])
+            #         summed_vars_per.append(variances[ti][summed_transit_points])
+            #         summed_corrections_per.append(cors[ti][summed_transit_points])
+            #
+            #     periods_selected.append(per_sel)
+            #     phase_indices_selected.append(phase_ind_sel)
+            #     coherent_scores_selected.append(scores_sel)
+            #     statistic_values_selected.append(stats_sel)
+            #     # statistic_values_selected.append(np.array(scores_max_per)[stat_best_per_inds])
+            #     phases_selected.append(phases_abs)
+            #     summed_transit_times_selected.append(summed_transit_times_per)
+            #     summed_stats_raw_selected.append(summed_stats_raw_per)
+            #     # summed_trends_selected.append(summed_trends_per)
+            #     summed_vars_selected.append(summed_vars_per)
+            #     summed_corrections_selected.append(summed_corrections_per)
+
+        # # # # # INTERLEAVED AND NON-INTERLEAVED SEPARATELT
+        # # period_indices_selected = []
+        # periods_selected = []
+        # phase_indices_selected = []  # relative phase indices wrt the local beginning of data (quarters may be cut)
+        # phases_selected = []  # phase wrt the beginning of Kepler time
+        # statistic_values_selected = []
+        # summed_transit_times_selected = []
+        # summed_stats_raw_selected = []
+        # # summed_trends_selected = []
+        # summed_vars_selected = []
+        # summed_corrections_selected = []
+        # if len(self.statistics_periodic_interleaved) > 0:
+        #     for ti in range(len(self.statistics_periodic_interleaved[0])):  # over templates
+        #         phase_ind_min_per = []
+        #         stats_min_per = []
+        #         for pi in range(len(self.statistics_periodic_interleaved)):  # over periods
+        #             ph_i_min = np.nanargmin(self.statistics_periodic_interleaved[pi][ti])
+        #             phase_ind_min_per.append(ph_i_min)
+        #             stats_min_per.append(self.statistics_periodic_interleaved[pi][ti][ph_i_min])
+        #         stat_best_per_inds = np.argsort(stats_min_per)[:n_per_temp]
+        #         per_sel = self.periods[stat_best_per_inds]
+        #         phase_ind_sel = np.array(phase_ind_min_per)[stat_best_per_inds]
+        #         phases_sel = np.array(self._phases_interleaved)[phase_ind_sel]  # relative phases wrt the beginning of this data
+        #         phases_abs = (np.array(self.time_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
+        #
+        #         summed_transit_times_per = []
+        #         summed_stats_raw_per = []
+        #         # summed_trends_per = []
+        #         summed_vars_per = []
+        #         summed_corrections_per = []
+        #         for j in range(len(stat_best_per_inds)):
+        #             period = per_sel[j]
+        #             phase = phases_sel[j]
+        #             expected_transit_times = [self.tmin + phase + i * period  # i am not sure tmin does not miss some nan in the beginning
+        #                                       for i in range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
+        #             summed_transit_points = [np.nanargmin(np.abs(self.time_interleaved - expected_transit_times[i])) for
+        #                                      i in range(len(expected_transit_times))]
+        #             summed_transit_times_per.append(self.time_interleaved[summed_transit_points])
+        #             summed_stats_raw_per.append(self.statistics_interleaved[ti][summed_transit_points])
+        #             # summed_trends_per.append(self.trend_orig_flux_interleaved[summed_transit_points])
+        #             summed_vars_per.append(self.stat_vars_interleaved[ti][summed_transit_points])
+        #             summed_corrections_per.append(self.corrections_interleaved[ti][summed_transit_points])
+        #         # period_indices_selected.append(stat_best_per_inds)
+        #         periods_selected.append(per_sel)
+        #         phase_indices_selected.append(phase_ind_sel)
+        #         statistic_values_selected.append(np.array(stats_min_per)[stat_best_per_inds])
+        #         phases_selected.append(phases_abs)
+        #         summed_transit_times_selected.append(summed_transit_times_per)
+        #         summed_stats_raw_selected.append(summed_stats_raw_per)
+        #         # summed_trends_selected.append(summed_trends_per)
+        #         summed_vars_selected.append(summed_vars_per)
+        #         summed_corrections_selected.append(summed_corrections_per)
+        # if len(self.statistics_periodic_not_interleaved) > 0:
+        #     for ti in range(len(self.statistics_periodic_not_interleaved[0])):  # over templates
+        #         phase_ind_min_per = []
+        #         stats_min_per = []
+        #         for pi in range(len(self.statistics_periodic_not_interleaved)):  # over periods
+        #             ph_i_min = np.nanargmin(self.statistics_periodic_not_interleaved[pi][ti])
+        #             phase_ind_min_per.append(ph_i_min)
+        #             stats_min_per.append(self.statistics_periodic_not_interleaved[pi][ti][ph_i_min])
+        #         stat_best_per_inds = np.argsort(stats_min_per)[:n_per_temp]
+        #         per_sel = self.periods[stat_best_per_inds]
+        #         phase_ind_sel = np.array(phase_ind_min_per)[stat_best_per_inds]
+        #         phases_sel = np.array(self._phases_not_interleaved)[phase_ind_sel]  # relative phases wrt the beginning of this data
+        #         phases_abs = (np.array(self.time_not_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
+        #
+        #         summed_transit_times_per = []
+        #         summed_stats_raw_per = []
+        #         # summed_trends_per = []
+        #         summed_vars_per = []
+        #         summed_corrections_per = []
+        #         for j in range(len(stat_best_per_inds)):
+        #             period = per_sel[j]
+        #             phase = phases_sel[j]
+        #             expected_transit_times = [self.tmin + phase + i * period
+        #                                       for i in range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
+        #             summed_transit_points = [np.nanargmin(np.abs(self.time_not_interleaved - expected_transit_times[i]))
+        #                                      for i in range(len(expected_transit_times))]
+        #             summed_transit_times_per.append(self.time_not_interleaved[summed_transit_points])
+        #             summed_stats_raw_per.append(self.statistics_not_interleaved[ti][summed_transit_points])
+        #             # summed_trends_per.append(self.trend_orig_flux_not_interleaved[summed_transit_points])
+        #             summed_vars_per.append(self.stat_vars_not_interleaved[ti][summed_transit_points])
+        #             summed_corrections_per.append(self.corrections_not_interleaved[ti][summed_transit_points])
+        #         # period_indices_selected.append(stat_best_per_inds)
+        #         periods_selected.append(per_sel)
+        #         phase_indices_selected.append(phase_ind_sel)
+        #         statistic_values_selected.append(np.array(stats_min_per)[stat_best_per_inds])
+        #         phases_selected.append(phases_abs)
+        #         summed_transit_times_selected.append(summed_transit_times_per)
+        #         summed_stats_raw_selected.append(summed_stats_raw_per)
+        #         # summed_trends_selected.append(summed_trends_per)
+        #         summed_vars_selected.append(summed_vars_per)
+        #         summed_corrections_selected.append(summed_corrections_per)
+        
+        # self.best_periodic_scores_data[Search_results_index_per] = periods_selected
+        # self.best_periodic_scores_data[Search_results_index_stat] = statistic_values_selected
+        # self.best_periodic_scores_data[Search_results_index_sum_tr_times] = summed_transit_times_selected
+        # self.best_periodic_scores_data[Search_results_index_sum_stats] = summed_stats_raw_selected
+        # # self.best_periodic_scores_data[Search_results_index_sum_trends] = summed_trends_selected
+        # self.best_periodic_scores_data[Search_results_index_sum_vars] = summed_vars_selected
+        # self.best_periodic_scores_data[Search_results_index_sum_cors] = summed_corrections_selected
+        # if self.inds_pieces_scramble is not None:
+        #     self.best_periodic_scores_data[Search_results_index_slides] = [self.inds_pieces_scramble, self.inds_pieces_in_scrambled]
+        # elif self.time_slide_shifts is not None:
+        #     self.best_periodic_scores_data[Search_results_index_slides] = [self.time_slide_shifts, times_quarters]
+        # self.best_periodic_scores_data[Search_results_index_per_list] = self.periods
+
+
+ # if save_inverted:
+        #     # period_indices_selected = []
+        #     periods_selected = []
+        #     phase_indices_selected = []
+        #     phases_selected = []
+        #     statistic_values_selected = []
+        #     summed_transit_times_selected = []
+        #     summed_stats_raw_selected = []
+        #     # summed_trends_selected = []
+        #     summed_vars_selected = []
+        #     summed_corrections_selected = []
+        #     if len(self.statistics_periodic_interleaved) > 0:
+        #         for ti in range(len(self.statistics_periodic_interleaved[0])):  # over templates
+        #             phase_ind_max_per = []
+        #             stats_max_per = []
+        #             for pi in range(len(self.statistics_periodic_interleaved)):  # over periods
+        #                 ph_i_max = np.nanargmax(self.statistics_periodic_interleaved[pi][ti])
+        #                 phase_ind_max_per.append(ph_i_max)
+        #                 stats_max_per.append(self.statistics_periodic_interleaved[pi][ti][ph_i_max])
+        #             stat_best_per_inds = (np.argsort(stats_max_per)[::-1])[:n_per_temp]
+        #             per_sel = self.periods[stat_best_per_inds]
+        #             phase_ind_sel = np.array(phase_ind_max_per)[stat_best_per_inds]
+        #             phases_sel = np.array(self._phases_interleaved)[phase_ind_sel]
+        #             phases_abs = (np.array(self.time_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
+        #
+        #             summed_transit_times_per = []
+        #             summed_stats_raw_per = []
+        #             # summed_trends_per = []
+        #             summed_vars_per = []
+        #             summed_corrections_per = []
+        #             for j in range(len(stat_best_per_inds)):
+        #                 period = per_sel[j]
+        #                 phase = phases_sel[j]
+        #                 expected_transit_times = [self.tmin + phase + i * period
+        #                                           for i in
+        #                                           range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
+        #                 summed_transit_points = [np.nanargmin(np.abs(self.time_interleaved - expected_transit_times[i]))
+        #                                          for i in range(len(expected_transit_times))]
+        #                 summed_transit_times_per.append(self.time_interleaved[summed_transit_points])
+        #                 summed_stats_raw_per.append(self.statistics_interleaved[ti][summed_transit_points])
+        #                 # summed_trends_per.append(self.trend_orig_flux_interleaved[summed_transit_points])
+        #                 summed_vars_per.append(self.stat_vars_interleaved[ti][summed_transit_points])
+        #                 summed_corrections_per.append(self.corrections_interleaved[ti][summed_transit_points])
+        #             # period_indices_selected.append(stat_best_per_inds)
+        #             periods_selected.append(per_sel)
+        #             phase_indices_selected.append(phase_ind_sel)
+        #             statistic_values_selected.append(np.array(stats_max_per)[stat_best_per_inds])
+        #             phases_selected.append(phases_abs)
+        #             summed_transit_times_selected.append(summed_transit_times_per)
+        #             summed_stats_raw_selected.append(summed_stats_raw_per)
+        #             # summed_trends_selected.append(summed_trends_per)
+        #             summed_vars_selected.append(summed_vars_per)
+        #             summed_corrections_selected.append(summed_corrections_per)
+        #     if len(self.statistics_periodic_not_interleaved) > 0:
+        #         for ti in range(len(self.statistics_periodic_not_interleaved[0])):  # over templates
+        #             phase_ind_max_per = []
+        #             stats_max_per = []
+        #             for pi in range(len(self.statistics_periodic_not_interleaved)):  # over periods
+        #                 ph_i_max = np.nanargmax(self.statistics_periodic_not_interleaved[pi][ti])
+        #                 phase_ind_max_per.append(ph_i_max)
+        #                 stats_max_per.append(self.statistics_periodic_not_interleaved[pi][ti][ph_i_max])
+        #             stat_best_per_inds = (np.argsort(stats_max_per)[::-1])[:n_per_temp]
+        #             per_sel = self.periods[stat_best_per_inds]
+        #             phase_ind_sel = np.array(phase_ind_max_per)[stat_best_per_inds]
+        #             phases_sel = np.array(self._phases_not_interleaved)[phase_ind_sel]
+        #             phases_abs = (np.array(self.time_not_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
+        #
+        #             summed_transit_times_per = []
+        #             summed_stats_raw_per = []
+        #             # summed_trends_per = []
+        #             summed_vars_per = []
+        #             summed_corrections_per = []
+        #             for j in range(len(stat_best_per_inds)):
+        #                 period = per_sel[j]
+        #                 phase = phases_sel[j]
+        #                 expected_transit_times = [self.tmin + phase + i * period
+        #                                           for i in
+        #                                           range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
+        #                 summed_transit_points = [
+        #                     np.nanargmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i in
+        #                     range(len(expected_transit_times))]
+        #                 summed_transit_times_per.append(self.time_not_interleaved[summed_transit_points])
+        #                 summed_stats_raw_per.append(self.statistics_not_interleaved[ti][summed_transit_points])
+        #                 # summed_trends_per.append(self.trend_orig_flux_not_interleaved[summed_transit_points])
+        #                 summed_vars_per.append(self.stat_vars_not_interleaved[ti][summed_transit_points])
+        #                 summed_corrections_per.append(self.corrections_not_interleaved[ti][summed_transit_points])
+        #             # period_indices_selected.append(stat_best_per_inds)
+        #             periods_selected.append(per_sel)
+        #             phase_indices_selected.append(phase_ind_sel)
+        #             statistic_values_selected.append(np.array(stats_max_per)[stat_best_per_inds])
+        #             phases_selected.append(phases_abs)
+        #             summed_transit_times_selected.append(summed_transit_times_per)
+        #             summed_stats_raw_selected.append(summed_stats_raw_per)
+        #             # summed_trends_selected.append(summed_trends_per)
+        #             summed_vars_selected.append(summed_vars_per)
+        #             summed_corrections_selected.append(summed_corrections_per)
+        #
+        #     times_quarters = [(np.nanmin(self.times[q]), np.nanmax(self.times[q])) for q in
+        #                       self.quarters]  # attention: there should be no zero-padding
+        # # warning: you updated time slides, but the indices of the shuffled pieces are not saved here because you did not need them yet.
+        #
+        #     self.best_inverted_periodic_scores_data = [[] for _ in range(Search_results_length)]
+        #     self.best_inverted_periodic_scores_data[Search_results_index_per] = periods_selected
+        #     self.best_inverted_periodic_scores_data[Search_results_index_stat] = statistic_values_selected
+        #     self.best_inverted_periodic_scores_data[Search_results_index_sum_tr_times] = summed_transit_times_selected
+        #     self.best_inverted_periodic_scores_data[Search_results_index_sum_stats] = summed_stats_raw_selected
+        #     # self.best_inverted_periodic_scores_data[Search_results_index_sum_trends] = summed_trends_selected
+        #     self.best_inverted_periodic_scores_data[Search_results_index_sum_vars] = summed_vars_selected
+        #     self.best_inverted_periodic_scores_data[Search_results_index_sum_cors] = summed_corrections_selected
+        #     if self.inds_pieces_scramble is not None:
+        #         self.best_inverted_periodic_scores_data[Search_results_index_slides] = [
+        #                                                                         self.inds_pieces_scramble, self.inds_pieces_in_scrambled]
+        #     elif self.time_slide_shifts is not None:
+        #         self.best_inverted_periodic_scores_data[Search_results_index_slides] = [self.time_slide_shifts, times_quarters]
+        #     self.best_inverted_periodic_scores_data[Search_results_index_per_list] = self.periods
+        #     if save_to_file:
+        #         filename_postfix = filename_postfix_inverted_period + str(self.Pmin) + '_' + str(self.Pmax)
+        #         file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
+        #                                             filename_postfix=filename_postfix, file_format='npy')
+        #         np.save(file_path, np.array(self.best_periodic_scores_data, dtype=object), allow_pickle=True)
+        
+        
+        
+        # self.best_stat_inv = 0
+        # best_candidates = self.best_inverted_periodic_scores_data
+        # argm = np.argmax(best_candidates[Search_results_index_stat])  # we took inverted best scores collection, they are positive
+        # ti, i = argm // len(best_candidates[Search_results_index_stat][0]), argm % len(best_candidates[Search_results_index_stat][0])
+        # # the structure used to be (25,10), where 10 was just 10 best per each template
+        # smax = best_candidates[Search_results_index_stat][ti][i]  # maximal statistic
+        # if smax > self.best_stat_inv:
+        #     self.best_stat_inv = smax
+        #     self.best_per_inv = best_candidates[Search_results_index_per][ti][i]
+        #     self.best_temp_inv = ti
+        #     self.best_first_transit_time_inv = best_candidates[Search_results_index_sum_tr_times][ti][i][0]
+        #     self.summed_transit_times_inv = best_candidates[Search_results_index_sum_tr_times][ti][i]
+        #     self.summed_raw_stats_inv = np.array(best_candidates[Search_results_index_sum_stats][ti][i])
+        #     # self.summed_trends_inv = np.array(best_candidates[Search_results_index_sum_trends][ti][i])
+        #     self.summed_vars_inv = np.array(best_candidates[Search_results_index_sum_vars][ti][i])
+        #     self.summed_vars_inv[self.summed_vars_inv == 0] = np.nan
+        
+        
+######### FROM TARGET CLASS  ##########
+# self.best_stat_inv = 0
+# for best_candidates in best_inv_candidates_concat:  # if there is a big MES score, further processing
+#     argm = np.argmax(best_candidates[spip.Search_results_index_stat])  # we took inverted best scores collection, they are positive
+#     ti, i = argm // len(best_candidates[spip.Search_results_index_stat][0]
+#                         ), argm % len(best_candidates[spip.Search_results_index_stat][0])
+#     # the structure is (25,10), where 10 is just 10 best per each template
+#     smax = best_candidates[spip.Search_results_index_stat][ti][i]  # maximal statistic
+#     if smax > self.best_stat_inv:
+#         self.best_stat_inv = smax
+#         self.best_per_inv = best_candidates[spip.Search_results_index_per][ti][i]
+#         self.best_temp_inv = ti
+#         self.best_first_transit_time_inv = best_candidates[spip.Search_results_index_sum_tr_times][ti][i][0]
+#         self.summed_transit_times_inv = best_candidates[spip.Search_results_index_sum_tr_times][ti][i]
+#         self.summed_raw_stats_inv = np.array(best_candidates[spip.Search_results_index_sum_stats][ti][i])
+#         self.summed_trends_inv = np.array(best_candidates[spip.Search_results_index_sum_trends][ti][i])
+#         self.summed_vars_inv = np.array(best_candidates[spip.Search_results_index_sum_vars][ti][i])
+#         self.summed_vars_inv[self.summed_vars_inv == 0] = np.nan
+        
+        """

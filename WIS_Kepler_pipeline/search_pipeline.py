@@ -203,6 +203,8 @@ class KeplerLightCurve(object):
         self.is_holes_interpolated = False
         self.is_prepared_for_psd = False
         self.is_template_whitened = False
+        self.is_periodic_scores_corrected = False
+        self.is_shifts_interleaved = False
         self.was_notched = None
         self.nperseg_psd = None
         tmax = np.max(np.array([len(t) for t in self.orig_times]))  # maximum length of the time
@@ -226,8 +228,10 @@ class KeplerLightCurve(object):
         # initialization of the numba function on some small data in order  not to
         # spend time on big data:
         _ = self.sum_periods_fast(statistics_by_trends=np.ones((2, 192)),
-                                  trends_sq_by_vars=np.ones((2, 192)), dt=0.02,
-                                  tmax=3., tmin=0., periods=np.arange(1., 2., 0.5))
+                                  trends_sq_by_vars=np.ones((2, 192)),
+                                  corrections=np.ones((2, 192)),
+                                  statistics_by_trends_gaussianized=np.ones((2, 192)),
+                                  dt=0.02, tmax=3., tmin=0., periods=np.arange(1., 2., 0.5))
 
         self.mean_total = 0.
         len_total = 0
@@ -255,9 +259,9 @@ class KeplerLightCurve(object):
         self.notch_mask = None
 
         self.unnotched_wf_fd = None
-        self.detrended_orig_fluxes = None
-        self.means = None
-        self.trends_orig_fluxes = None
+        # self.detrended_orig_fluxes = None
+        self.orig_means = None
+        # self.trends_orig_fluxes = None
         self.whitened_fluxes_fd = None
         self.whitened_fluxes_td = None
         self.whitened_clean_fluxes_fd = None
@@ -269,21 +273,27 @@ class KeplerLightCurve(object):
         self.indices_of_templates = None
         self.templates_of_indices = None
 
-        # self.statistics_raw = None
         self.statistics_snr = None
-        self.statistics_raw_cor = None
+        self.statistics_raw = None
         self.stat_moving_vars = None
-        self.stat_vars = None
-        self.stat_denoms = None
+        self.stat_tot_vars = None
         self.stats_raw_no_veto_no_score_cor = None
+        self.veto_bit_masks = None
+        self.trigger_indices = None
+
+        self.statistics_gaussianized = None
+        self.statistics_snr_gaussianized = None
+        self.stat_non_gauss_scales_coefs = None
+        self.log_non_gaussian_corrections = None
 
         self.time_full = None
-        self.trend_orig_flux_full = None
+        # self.trend_orig_flux_full = None
         self.statistics_full = None
         self.stat_vars_full = None
         self.stat_masks_full = None
         self.big_hole_masks_full = None  # used only in the statistic shuffling
-        self.veto_bad_trigger_inds = None
+        self.corrections_full = None
+        self.statistics_gaussianized_full = None
 
         self.inds_pieces_scramble = None
         self.tot_hole_len_scramble = None
@@ -296,12 +306,16 @@ class KeplerLightCurve(object):
         self.statistics_interleaved = None
         self.stat_masks_interleaved = None
         self.stat_vars_interleaved = None
-        self.trend_orig_flux_interleaved = None
+        # self.trend_orig_flux_interleaved = None
+        self.corrections_interleaved = None
+        self.statistics_gaussianized_interleaved = None
         self.time_interleaved = None
         self.statistics_not_interleaved = None
         self.stat_masks_not_interleaved = None
         self.stat_vars_not_interleaved = None
-        self.trend_orig_flux_not_interleaved = None
+        # self.trend_orig_flux_not_interleaved = None
+        self.corrections_not_interleaved = None
+        self.statistics_gaussianized_not_interleaved = None
         self.time_not_interleaved = None
 
         self.Pmin = None
@@ -309,27 +323,58 @@ class KeplerLightCurve(object):
         self.periods = None
         self._phases_interleaved = None
         self.statistics_periodic_interleaved = None
+        self.corrections_periodic_interleaved = None
         self._phases_not_interleaved = None
         self.statistics_periodic_not_interleaved = None
-        self.mes_veto_masks_interleaved = None
-        self.mes_veto_masks_not_interleaved = None
+        self.corrections_periodic_not_interleaved = None
+        self.uncorrected_stats_periodic_interleaved = None
+        self.uncorrected_stats_periodic_not_interleaved = None
+        self.volume_prior_terms_interleaved = None
+        self.volume_prior_terms_not_interleaved = None
+        self.coherent_scores_interleaved = None
+        self.coherent_scores_not_interleaved = None
+        self.stats_gaussianized_periodic_interleaved = None
+        self.stats_gaussianized_periodic_not_interleaved = None
+
+        self.statistics_periodic = None
+        self.corrections_periodic = None
+        self.stats_gaussianized_periodic = None
+        self.uncorrected_stats_periodic = None
+        self._phases = None
+        self.stats_periodic_mar_temp = None
+        self.stats_gaussianized_periodic_mar_temp = None
+        self.best_phase_inds = None
+        self.stats_periodic_mar_temp_best_ph = None
+        self.stats_gaussianized_periodic_mar_temp_best_ph = None
+        self.first_transit_times_best_ph = None
 
         self.triggers = None
         self.best_periodic_scores_data = None
-        self.best_inverted_periodic_scores_data = None
 
+        self.best_period = None
+        self.best_ftt = None
         self.best_stat = None
-        self.best_per = None
-        self.best_temp = None
-        self.best_first_transit_time = None
-        self.summed_transit_times = None
-        self.summed_raw_stats = None
-        self.summed_trends = None
-        self.summed_vars = None
+        self.best_stat_gaussianized = None
+        self.best_phase_index = None
+        self.best_period_index = None
+
+        # self.best_score = None
+        # self.best_vol_prior = None
+        # self.best_gauss_stat = None
+        # self.best_stat = None
+        # self.best_per = None
+        # self.best_temp = None
+        # self.best_first_transit_time = None
+        # self.summed_transit_times = None
+        # self.summed_raw_stats = None
+        # # self.summed_trends = None
+        # self.summed_vars = None
+        # self.summed_corrections = None
+        # self.summed_gauss_stats = None
 
         self.best_raw_stats = None  # will be defined in the non-dcore-corrected and non-vetted data
-        self.best_stat_denoms = None
-        self.best_trends = None
+        self.best_stat_vars = None
+        # self.best_trends = None
         self.best_templ_depths = None
         self.best_ampl = None
         self.best_ppm = None
@@ -339,15 +384,6 @@ class KeplerLightCurve(object):
         self.best_normalized_ampls_stds = None
         self.best_ppms = None
         self.best_ppms_stds = None
-
-        self.best_stat_inv = None
-        self.best_per_inv = None
-        self.best_temp_inv = None
-        self.best_first_transit_time_inv = None
-        self.summed_transit_times_inv = None
-        self.summed_raw_stats_inv = None
-        self.summed_trends_inv = None
-        self.summed_vars_inv = None
 
     def condition_data(self, nsig_outliers_0=Nsig_outliers_0, nsig_outliers_0_pos=Nsig_outliers_0_pos,
                        nsig_outliers_0_neg=Nsig_outliers_0_neg,
@@ -361,9 +397,7 @@ class KeplerLightCurve(object):
                        detr_length_outliers=Detr_length_outliers, detr_method_outliers=Detr_method_outliers,
                        detr_endmethod_outliers=Detr_endmethod_outliers,
                        detr_ends_outliers=Detr_ends_outliers, detr_endlen_outliers=Detr_endlen_outliers,
-                       tukey_steps_len=Tukey_steps_len_psd,
-                       conditional_zero_zeroth_freq=Conditional_zero_zeroth_freq_wf,
-                       always_zero_zeroth_freq=Always_zero_zeroth_freq_wf):
+                       tukey_steps_len=Tukey_steps_len_psd):
         """
         Preparing data for detection. Subtract mean, mask outliers, measure psds,
         padding by zeros, notching, inpainting, whitening.
@@ -413,25 +447,22 @@ class KeplerLightCurve(object):
         :type detr_endlen_outliers:
         :param tukey_steps_len:
         :type tukey_steps_len:
-        :param conditional_zero_zeroth_freq:
-        :type conditional_zero_zeroth_freq:
-        :param always_zero_zeroth_freq:
-        :type always_zero_zeroth_freq:
         :return:
         :rtype:
 
         Mean values of the flux are subtracted to have signal centered around zero. 
-        Means are saved in self.means:
+        Means are saved in self.orig_means:
         """
         self.nperseg_psd = nperseg_psd
-        self.subtract_means(save_means=True, make_trends=True)
+        self.subtract_means(save_means=True)  # , make_trends=False)
         self.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
                                 nsig_negative=nsig_outliers_0_neg,
                                 nsig_clean=nsig_outliers_psd, detr_length_outliers=detr_length_outliers,
                                 detr_method_outliers=detr_method_outliers, detr_endmethod_outliers=detr_endmethod_outliers,
                                 detr_ends_outliers=detr_ends_outliers, detr_endlen_outliers=detr_endlen_outliers,
                                 in_whitened_fluxes=False, modify_clean_masks=True)
-        self.subtract_means(save_means=True, make_trends=True, masks=self.masks)
+        self.subtract_means(save_means=True, masks=self.masks)  # , make_trends=False
+        self.normalize_by_means()
         self.pad_by_zeros()
         self.make_big_hole_masks(max_small_hole=max_small_hole, exclude_individual_points=True)
         self.interpolate_fluxes()
@@ -442,16 +473,15 @@ class KeplerLightCurve(object):
                                 detr_method_outliers=detr_method_outliers, detr_endmethod_outliers=detr_endmethod_outliers,
                                 detr_ends_outliers=detr_ends_outliers, detr_endlen_outliers=detr_endlen_outliers,
                                 in_whitened_fluxes=False, modify_clean_masks=True)
-        self.interpolate_fluxes(interpolate_clean_fluxes=True) # interpolate_clean_fluxes=False)  # need to do this again after piecewise detrending
+        self.interpolate_fluxes(interpolate_clean_fluxes=True)  # interpolate_clean_fluxes=False)
+        # -> need to do this again after piecewise detrending
         self.prepare_for_psd(nperseg=self.nperseg_psd, noverlap=noverlap_psd, npsdsmin=npsdsmin)
-        # TODO!!!!!!!
-        # self.measure_psds(nperseg=self.nperseg_psd, noverlap=noverlap_psd, window=window_psd,
-        #                   subtract_mean=subtract_mean_in_psd, smoothen_psds=smoothen_psds,
-        #                   tukey_steps_len=tukey_steps_len, conditional_zero_zeroth_freq=conditional_zero_zeroth_freq,
-        #                   always_zero_zeroth_freq=always_zero_zeroth_freq)
-        self.measure_psds_run_7(nperseg=self.nperseg_psd, noverlap=noverlap_psd, window=window_psd,
-                                subtract_mean=subtract_mean_in_psd,
-                                rfft=True, smoothen_psds=smoothen_psds)
+        self.measure_psds(nperseg=self.nperseg_psd, noverlap=noverlap_psd, window=window_psd,
+                          subtract_mean=subtract_mean_in_psd, smoothen_psds=smoothen_psds,
+                          tukey_steps_len=tukey_steps_len)
+        # self.measure_psds_run_7(nperseg=self.nperseg_psd, noverlap=noverlap_psd, window=window_psd,
+        #                         subtract_mean=subtract_mean_in_psd,
+        #                         rfft=True, smoothen_psds=smoothen_psds)
         self.whiten_fluxes(whiten_clean_fluxes=True)
         self.mask_flux_outliers(nsig=nsig_outliers_w, nsig_positive=nsig_outliers_w_pos,
                                 nsig_negative=nsig_outliers_w_neg,
@@ -567,6 +597,8 @@ class KeplerLightCurve(object):
 
         Parameters
         ----------
+        :param file:
+        :type file:
         :param path : path to the folder in which the data should be saved.
         :type path : str
         :param filename_postfix:
@@ -589,6 +621,7 @@ class KeplerLightCurve(object):
         conditioned_data[0][10] = self.support
         conditioned_data[0][11] = len(self.whitened_templates_td)
         conditioned_data[0][12] = self.nperseg_psd
+        conditioned_data[0][13] = self.mean_total
         # conditioned_data[0][11] = self.tb.num_templates
         # conditioned_data[0][12] = len(self.whitened_templates_td
         # for tn in range(len(self.whitened_templates_td):
@@ -605,7 +638,7 @@ class KeplerLightCurve(object):
             conditioned_data[3][ind_last:ind_last + len(self.whitened_fluxes_td[q])] = self.whitened_fluxes_td[q]
             conditioned_data[4][ind_last:ind_last + self.support] = self.wf_tds[q]
             conditioned_data[5][ind_last:ind_last + len(self.fluxes[q])] = self.big_hole_masks[q]
-            conditioned_data[6][ind_last:ind_last + len(self.trends_orig_fluxes[q])] = self.trends_orig_fluxes[q]
+            # conditioned_data[6][ind_last:ind_last + len(self.trends_orig_fluxes[q])] = self.trends_orig_fluxes[q]
             for k in range(len(self.whitened_templates_td)):
                 conditioned_data[k + 7][ind_last:ind_last + len(self.whitened_templates_td[k][q])] = self.whitened_templates_td[k][q]
             ind_last += self.support
@@ -633,6 +666,8 @@ class KeplerLightCurve(object):
         self.whitened_templates_td
         self.whitened_templates_fd
 
+        :param path:
+        :type path:
         :param file: path to the .npy file where the data is stored.
         :type file: str
         :param filename_postfix:
@@ -651,6 +686,7 @@ class KeplerLightCurve(object):
         self.support = int(conditioned_data[0][10])
         len_whitened_templates_td = int(conditioned_data[0][11])
         self.nperseg_psd = int(conditioned_data[0][12])
+        self.mean_total = float(conditioned_data[0][13])
         # self.tb.num_templates = int(conditioned_data[0][11])
         # self.tb.num_templates_shifts = int(conditioned_data[0][12])
         # self.tb.indices_of_templates = []
@@ -666,7 +702,7 @@ class KeplerLightCurve(object):
         self.wf_tds = []
         self.wf_fds = []
         self.big_hole_masks = []
-        self.trends_orig_fluxes = []
+        # self.trends_orig_fluxes = []
         self.whitened_templates_td = [[] for _ in range(len(conditioned_data) - 7)]
         self.whitened_templates_fd = [[] for _ in range(len(conditioned_data) - 7)]
         ind_last = 0
@@ -677,7 +713,7 @@ class KeplerLightCurve(object):
             self.zero_padding_ends[q][0] = zpe1
             self.zero_padding_ends[q][1] = zpe2
             lenflux = int(conditioned_data[0][ind_last + 3])
-            len_orig = int(conditioned_data[0][ind_last + 4])
+            # len_orig = int(conditioned_data[0][ind_last + 4])
             if lenflux != self.support:
                 self.is_zero_padded = False
             self.times.append(np.array(conditioned_data[1][ind_last: ind_last + lenflux]).astype(float))
@@ -691,7 +727,7 @@ class KeplerLightCurve(object):
             self.wf_tds.append(wftd1)
             self.wf_fds.append(np.fft.rfft(np.fft.ifftshift(wftd1)))
             self.big_hole_masks.append((conditioned_data[5][ind_last: ind_last + lenflux]).astype(bool))
-            self.trends_orig_fluxes.append((conditioned_data[6][ind_last: ind_last + len_orig]).astype(float))
+            # self.trends_orig_fluxes.append((conditioned_data[6][ind_last: ind_last + len_orig]).astype(float))
             for k in range(len_whitened_templates_td):
                 whtltd1 = np.array(conditioned_data[k + 7][ind_last:ind_last + lenflux]).astype(float)
                 if (not self.is_zero_padded) and (not no_zero_padding):
@@ -714,27 +750,35 @@ class KeplerLightCurve(object):
         self.is_zero_padded = True
         self.is_template_whitened = True
 
+    def save_mean_psd_for_injections(self, file=None, filename_postfix=Default_psd_for_injections_filename_postfix, path=None):
+        if file is None:
+            if path is None:
+                path = self.output_location
+            file = af.get_saving_file_path(output_location=path, target_id=self.target_id,
+                                           filename_postfix=filename_postfix, file_format='npy')
+        np.save(file, np.mean(self.psds, axis=0) / self.mean_total**2, allow_pickle=True)
+
     def save_connected_stats(self, filename_postfix=Default_connected_statistic_data_filename_postfix, path=None):
         if path is None:
             path = self.output_location
         num_temp_shifts = len(self.statistics_full)
         len_one = len(self.time_full)
-        connected_data = np.zeros((3 + num_temp_shifts * 3, len_one + 1), dtype=Dtype_r)
+        connected_data = np.zeros((3 + num_temp_shifts * 5, len_one + 1), dtype=Dtype_r)
 
         # connected_data[0, 0] = num_temp_shifts
         connected_data[0, 1:] = self.time_full
-        connected_data[1, 1:] = self.trend_orig_flux_full
+        # connected_data[1, 1:] = self.trend_orig_flux_full
         connected_data[2, 1:] = self.big_hole_masks_full.astype(Dtype_r)
         line_num_0 = 3
         for kk in range(num_temp_shifts):
             connected_data[line_num_0 + kk, 0] = self.templates_of_indices[kk]
             connected_data[line_num_0 + kk, 1:] = self.statistics_full[kk]
-            connected_data[line_num_0 + 2 * num_temp_shifts + kk, 1:] = self.stat_masks_full[kk].astype(float)
-            connected_data[line_num_0 + 2 * num_temp_shifts + kk, 0] = self.templates_of_indices[kk]
-            connected_data[line_num_0 + num_temp_shifts + kk, 1:] = self.stat_vars_full[kk]
-            connected_data[line_num_0 + num_temp_shifts + kk, 0] = self.templates_of_indices[kk]
+            connected_data[line_num_0 + 1 * num_temp_shifts + kk, 1:] = self.stat_masks_full[kk].astype(float)
+            connected_data[line_num_0 + 2 * num_temp_shifts + kk, 1:] = self.stat_vars_full[kk]
+            connected_data[line_num_0 + 3 * num_temp_shifts + kk, 1:] = self.corrections_full[kk]
+            connected_data[line_num_0 + 4 * num_temp_shifts + kk, 1:] = self.statistics_gaussianized_full[kk]
 
-        # vars_quarters = [[np.array(np.ones(len(self.statistics_raw_cor[k][q])) * self.stat_vars[k][q], dtype=Dtype_r)
+        # vars_quarters = [[np.array(np.ones(len(self.statistics_raw[k][q])) * self.stat_tot_vars[k][q], dtype=Dtype_r)
         #                   for q in self.quarters] for k in range(self.tb.num_templates_shifts)]
         file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
                                             filename_postfix=filename_postfix, file_format='npy')
@@ -745,7 +789,7 @@ class KeplerLightCurve(object):
                                             filename_postfix=filename_postfix, file_format='npy')
         # np.save(file_path, np.array(self.stats_raw_no_veto_no_score_cor, dtype=object), allow_pickle=True)
         np.save(file_path, np.array([self.stats_raw_no_veto_no_score_cor,
-                                     self.stat_denoms], dtype=object), allow_pickle=True)
+                                     self.stat_moving_vars], dtype=object), allow_pickle=True)
 
     def load_connected_stats(self, file_path=None, filename_postfix=Default_connected_statistic_data_filename_postfix, path=None):
         if file_path is None:
@@ -755,9 +799,9 @@ class KeplerLightCurve(object):
                                                 filename_postfix=filename_postfix, file_format='npy')
         connected_data = np.load(file_path, allow_pickle=True)
 
-        num_temp_shifts = (len(connected_data) - 3) // 3  # int(connected_data[0, 0])
+        num_temp_shifts = (len(connected_data) - 3) // 5  # int(connected_data[0, 0])
         self.time_full = connected_data[0, 1:]
-        self.trend_orig_flux_full = connected_data[1, 1:]
+        # self.trend_orig_flux_full = connected_data[1, 1:]
         self.big_hole_masks_full = (connected_data[2, 1:]).astype(bool)
         templates_of_indices = []
         line_num_0 = 3
@@ -765,12 +809,16 @@ class KeplerLightCurve(object):
         self.statistics_full = np.zeros((num_temp_shifts, len(self.time_full)), dtype=Dtype_r)
         self.stat_vars_full = np.zeros((num_temp_shifts, len(self.time_full)), dtype=Dtype_r)
         self.stat_masks_full = np.zeros((num_temp_shifts, len(self.time_full)), dtype=bool)
+        self.corrections_full = np.zeros((num_temp_shifts, len(self.time_full)), dtype=Dtype_r)
+        self.statistics_gaussianized_full = np.zeros((num_temp_shifts, len(self.time_full)), dtype=Dtype_r)
 
         for kk in range(num_temp_shifts):
             templates_of_indices.append(connected_data[line_num_0 + kk, 0])
             self.statistics_full[kk] = connected_data[line_num_0 + kk, 1:]
-            self.stat_masks_full[kk] = (connected_data[line_num_0 + 2 * num_temp_shifts + kk, 1:]).astype(bool)
-            self.stat_vars_full[kk] = connected_data[line_num_0 + num_temp_shifts + kk, 1:]
+            self.stat_masks_full[kk] = (connected_data[line_num_0 + 1 * num_temp_shifts + kk, 1:]).astype(bool)
+            self.stat_vars_full[kk] = connected_data[line_num_0 + 2 * num_temp_shifts + kk, 1:]
+            self.corrections_full[kk] = connected_data[line_num_0 + 3 * num_temp_shifts + kk, 1:]
+            self.statistics_gaussianized_full[kk] = connected_data[line_num_0 + 4 * num_temp_shifts + kk, 1:]
 
         # making indices_of_templates
         temp_now = templates_of_indices[0]
@@ -783,11 +831,11 @@ class KeplerLightCurve(object):
         indices_of_templates[-1].append(len(templates_of_indices))
         self.indices_of_templates = np.array(indices_of_templates)
         self.templates_of_indices = np.array(templates_of_indices)
-        # vars_quarters = [[np.array(np.ones(len(self.statistics_raw_cor[k][q])) * self.stat_vars[k][q], dtype=Dtype_r)
+        # vars_quarters = [[np.array(np.ones(len(self.statistics_raw[k][q])) * self.stat_tot_vars[k][q], dtype=Dtype_r)
         #                   for q in self.quarters] for k in range(self.tb.num_templates_shifts)]
 
     def select_connected_stats_indices(self, indices):
-        #inds_templs_to_use = np.arange(tm.Indices_of_templates[self.best_temp][0], tm.Indices_of_templates[self.best_temp][-1])
+        # inds_templs_to_use = np.arange(tm.Indices_of_templates[self.best_temp][0], tm.Indices_of_templates[self.best_temp][-1])
         indices_with_shifts = [i for ind in indices
                                for i in range(tm.Indices_of_templates[ind][0], tm.Indices_of_templates[ind][1])]
         self.indices_of_templates = np.array(self.indices_of_templates)[indices]
@@ -831,18 +879,19 @@ class KeplerLightCurve(object):
         self.whiten_templates()
 
     def detect_single_transits(self, nsig_outliers_stat=Nsig_outliers_stat,
-                               apply_veto=True, apply_score_correction=Apply_score_correction,
+                               apply_veto=True, gaussianize=Get_gaussianized_ses,
                                apply_veto_only_to_neg=False,
-                               margin_snr_veto=Margin_snr_veto,
-                               fn_step_veto=Fn_step_veto, fn_fit_veto=Fn_fit_veto,
-                               min_len_step_checking_veto=Min_len_step_checking_veto,
-                               max_len_step_checking_veto=Max_len_step_checking_veto,
+                               margin_snr_veto=Margin_snr_veto, fn_fit_veto=Fn_fit_veto,
+                               # fn_step_veto=Fn_step_veto,
+                               # min_len_step_checking_veto=Min_len_step_checking_veto,
+                               # max_len_step_checking_veto=Max_len_step_checking_veto,
                                n_parts_veto_snr=N_parts_veto_snr,
                                n_parts_veto_fourier=N_parts_veto_fourier,
                                wind_len_overlap_fourier=Wind_len_overlap_fourier,
-                               delta_snr_wide_templ=Delta_snr_wide_templ_veto,
+                               delta_snr_wide_templ=Delta_snr_from_best_veto,
                                threshold_peak_sigma_veto=Threshold_peak_sigma_veto,  # there will also be look-elsewhere
-                               save_triggers_as_attribute=False):
+                               save_triggers_as_attribute=False,
+                               max_abs_stat_veto=Max_abs_stat_veto):
         """
 
         :param nsig_outliers_stat: Deviation in units of stansard deviation to be considered as an outlier in the
@@ -850,20 +899,14 @@ class KeplerLightCurve(object):
         :type nsig_outliers_stat:
         :param apply_veto:
         :type apply_veto:
-        :param apply_score_correction:
-        :type apply_score_correction:
+        :param gaussianize:
+        :type gaussianize:
         :param apply_veto_only_to_neg:
         :type apply_veto_only_to_neg:
         :param margin_snr_veto:
         :type margin_snr_veto:
-        :param fn_step_veto:
-        :type fn_step_veto:
         :param fn_fit_veto:
         :type fn_fit_veto:
-        :param min_len_step_checking_veto:
-        :type min_len_step_checking_veto:
-        :param max_len_step_checking_veto:
-        :type max_len_step_checking_veto:
         :param n_parts_veto_snr:
         :type n_parts_veto_snr:
         :param n_parts_veto_fourier:
@@ -876,31 +919,28 @@ class KeplerLightCurve(object):
         :type threshold_peak_sigma_veto:
         :param save_triggers_as_attribute:
         :type save_triggers_as_attribute:
+        :param max_abs_stat_veto:
+        :type max_abs_stat_veto:
         :return:
         :rtype:
         """
 
         self.matched_filtering(nsig_outliers_stat=nsig_outliers_stat)
         if apply_veto:
-            self.veto_statistics(apply_only_to_neg=apply_veto_only_to_neg,
-                                 margin_snr=margin_snr_veto,
-                                 fn_step=fn_step_veto, fn=fn_fit_veto,
-                                 min_len_step_checking=min_len_step_checking_veto,
-                                 max_len_step_checking=max_len_step_checking_veto,
-                                 n_parts_veto_snr=n_parts_veto_snr,
-                                 n_parts_veto_fourier=n_parts_veto_fourier,
-                                 wind_len_overlap_fourier=wind_len_overlap_fourier,
-                                 delta_snr_wide_templ=delta_snr_wide_templ,
-                                 threshold_peak_sigma=threshold_peak_sigma_veto,  # there will also be look-elsewhere
-                                 save_triggers_as_attribute=save_triggers_as_attribute)
+            self.veto_statistics(apply_only_to_neg=apply_veto_only_to_neg, margin_snr=margin_snr_veto, fn=fn_fit_veto,
+                                 # fn_step=fn_step_veto,
+                                 # min_len_step_checking=min_len_step_checking_veto, max_len_step_checking=max_len_step_checking_veto,
+                                 n_parts_veto_snr=n_parts_veto_snr, n_parts_veto_fourier=n_parts_veto_fourier,
+                                 wind_len_overlap_fourier=wind_len_overlap_fourier, delta_snr_from_best=delta_snr_wide_templ,
+                                 threshold_peak_sigma=threshold_peak_sigma_veto, save_triggers_as_attribute=save_triggers_as_attribute,
+                                 max_abs_stat=max_abs_stat_veto)
         self.cut_zero_padding_ends()
-        if apply_score_correction:
-            self.correct_score()
+        self.calculate_ses_distr_corrections()
+        if gaussianize:
+            self.calculate_gaussianized_ses()
 
     def periodicity_search(self, pmin=Pmin, pmax=Pmax, dp=None,
-                           duty_cycle=Duty_cycle, delete_full_stats=True,
-                           # threshold_mes_veto=Threshold_mes_veto, veto_threshold_for_mes=Veto_threshold_for_mes
-                           ):
+                           duty_cycle=Duty_cycle, delete_full_stats=True, delete_periodic_interleaved=True):
         """
         :param pmin:
         :type pmin:
@@ -910,31 +950,26 @@ class KeplerLightCurve(object):
         :type dp:
         :param duty_cycle:
         :type duty_cycle:
+        :param delete_full_stats:
+        :type delete_full_stats:
+        :param delete_periodic_interleaved:
+        :tyne delete_periodic_interleaved:
         :return:
         :rtype:
         """
-        # self.find_moving_averages(interpolate=True, detr_length=detr_length, detr_method=detr_method,
-        #                      detr_endmethod=detr_endmethod, detr_ends=detr_ends,
-        #                      detr_endlen=detr_endlen, keep_overall_level=False)
-        self.connect_quarters()
-        self.interleave_shifts(delete_fulls=delete_full_stats)
+        self.interleave_shifts(delete_fulls=delete_full_stats)  # quarters will be connected inside if they are not
         self.sum_periods(pmin=pmin, pmax=pmax, dp=dp, duty_cycle=duty_cycle)
-        # self.veto_mes(mes_threshold=threshold_mes_veto, veto_threshold=veto_threshold_for_mes)
-        # -> WARNING: this veto, if done after the periodicity search on the score-corrected data, will destroy the
-        # distribution. Therefore, we are removing this veto from the search and will do it after the search and after
-        # the time-slides and p_periodic estimation as a post-processing veto. Also, we make sure to do it on the
-        # non-score-corrected data.
+        self.interpolate_not_interleaved(delete_periodic_interleaved=delete_periodic_interleaved)
+        self.calculate_periodic_scores_with_correction()
 
-    def subtract_means(self, save_means=True, method='mean', make_trends=True, masks=None):
+    def subtract_means(self, save_means=True, method='mean', masks=None):  # , make_trends=True
         """
         Subtracts mean value from each of self.fluxes
-        :param save_means: Whether to create a new attribure self.means and save the mean
+        :param save_means: Whether to create a new attribure self.orig_means and save the mean
             values of the fluxes there. The default is True.
         :type save_means: bool
         :param method:
         :type method:
-        :param make_trends:
-        :type make_trends:
         :param masks:
         :type masks:
         :return:
@@ -945,19 +980,18 @@ class KeplerLightCurve(object):
         """
         assert method == 'mean' or method == 'median', "`method` must be 'mean' or 'median'!"
         new_means = self.get_averages(masks=masks, method=method)
-        if self.means is None:
+        if self.orig_means is None:
             old_means = np.zeros(len(self.quarters))
         else:
-            old_means = self.means
+            old_means = self.orig_means
         self.fluxes = [np.array(self.fluxes[q] + old_means[q] - new_means[q]) for q in self.quarters]
         self.clean_fluxes = [np.array(self.clean_fluxes[q] + old_means[q] - new_means[q]) for q in self.quarters]
         if save_means:
-            self.means = new_means
+            self.orig_means = new_means
             lens = [len(self.clean_fluxes[q][~np.isnan(self.clean_fluxes[q])]) for q in self.quarters]
-            self.mean_total = np.sum([self.means[q] * lens[q] for q in self.quarters]) / np.sum(lens)
-
-        if make_trends:
-            self.trends_orig_fluxes = [new_means[q] * np.ones(len(self.clean_fluxes[q])) for q in self.quarters]
+            self.mean_total = np.sum([self.orig_means[q] * lens[q] for q in self.quarters]) / np.sum(lens)
+        # if make_trends:
+        #     self.trends_orig_fluxes = [new_means[q] * np.ones(len(self.clean_fluxes[q])) for q in self.quarters]
 
     def get_averages(self, masks=None, method='mean'):
         if masks is None:
@@ -969,6 +1003,22 @@ class KeplerLightCurve(object):
         else:
             raise ValueError("`method` should be 'mean' or 'median'!")
         return averages
+
+    def normalize_by_means(self):
+        """
+        This makes all the flux means to be the same, so that we work in the relative units in which
+        the amplitudes of all the fluxes are supposed to be the same. The data is corrected for the crowding metric,
+        so that should really be true. All the formulae are now simplified because we do not have to drag the changing
+        mean flux trends. The actual value of the mean anyway cancels in the final formula. We do renormalize the fluxes by the
+        new mean though because we do not wnat to work with too small numbers. We note that this changes also the values of
+        the PSDs etc!
+        :return:
+        :rtype:
+        """
+        for q in self.quarters:
+            self.fluxes[q] = self.fluxes[q] / self.orig_means[q] * self.mean_total
+            self.clean_fluxes[q] = self.clean_fluxes[q] / self.orig_means[q] * self.mean_total
+        # self.trends_orig_fluxes = None
 
     def mask_flux_outliers(self, nsig=Nsig_outliers_0, nsig_positive=Nsig_outliers_0_pos,
                            nsig_negative=Nsig_outliers_0_neg, nsig_clean=Nsig_outliers_psd,
@@ -1212,8 +1262,8 @@ class KeplerLightCurve(object):
 
     def measure_psds(self, nperseg=None, noverlap=Noverlap_psd, window=Window_psd,
                      subtract_mean=Subtract_mean_in_psd, smoothen_psds=True,
-                     tukey_steps_len=16, conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False,
-                     zero_to_high_freq_thresh_wf_ratio=0.6, d1=1, w1=7, d2=3.5, w2=4):
+                     tukey_steps_len=Tukey_steps_len_psd, always_zero_zeroth_freq=False,
+                     feature_sizes=(1, 9, 3.5, 4, 2., 3)):
         """
         PSDS as function of quarter id.
         The PSD measuring algotithm makes the evenly sampled steps and not adjust the search for
@@ -1237,17 +1287,14 @@ class KeplerLightCurve(object):
         :type smoothen_psds: bool
         :param tukey_steps_len: length taken for zeroing in the tukey windowing
         :type tukey_steps_len: int or float
-        :param conditional_zero_zeroth_freq: Whether to put the low frequencies to zero if they deviate too much
-        :type conditional_zero_zeroth_freq: bool
         :param always_zero_zeroth_freq: whether to always put the lowest frequencies to zero
         :type always_zero_zeroth_freq: bool
-        :param zero_to_high_freq_thresh_wf_ratio : the ratio between the whitening filter in the Fourier domain above which
-            the filter is considered to be quickly decaying. Then, Tukey window will be applied to the lowest frequencies.
-            It is done because the lowest frequencies often have orders of magnitude spike of PSD which is not resolved by Welch.
-        :type zero_to_high_freq_thresh_wf_ratio : float
+        :param feature_sizes: length and depth of the deviations that willtrigger increasing nperseg, see in the code
+        :type feature_sizes:
         :return: creates self.psds, self.psdfreqs, self.wf_tds, self.wf_fds, self.freqs, seld.npsds.
         :rtype:
         """
+        d1, w1, d2, w2, d3, w3 = feature_sizes
         if nperseg is None:
             nperseg = self.nperseg_psd
 
@@ -1268,7 +1315,7 @@ class KeplerLightCurve(object):
         else:
             clean_fluxes = self.clean_fluxes
 
-        # qq = -1
+        # qq = -1s
         # clean_fluxes = [self.clean_fluxes[qq]]
 
         self.orig_psds, self.psdfreqs = ut.welch_psds(clean_fluxes=clean_fluxes, psd_masks=self.psd_masks,
@@ -1307,36 +1354,6 @@ class KeplerLightCurve(object):
             ########################################################################################################################
             # Lowest freqs cannot be resolved by small nperseg by definition. And also, there will be leakage.
             # So we just put there better resolution straight away
-            # TODO think about `levels` formalism
-
-            # for q in range(len(self.orig_psds)):
-            #     noisy_vec = 1 / psds_two[q] ** 0.5
-            #     mean_vec = ut.sinc_interp(1 / psds_smooth[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            #     orig_vec = ut.sinc_interp(1 / self.orig_psds[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            #     coarse_vec = ut.sinc_interp(1 / psds_coarse[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            #     rude_vec = ut.sinc_interp(1 / psds_rude[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
-            #
-            #     combined_vec = np.array(mean_vec)
-            #     noisy_resid_vec = noisy_vec - combined_vec
-            #     std_noisy = ut.outlier_free_std(noisy_resid_vec[len(noisy_resid_vec) // 2:], nsig=3, n_iterations=2)
-            #     orig_resid_vec = noisy_vec - combined_vec
-            #     nsig_sign_minwids_res_repl_vecs_res_repl = [[1, -1., 6, noisy_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
-            #                                                 [1, +1., 6, noisy_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
-            #                                                 [2.5, -1., 3, noisy_resid_vec, orig_vec, orig_resid_vec],  # for real features
-            #                                                 [2.5, +1., 3, noisy_resid_vec, orig_vec, orig_resid_vec]]  # for lowest freqs
-            #
-            #     vecs = [rude_vec, coarse_vec, orig_vec]
-            #     npersegs_lim = [nperseg_smooth, nperseg_rude, nperseg_coarse]
-            #     fmb_int = int(np.ceil(nperseg_two / nperseg))
-            #     for i, vec_f in enumerate(vecs):
-            #         ind_temp = 2 * fmb_int * int(nperseg / npersegs_lim[i])
-            #         sign_0 = np.sign(combined_vec[ind_temp] - vec_f[ind_temp])
-            #         ind_temp += 1
-            #         sign = np.sign(combined_vec[ind_temp] - vec_f[ind_temp])
-            #         while sign == sign_0 and ind_temp < len(combined_vec) - 1:
-            #             ind_temp += 1
-            #             sign = np.sign(combined_vec[ind_temp] - vec_f[ind_temp])
-            #         combined_vec[: ind_temp] = vec_f[: ind_temp]
             for q in range(len(self.orig_psds)):
                 noisy_vec = 1 / psds_two[q] ** 0.5
                 orig_vec = ut.sinc_interp(1 / self.orig_psds[q] ** 0.5, nperseg_two, tukey_steps_len=tukey_steps_len)
@@ -1357,13 +1374,15 @@ class KeplerLightCurve(object):
                     combined_vec = ut.replace_if_deviating(combined_vec, vec_f, tester=None, mindev=(std_noisy * 4 / nps_rat),
                                                            minwid=nps_rat)
                 orig_resid_vec = noisy_vec - combined_vec
-                nsig_sign_minwids_res_repl_vecs_res_repl = [[d1, -1., w1, noisy_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
-                                                            [d1, +1., w1, noisy_resid_vec, orig_vec, orig_resid_vec],  # for mismatch behavior
-                                                            [d2, -1., w2, noisy_resid_vec, orig_vec, orig_resid_vec],  # for real features
-                                                            [d2, +1., w2, noisy_resid_vec, orig_vec, orig_resid_vec]]  # for lowest freqs
-
-                for nsig, sign, min_wid, res_vec, repl_vec, res_repl in nsig_sign_minwids_res_repl_vecs_res_repl:
-                    i = 0
+                nsig_sign_minwids_repl_vecs_i_min = [[d3, -1., w3, orig_vec, 0],
+                                                     [d1, -1., w1, coarse_vec, 16],  # for mismatch behavior
+                                                     [d1, +1., w1, coarse_vec, 16],
+                                                     [d2, -1., w2, orig_vec, 0],
+                                                     [d2, +1., w2, orig_vec, 0]]  # ,  # for real features
+                res_vec = noisy_resid_vec
+                res_repl = orig_resid_vec
+                for nsig, sign, min_wid, repl_vec, i_min in nsig_sign_minwids_repl_vecs_i_min:
+                    i = i_min
                     while i < len(combined_vec):
                         if sign * res_vec[i] - nsig * std_noisy > 0.:
                             i_1 = i
@@ -1426,16 +1445,16 @@ class KeplerLightCurve(object):
             wf_fd = fftfun(result)
             wf_fd[0] = 0.  # MAYBE THIS IS WRONG! also, the flux was already supposed to have zero mean. see below what I did.
             wf_fd = np.abs(wf_fd)  # anyway in the formula it appears twice, so the phase will get canceled
-            # but maybe this exactly means that we should not take this abs?
+            # but maybe this exactly orig_means that we should not take this abs?
             self.wf_fds_unwindowed.append(np.array(wf_fd))  # it is unwindowed in the large-window sense of this world
 
             whitened_clean_flux_fd = fftfun(self.clean_fluxes[q]) * wf_fd
             first_measured_bin = int(np.ceil(self.support / nperseg))
             too_noisy = np.where(np.abs(whitened_clean_flux_fd[:first_measured_bin]) ** 2 / np.mean(np.abs(
-                whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (2 * first_measured_bin), df=1))[0]
+                whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (1 * first_measured_bin), df=1))[0]
             if len(too_noisy) > 0 and not always_zero_zeroth_freq:
                 len_kill = int(np.ceil(too_noisy[-1] * 1.1))
-                lentuk = min(len_kill + 2, first_measured_bin + 2) * 2  # if we need to cover more, we will do that after notch
+                lentuk = max(len_kill + 2, first_measured_bin + 2) * 2  # if we need to cover more, we will do that after notch
                 # the multiplication by 2 is because the window is symmetric
                 wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
             elif always_zero_zeroth_freq:
@@ -1445,20 +1464,6 @@ class KeplerLightCurve(object):
             self.wf_fds.append(np.array(wf_fd, dtype=Dtype_c))
         # We want to somehow make the correlation length smaller but still okay in Fourier:
         self.window_wf_td()
-        # # The following comment was indented
-        # wf_td = ifftfun(wf_fd)
-        # wind = np.zeros(len(wf_td))
-        # len_to_save = meas_len  # it is 2 nperseg
-        # extension_coef = 2.5
-        # tuk = ut.tukey(int(2 * extension_coef * len_to_save), alpha=1 - 1 / extension_coef, sym=True)
-        # wind[:len(tuk) // 2] = tuk[-len(tuk) // 2:]
-        # wind[-len(tuk) // 2:] = tuk[:len(tuk) // 2]
-        # wf_td = wf_td * wind
-        # wf_td -= np.mean(wf_td) * wind / np.mean(wind)
-        # wf_fd = np.abs(fftfun(wf_td))
-        # wf_td = np.fft.fftshift(ifftfun(wf_fd))  # we need wf_fd for inpainting
-        # self.wf_tds.append(np.array(wf_td, dtype=Dtype_r))
-        # self.wf_fds.append(np.array(wf_fd, dtype=Dtype_c))
         self.wf_tds = np.array(self.wf_tds, dtype=Dtype_r)  # for numba need numpy.arrays
 
     def measure_psds_run_7(self, nperseg=Nperseg_psd, noverlap=Noverlap_psd, window=Window_psd,
@@ -1648,7 +1653,8 @@ class KeplerLightCurve(object):
             #         wf_fd_new[:lentuk // 2] = wf_fd_new[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
             #         whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * wf_fd_new
             #         too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]) ** 2 / np.mean(np.abs(
-            #             whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
+            #             whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2
+            #                                                           ) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
             #     wf_td_new, wf_fd_new = ut.window_wf_td_fun(wf_fd_new, extension_coef=wf_td_window_extension_coef)
             #     wf_fds_new.append(wf_fd_new)
             #     wf_tds_new.append(wf_td_new)
@@ -1656,7 +1662,7 @@ class KeplerLightCurve(object):
                 wf_fds_new.append(self.wf_fds[q])
                 wf_tds_new.append(self.wf_tds[q])
         self.wf_fds = wf_fds_new
-        self.wf_tds = wf_tds_new  #np.array([np.fft.irfft(wf_fds_new[q]) for q in self.quarters])
+        self.wf_tds = wf_tds_new  # np.array([np.fft.irfft(wf_fds_new[q]) for q in self.quarters])
 
     def window_wf_td(self, extension_coef=Wf_td_window_extension_coef):
         """
@@ -1698,7 +1704,7 @@ class KeplerLightCurve(object):
                                                                 mitigate_hole_ends=False, endhole_method='median')
             self.is_holes_interpolated = True
 
-    def subtract_low_trends(self, nperseg=None):
+    def subtract_low_trends(self, nperseg=None, save_low_trends=False):
         # WARNING: WE DO NOT APPLY THIS TO THE TEMPLATE. FOR SHORT TEMPLATES IT IS OK, ALTHOUGH IN PRINCIPLE, IT IS NOT CORRECT.
         if nperseg is None:
             nperseg = self.nperseg_psd
@@ -1737,6 +1743,8 @@ class KeplerLightCurve(object):
                     (np.zeros(self.zero_padding_ends[q][0]), trend_low, np.zeros(self.zero_padding_ends[q][1]))), dtype=Dtype_r)
                 self.clean_fluxes[q] = np.array(np.array(self.clean_fluxes[q]) - np.concatenate(
                     (np.zeros(self.zero_padding_ends[q][0]), trend_low, np.zeros(self.zero_padding_ends[q][1]))), dtype=Dtype_r)
+        if not save_low_trends:
+            self.trends_low = None
 
     def notch_fluxes(self, nsig=Nsig_notch, irl_notch=Irl_notch, htol_notch=Htol_notch, minval_notch=Minval_notch):
         """
@@ -1831,68 +1839,6 @@ class KeplerLightCurve(object):
                 self.whitened_clean_fluxes_td.append(np.array(np.fft.irfft(whitened_clean_flux_fd), dtype=Dtype_r))
 
         self.is_fluxes_whitened = True
-
-    def find_moving_averages(self, interpolate=True, detr_length=Detr_length, detr_method=Detr_method,
-                             detr_endmethod=Detr_endmethod, detr_ends=Detr_ends,
-                             detr_endlen=Detr_endlen, keep_overall_level=False,
-                             remove_outliers=False, nsig_outliers=Nsig_outliers_0):
-        """
-        Calculates the large trends of the original fluxes by taking the moving average of
-        type detr_method ('mean' or 'median') of slices of size detr_length.
-        Saves the trends (quarter-specific) and saves the detrended original fluxes separately.
-        :param interpolate: Whether to interpolate the data in the holes containing numpy.nan.
-            The interpolation will be linear, the holes in the ends of the data will
-            be filled by a constant.
-        :type interpolate: bool
-        :param detr_length: Detrending length. Size of a slice to take the moving average
-        :type detr_length: int
-        :param detr_method: The type of moving average to take. Median is less sensitive to
-            outliers, and mean is less sensitive to small number of samples.
-            Median is preferred in the middle of the data.
-        :type detr_method: str : 'mean' or 'median'
-        :param detr_endmethod: The type of moving average to take in the ends of the data.
-            Mean is less sensitive to small number of samples, so it is preferred
-            in the ends of the data.
-        :type detr_endmethod: str : 'mean' or 'median'
-        :param detr_ends: How to make slices on the ends of the data. Read details in detrend_mov_ave().
-            'symmetric' and 'asymmetric' preserve the size of the data,
-            'cut' decreases the size of the data by detr_length.
-        :type detr_ends: str : 'symmetric' or 'asymmetric' or 'cut'
-        :param detr_endlen: Minimal slice taken in the end of the data. If None, will be taken
-            as detr_len//4
-        :type detr_endlen: int or None
-        :param keep_overall_level: Whether to preserve the overall average (mean or median, defined by
-            detr_method) of the data
-        :type keep_overall_level: bool
-        :param remove_outliers:
-        :type remove_outliers:
-        :param nsig_outliers:
-        :type nsig_outliers:
-        :return: creates self.detrended_orig_fluxes and self.trends_orig_fluxes
-        :rtype:
-        """
-        self.detrended_orig_fluxes = []
-        self.trends_orig_fluxes = []
-        for q in self.quarters:
-            msk = ~np.isnan(self.orig_fluxes[q])
-            if interpolate:
-                o_f = ut.interpolate_over_mask(np.array(self.orig_fluxes[q]), msk, interp_method='linear', ends='continue',
-                                               mitigate_hole_ends=False, endhole_method='median')
-                detr, trend = ut.detrend_mov_ave(np.array(o_f), length=detr_length, mask=None, method=detr_method,
-                                                 endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen,
-                                                 return_trend=True,
-                                                 keep_overall_level=keep_overall_level, remove_outliers=remove_outliers,
-                                                 nsig_outliers=nsig_outliers)
-            else:
-                detr, trend = ut.detrend_mov_ave(np.array(self.orig_fluxes[q]), length=detr_length, mask=msk,
-                                                 method=detr_method,
-                                                 endmethod=detr_endmethod, ends=detr_ends, endlen=detr_endlen,
-                                                 return_trend=True,
-                                                 keep_overall_level=keep_overall_level, remove_outliers=remove_outliers,
-                                                 nsig_outliers=nsig_outliers)
-            detr[~msk] = np.nan
-            self.detrended_orig_fluxes.append(detr)
-            self.trends_orig_fluxes.append(trend)
 
     def initialize_templates(self, templates=None, shifts=None, template_index='all'):
         """
@@ -1992,8 +1938,9 @@ class KeplerLightCurve(object):
 
     def matched_filtering(self, detr_length_outliers=Detr_length_outliers,
                           nsig_outliers_stat=Nsig_outliers_stat,
-                          ngap_moving_var=Ngap_moving_var,
-                          nsamples_min_moving_var=Nsamples_min_moving_var):
+                          nwind_moving_var_min=Nwind_moving_var_min,
+                          ngap_moving_var_min=Ngap_moving_var_min,
+                          nsamples_min_moving_var_coef=Nsamples_min_moving_var_coef):
         """
         Calculates the matched-filtering statistics of data and templates.
         Cuts the statistic from zero padding ends.
@@ -2021,25 +1968,26 @@ class KeplerLightCurve(object):
         :param nsig_outliers_stat: Deviation in units of stansard deviation to be considered as an outlier in the
             outlier-free variance calculation for the statistic.
         :type nsig_outliers_stat: float
-        :param ngap_moving_var:
-        :type ngap_moving_var:
-        :param nsamples_min_moving_var:
-        :type nsamples_min_moving_var:
+        :param ngap_moving_var_min:
+        :type ngap_moving_var_min:
+        :param nsamples_min_moving_var_coef:
+        :type nsamples_min_moving_var_coef:
+        :param nwind_moving_var_min:
+        :type nwind_moving_var_min:
         :return:
         :rtype:
         """
         n_wh_temp = len(self.whitened_templates_td)
         # self.statistics_raw = [[np.zeros(len(self.fluxes[q])) for q in self.quarters] for _ in range(n_wh_temp)]
-        self.statistics_raw_cor = [[np.zeros(len(self.fluxes[q]), dtype=Dtype_r) for q in self.quarters]
-                                   for _ in range(n_wh_temp)]
+        self.statistics_raw = [[np.zeros(len(self.fluxes[q]), dtype=Dtype_r) for q in self.quarters]
+                               for _ in range(n_wh_temp)]
         # -> corrected for moving std and then multiplied back by non-moving std
         self.stat_moving_vars = [[np.zeros(len(self.fluxes[q]), dtype=Dtype_r) for q in self.quarters]
                                  for _ in range(n_wh_temp)]
         self.statistics_snr = [[np.zeros(len(self.fluxes[q]), dtype=Dtype_r) for q in self.quarters]
                                for _ in range(n_wh_temp)]
         # self.statistics_abs = [[np.zeros(len(self.fluxes[q])) for q in self.quarters] for t in range(n_wh_temp)]
-        self.stat_vars = [[Dtype_r(0.) for _ in self.quarters] for __ in range(n_wh_temp)]  # mean of moving variance
-        self.stat_denoms = [[Dtype_r(np.inf) for _ in self.quarters] for __ in range(n_wh_temp)]  # mean of den stat
+        self.stat_tot_vars = [[Dtype_r(0.) for _ in self.quarters] for __ in range(n_wh_temp)]  # mean of moving variance
         self.stat_masks = [[np.ones(len(self.fluxes[q])).astype(bool) for q in self.quarters] for _ in
                            range(n_wh_temp)]
 
@@ -2052,27 +2000,88 @@ class KeplerLightCurve(object):
                     np.fft.irfft(np.conjugate(self.whitened_templates_fd[k][q]) * self.whitened_fluxes_fd[q]))
                 stat = np.array(
                     stat[self.zero_padding_ends[q][0]:len(stat) - self.zero_padding_ends[q][1]])  # CUT THE STATISTIC BECAUSE MEMORY
-                # This denom will be needed for the amplitude calculation:
-                stat_denom = np.fft.irfft(np.abs(self.whitened_templates_fd[k][q]) ** 2)[0]
+                var_calc = np.fft.irfft(np.abs(self.whitened_templates_fd[k][q]) ** 2)[0]
                 # zero-padding ends are not a problem because they are zeros, and the normalization is fixed by irfft
-
                 statmask = np.array(self.big_hole_masks[q][self.zero_padding_ends[q][0]:len(
                     self.big_hole_masks[q]) - self.zero_padding_ends[q][1]])
-                # self.statistics_raw[k][q] = stat
-                movvar, tot_var = ut.gap_var(np.array(stat), mask=np.array(statmask), ngap=ngap_moving_var,
-                                             nsamples_min=nsamples_min_moving_var,
-                                             remove_outliers=False, remove_outliers_light=True,
-                                             detr_length_outliers=detr_length_outliers,
-                                             nsig_outliers=nsig_outliers_stat, return_mask=False, return_total_var=True)
-                movvar[~statmask] = np.inf
-                self.stat_moving_vars[k][q] = movvar
-                self.statistics_snr[k][q] = stat / movvar ** 0.5
-                statrawcor = stat / movvar * np.nanmean(movvar[statmask])
+
+                temp_n = self.templates_of_indices[k]
+                eff_temp_wid = len(np.where(self.tb.templates[temp_n][0] > np.max(self.tb.templates[temp_n][0])/2)[0])
+                gap_len = 2 * eff_temp_wid
+                gap_len = max(ngap_moving_var_min, gap_len)
+                wind_len = 30 * eff_temp_wid
+                wind_len = max(wind_len, nwind_moving_var_min)
+                nsamples_min = int(nsamples_min_moving_var_coef * (wind_len - gap_len))
+                movvar_meas, tot_var = ut.moving_var(np.array(stat),
+                                                     mask=np.array(statmask),
+                                                     nwind=wind_len, ngap=gap_len,
+                                                     nsamples_min=nsamples_min,
+                                                     remove_outliers=True, detrend_remove_outliers=False,
+                                                     detr_length_outliers=detr_length_outliers,
+                                                     nsig_outliers=nsig_outliers_stat,
+                                                     return_mask=False, return_total_var=True)
+                movvar_meas[~statmask] = np.inf
+                stat_snr = stat / movvar_meas ** 0.5
+                # ### new piece as of Dec 4
+                # var_snr = np.var(stat_snr[statmask])  # the definition of well-measured variance is that the snr should be N(0,1)
+                # movvar_meas *= var_snr  # we make the variance estimate exact in order for the snr to be N(0,1)
+                # # # making positive values unit variance # # # (as of Dec 15)
+                indices_sign = statmask & (stat > 0)
+                var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
+                movvar_meas[indices_sign] *= var_snr_indices
+                # # # making negative values unit variance # # #
+                indices_sign = statmask & (stat < 0)
+                var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
+                movvar_meas[indices_sign] *= var_snr_indices
+                # # # then we use this new moving variance for all the rest
+                stat_snr = stat / movvar_meas ** 0.5  # now should be N(0,1) for sure
+                correction = movvar_meas / var_calc
+                # ### end of the new piece as of Dec 4
+                statrawcor = stat / correction
                 statrawcor[~statmask] = 0.
-                self.statistics_raw_cor[k][q] = statrawcor
-                self.stat_vars[k][q] = np.nanmean((movvar[statmask]) ** 0.5) ** 2
+                stat_var_cor = np.array(movvar_meas)
+                stat_var_cor[statmask] = movvar_meas[statmask] / (correction[statmask])**2
+                # stat_snr = stat / movvar_meas ** 0.5  # commented as of Dec 4
+                stat_var_cor[~statmask] = 0.  # because this inf will destroy periodicity search
+
+                self.stat_tot_vars[k][q] = Dtype_r(ut.unb_var(statrawcor[statmask]))
+                self.stat_moving_vars[k][q] = stat_var_cor
+                self.statistics_snr[k][q] = stat_snr  # stat / movvar ** 0.5
+                self.statistics_raw[k][q] = statrawcor
                 self.stat_masks[k][q] = statmask
-                self.stat_denoms[k][q] = stat_denom
+
+                # ############### This was before Dec 15 ########################
+                # movvar_meas[~statmask] = np.inf
+                # correction = movvar_meas / var_calc
+                # stat_snr = stat / movvar_meas ** 0.5
+                # # ### new piece as of Dec 4
+                # var_snr = np.var(stat_snr[statmask])
+                # correction = correction * var_snr  # as if we are correcting again to mase stat snr have exaclty var 1
+                # stat_snr = stat_snr / var_snr ** 0.5  # brings it to the correct distr, but be careful!
+                # # ### end of the new piece as of Dec 4
+                # statrawcor = stat / correction
+                # statrawcor[~statmask] = 0.
+                # stat_var_cor = np.array(movvar_meas)
+                # stat_var_cor[statmask] = movvar_meas[statmask] / (correction[statmask]) ** 2
+                # # stat_snr = stat / movvar_meas ** 0.5  # commented as of Dec 4
+                # stat_var_cor[~statmask] = 0.  # because this inf will destroy periodicity search
+                ##################################################################
+
+                # stat_snr = stat / movvar_meas ** 0.5 / var_snr ** 0.5
+                # correction = movvar_meas / var_calc  * var_snr
+                # statrawcor = stat / correction = stat / movvar_meas * var_calc / var_snr
+                # stat_var_cor = movvar_meas / correction ** 2 = movvar_meas / movvar_meas**2 * var_calc**2 / var_snr**2
+                # stat_var_cor**0.5 = var_calc / var_snr / movvar_meas**0.5
+                # statrawcor / stat_var_cor**0.5 = stat / movvar_meas * var_calc / var_snr / var_calc * var_snr * movvar_meas**0.5
+                #                                = stat / movvar_meas**0.5
+
+                # stat_snr = stat / movvar_meas ** 0.5 / var_snr ** 0.5
+                # correction = movvar_meas / var_calc * var_snr
+                # statrawcor = stat / correction = stat / movvar_meas * var_calc
+                # stat_var_cor = movvar_meas / correction ** 2 = movvar_meas / movvar_meas ** 2 * var_calc ** 2 * var_snr
+                # stat_var_cor ** 0.5 = var_calc / movvar_meas ** 0.5 * var_snr**0.5
+                # statrawcor / stat_var_cor ** 0.5 = stat / movvar_meas * var_calc / var_calc / var_snr**0.5 * movvar_meas ** 0.5
+                # = stat / movvar_meas ** 0.5 / var_snr**0.5
 
     def cut_zero_padding_ends(self):
         """
@@ -2189,13 +2198,15 @@ class KeplerLightCurve(object):
 
     def veto_statistics(self, apply_only_to_neg=False,
                         margin_snr=Margin_snr_veto,
-                        fn_step=Fn_step_veto, fn=Fn_fit_veto,
-                        min_len_step_checking=Min_len_step_checking_veto,
-                        max_len_step_checking=Max_len_step_checking_veto,
+                        max_abs_stat=Max_abs_stat_veto,
+                        fn=Fn_fit_veto,
+                        # fn_step=Fn_step_veto,
+                        # min_len_step_checking=Min_len_step_checking_veto,
+                        # max_len_step_checking=Max_len_step_checking_veto,
                         n_parts_veto_snr=N_parts_veto_snr,
                         n_parts_veto_fourier=N_parts_veto_fourier,
                         wind_len_overlap_fourier=Wind_len_overlap_fourier,
-                        delta_snr_wide_templ=Delta_snr_wide_templ_veto,
+                        delta_snr_from_best=Delta_snr_from_best_veto,
                         threshold_peak_sigma=Threshold_peak_sigma_veto,  # there will also be look-elsewhere
                         save_triggers_as_attribute=False):
         """
@@ -2207,20 +2218,22 @@ class KeplerLightCurve(object):
         alternative hypothesis testing against step and peak, masking out narrower transits if wider are
         sufficiently more significant.
         Should be done before unpadding!
+        :param max_abs_stat:
+        :type max_abs_stat:
         :param apply_only_to_neg: Whether to apply the veto only to negative statistics, which transits are expected to be, or
             also to the positive ones. The latter is needed if we want to look at the inverted data. It also can affetct the negative
             values processing due to masking and comparison.
         :type apply_only_to_neg: bool
         :param margin_snr: the minimal abs value of the snr from which the vetting starts to be applied
         :type margin_snr: float
-        :param fn_step: false negative probability for the test against step
-        :type fn_step: float
+        # :param fn_step: false negative probability for the test against step
+        # :type fn_step: float
         :param fn: false negative probability for vetoes except step
         :type fn: float
-        :param min_len_step_checking: minimal number of points participating in the mean calculation for the step veto
-        :type min_len_step_checking: float, bins
-        :param max_len_step_checking: maximal and desired number of points participating in the mean calculation for the step veto
-        :type max_len_step_checking: float, bins
+        # :param min_len_step_checking: minimal number of points participating in the mean calculation for the step veto
+        # :type min_len_step_checking: float, bins
+        # :param max_len_step_checking: maximal and desired number of points participating in the mean calculation for the step veto
+        # :type max_len_step_checking: float, bins
         :param n_parts_veto_snr: maximal number of parts to split the whitened template when doing vetting in time domain
         :type n_parts_veto_snr: int
         :param n_parts_veto_fourier: maximal number of parts to split the whitened template when doing vetting in fourier domain
@@ -2228,9 +2241,9 @@ class KeplerLightCurve(object):
         :param wind_len_overlap_fourier: size of the window for the template splitting in the fourier domain. is needed to avoid too
             long templates in the time domain. Is recommended to be smaller than the nperseg
         :type wind_len_overlap_fourier: int
-        :param delta_snr_wide_templ: the difference in the statistic in units of snr between a given template and a wider template
+        :param delta_snr_from_best: the difference in the statistic in units of snr between a given template and a wider template
             for the given template to be masked as insignificant
-        :type delta_snr_wide_templ: float
+        :type delta_snr_from_best: float
         :param threshold_peak_sigma: threshold value for the peak veto
         :type threshold_peak_sigma: float
         :param save_triggers_as_attribute: whether to save the triggers with descriptions as part of the class attribute. If
@@ -2240,12 +2253,22 @@ class KeplerLightCurve(object):
         :rtype:
         """
         assert self.is_zero_padded, 'Zero padding ends must not be removed before vetting!'
-        self.stats_raw_no_veto_no_score_cor = copy.deepcopy(self.statistics_raw_cor)
+        self.stats_raw_no_veto_no_score_cor = copy.deepcopy(self.statistics_raw)
         self.veto_masks = [[np.ones(len(self.stat_masks[k][q])).astype(bool) for q in self.quarters] for k in
                            range(len(self.stat_masks))]
         if save_triggers_as_attribute:
-            self.veto_bad_trigger_inds = [[{} for _ in self.quarters] for __ in range(len(self.whitened_templates_td))]
-            self.trigger_indices = [[[] for _ in self.quarters] for __ in range(len(self.whitened_templates_td))]
+            self.veto_bit_masks = [[np.zeros(len(self.veto_masks[k][q])).astype(int) for q in self.quarters]
+                                   for k in range(len(self.veto_masks))]
+
+        # masking too large peaks
+        for k in range(len(self.tb.initial_templates_shifts)):
+            for q in self.quarters:  # over quarters
+                too_big_mask = np.abs(self.statistics_snr[k][q]) > max_abs_stat
+                self.veto_masks[k][q][too_big_mask] = False  # too_big
+                self.stat_masks[k][q][too_big_mask] = False  # too_big
+                if save_triggers_as_attribute:
+                    self.veto_bit_masks[k][q][too_big_mask] += 2 ** 5
+                    self.veto_bit_masks[k][q][too_big_mask] += 2 ** 5
 
         # we prepare here renormalized fluxes and templates to use them in the veto and not renormalize there every time:
         norms_templates = [[np.linalg.norm(self.whitened_templates_td[k][q]) for q in self.quarters]
@@ -2263,217 +2286,221 @@ class KeplerLightCurve(object):
         templs_of_min_snr = [np.argmax(np.array([self.statistics_snr[k][q] for k in range(len(self.statistics_snr))]), axis=0)
                              for q in self.quarters]
 
-        stats_peak = []
-        whitened_peak_temps_fd = []
-        whitened_peak_temps_td = []
         # this will not be important for the normal search because peaks will be filtered in the template_width veto.
         # but for the injections, it may be more important. In the injections, there is no template_width because we only use one
         # template. It is bad because the injections are not exactly as the main search, but this peak veto will make it
         # at least a bit closer
-        if self.tb.durations[-1] / self.dt_days > 3:  # if there will be some templates requiring peak veto
-            peak_template = np.zeros_like(self.whitened_templates_td[0][0])
-            peak_template[0] = 1.
-            peak_template[1] = 0.5
-            peak_template[-1] = 0.5
-            peak_template = np.fft.rfft(peak_template)
-            whitened_peak_temps_fd = [peak_template * self.wf_fds[q] for q in self.quarters]
-            whitened_peak_temps_td = [np.fft.irfft(whitened_peak_temps_fd[q]) for q in self.quarters]
-            stats_peak = [np.real(np.fft.irfft(np.conjugate(whitened_peak_temps_fd[q]) * self.whitened_fluxes_fd[q]))
-                          for q in self.quarters]
-            stats_peak = [stats_peak[q] / ut.outlier_free_std(stats_peak[q], nsig=3, n_iterations=2,
-                                                              mask=self.big_hole_masks[q]) for q in self.quarters]
-            stats_peak = [stats_peak[q][self.zero_padding_ends[q][0]:len(stats_peak[q]) - self.zero_padding_ends[q][1]]
-                          for q in self.quarters]
-            # -> CUT THE STATISTIC BECAUSE STATISTICS_SNR IS ALSO CUT
+        stats_peak, whitened_peak_temps_td, whitened_peak_temps_fd = self.prepare_peak_statistics()
 
+        self.trigger_indices = [[[] for _ in self.quarters] for __ in range(len(self.whitened_templates_td))]
         for k in range(len(self.tb.initial_templates_shifts)):
-            template = copy.deepcopy(self.tb.initial_templates_shifts[k])  # needed only for step veto
             for q in self.quarters:  # over quarters
-                stat_mask_padded = np.concatenate((np.zeros(self.zero_padding_ends[q][0]).astype(bool), self.stat_masks[k][q],
-                                                   np.zeros(self.zero_padding_ends[q][1]).astype(bool)))
-                # -> allow small holes to be in the transit
-                statistic_snr_padded = np.concatenate((np.zeros(self.zero_padding_ends[q][0]), self.statistics_snr[k][q],
-                                                       np.zeros(self.zero_padding_ends[q][1])))
+                templ_width = int(np.ceil(self.tb.durations[self.tb.templates_of_indices[k]] / self.dt_days))
+                # template = copy.deepcopy(self.tb.initial_templates_shifts[k])  # needed only for step veto
+                # extreme_position; we do not trust it because the data mey be bad, and veto will be poor there
+                self.veto_masks[k][q][:templ_width // 2] = False
+                self.veto_masks[k][q][-templ_width // 2:] = False
+                self.stat_masks[k][q][:templ_width // 2] = False
+                self.stat_masks[k][q][-templ_width // 2:] = False
+                if save_triggers_as_attribute:
+                    self.veto_bit_masks[k][q][:templ_width // 2] += 2**0
+                    self.veto_bit_masks[k][q][-templ_width // 2:] += 2**0
+
+                zpe_0 = self.zero_padding_ends[q][0]
+                trigger_indices_quarter_unpadded = (np.abs(self.statistics_snr[k][q]) >= margin_snr) & self.stat_masks[k][q]
                 if apply_only_to_neg:
-                    trigger_indices_quarter = np.where((statistic_snr_padded <= 0) & (np.abs(statistic_snr_padded) >= margin_snr
-                                                                                      ) & stat_mask_padded)[0]
-                    # -> if the index was already fixed to be bad before, it will not be used anymore.
-                else:
-                    trigger_indices_quarter = np.where((np.abs(statistic_snr_padded) >= margin_snr) & stat_mask_padded)[0]
-
-                trigger_indices_quarter_mask = np.ones(len(trigger_indices_quarter)).astype(bool)
+                    trigger_indices_quarter_unpadded = (self.statistics_snr[k][q] <= 0) & trigger_indices_quarter_unpadded
+                trigger_indices_quarter_unpadded = np.where(trigger_indices_quarter_unpadded)[0]
+                trigger_indices_quarter_padded = trigger_indices_quarter_unpadded + zpe_0
                 if save_triggers_as_attribute:
-                    self.trigger_indices[k][q] = trigger_indices_quarter
+                    self.trigger_indices[k][q] = trigger_indices_quarter_unpadded
 
-                # CHECKING FOR STEP
-                for i_ind, ind in enumerate(trigger_indices_quarter):
-                    jump_to_left = len(template) // 2 - np.nonzero(template)[0][0]
-                    jump_to_right = len(template) // 2 - np.nonzero(template[::-1])[0][0]
-                    if (ind - jump_to_left >= min_len_step_checking) and (
-                            ind + jump_to_right < len(self.fluxes[q]) - max_len_step_checking):
-                        ind_left = max(0, ind - jump_to_left - max_len_step_checking)
-                        ind_right = min(ind + jump_to_right + max_len_step_checking + 1, len(self.fluxes[q]))
-                        indices_center_exclude = np.arange(ind - jump_to_left, ind + jump_to_right + 1) - ind_left
-                        data_to_test = np.array(self.fluxes[q][ind_left:ind_right])
-                        mask_to_test = np.array(self.big_hole_masks[q][ind_left:ind_right])
-                        p_value_step = ut.veto_step(data=data_to_test, indices_center_exclude=indices_center_exclude,
-                                                    mask=mask_to_test, min_len_to_process=min_len_step_checking)
-                        if p_value_step is not None:  # it will be none if all the points are masked
-                            if p_value_step < fn_step:
-                                self.veto_masks[k][q][ind - self.zero_padding_ends[q][0]] = False  # step
-                                self.stat_masks[k][q][ind - self.zero_padding_ends[q][0]] = False  # step
-                                trigger_indices_quarter_mask[i_ind] = False
-                                if save_triggers_as_attribute:
-                                    if ind not in self.veto_bad_trigger_inds[k][q]:
-                                        self.veto_bad_trigger_inds[k][q][ind] = 'step '
-                                    else:
-                                        self.veto_bad_trigger_inds[k][q][ind] = self.veto_bad_trigger_inds[k][q][ind] + 'step '
-                    else:
-                        self.veto_masks[k][q][ind - self.zero_padding_ends[q][0]] = False  # extreme_position
-                        self.stat_masks[k][q][ind - self.zero_padding_ends[q][0]] = False  # extreme_position
-                        trigger_indices_quarter_mask[i_ind] = False
-                        if save_triggers_as_attribute:
-                            if ind not in self.veto_bad_trigger_inds[k][q]:
-                                self.veto_bad_trigger_inds[k][q][ind] = 'extreme_position '
-                            else:
-                                self.veto_bad_trigger_inds[k][q][ind] = self.veto_bad_trigger_inds[k][q][ind] + 'extreme_position '
-
-                trigger_indices_quarter = trigger_indices_quarter[trigger_indices_quarter_mask]
-                # If one test is false, we will not to run the next one.
-                trigger_indices_quarter_mask = np.ones(len(trigger_indices_quarter)).astype(bool)
-
-                # VETO OF NARROW TEMPLATES TRIGGERING ON WIDER TRANSITS
-                # everywhere_good_masks = [np.prod([(self.veto_masks[k][q].astype(Dtype_r))
-                for i_ind, ind in enumerate(trigger_indices_quarter):
-                    is_good = True
-                    snr_k = statistic_snr_padded[ind]  # self.statistics_snr[k][q][ind]
-                    if snr_k > 0:
-                        temp_max = templs_of_max_snr[q][ind - self.zero_padding_ends[q][0]]
-                        snr_max = self.statistics_snr[temp_max][q][ind - self.zero_padding_ends[q][0]]
-                        if ((self.tb.durations[self.tb.templates_of_indices[k]] < self.tb.durations[self.tb.templates_of_indices[temp_max]])
-                                and (snr_k < snr_max - delta_snr_wide_templ)):
-                            is_good = False
-                    else:
-                        temp_min = templs_of_min_snr[q][ind - self.zero_padding_ends[q][0]]
-                        snr_min = self.statistics_snr[temp_min][q][ind - self.zero_padding_ends[q][0]]
-                        if ((self.tb.durations[self.tb.templates_of_indices[k]] < self.tb.durations[self.tb.templates_of_indices[temp_min]])
-                                and (snr_k > snr_min + delta_snr_wide_templ)):
-                            is_good = False
-                    if not is_good:
-                        # indices are of padded, and masks are unpadded to save memory:
-                        self.veto_masks[k][q][ind - self.zero_padding_ends[q][0]] = False  # template_width
-                        self.stat_masks[k][q][ind - self.zero_padding_ends[q][0]] = False  # template_width
-                        trigger_indices_quarter_mask[i_ind] = False
-                        if save_triggers_as_attribute:
-                            if ind not in self.veto_bad_trigger_inds[k][q]:
-                                self.veto_bad_trigger_inds[k][q][ind] = 'template_width '
-                            else:
-                                self.veto_bad_trigger_inds[k][q][ind] = self.veto_bad_trigger_inds[k][q][ind] + 'template_width '
-                trigger_indices_quarter = trigger_indices_quarter[trigger_indices_quarter_mask]
-
-                # VETO OF INCONSISTENT PARTS OF TEMPLATE FITTING (SPLITTING BY SNR IN TIME DOMAIN)
-                isgood_parts = ut.veto_parts(data_wh_fd=fluxes_wh_fd_rewh[q],
-                                             template_wh_full=whitened_templates_td_renorm[k][q],
-                                             indices_padded=trigger_indices_quarter,
-                                             mask_padded=stat_mask_padded, tlen=None, hlen_if_short=5, fn=fn,
-                                             n_parts=n_parts_veto_snr,
-                                             nperseg_psd=self.nperseg_psd, splitting='snr', lobe_hlen=5)
-
-                self.veto_masks[k][q][trigger_indices_quarter[~isgood_parts] - self.zero_padding_ends[q][0]] = False
-                self.stat_masks[k][q][trigger_indices_quarter[~isgood_parts] - self.zero_padding_ends[q][0]] = False
-                # -> inconsistent_parts_time
-                if save_triggers_as_attribute:
-                    for j, ind_j in enumerate(trigger_indices_quarter):
-                        if not isgood_parts[j]:
-                            if ind_j not in self.veto_bad_trigger_inds[k][q]:
-                                self.veto_bad_trigger_inds[k][q][ind_j] = 'inconsistent_parts_time '
-                            else:
-                                self.veto_bad_trigger_inds[k][q][ind_j] = (self.veto_bad_trigger_inds[k][q][j]
-                                                                           + 'inconsistent_parts_time ')
-                trigger_indices_quarter = trigger_indices_quarter[isgood_parts]
-
-                # VETO OF INCONSISTENT PARTS OF TEMPLATE FITTING (SPLITTING IN FOURIER)
-                isgood_parts = ut.veto_parts_fourier(data_wh_fd=fluxes_wh_fd_rewh[q],
-                                                     template_wh_fd=whitened_templates_fd_renorm[k][q],
-                                                     indices_padded=trigger_indices_quarter,
-                                                     mask_padded=stat_mask_padded, n_parts=n_parts_veto_fourier,
-                                                     fn=fn, wind_len_overlap=wind_len_overlap_fourier)
-                self.veto_masks[k][q][trigger_indices_quarter[~isgood_parts] - self.zero_padding_ends[q][0]] = False
-                self.stat_masks[k][q][trigger_indices_quarter[~isgood_parts] - self.zero_padding_ends[q][0]] = False
-                # -> inconsistent_parts_fourier
-                if save_triggers_as_attribute:
-                    for j, ind_j in enumerate(trigger_indices_quarter):
-                        if not isgood_parts[j]:
-                            if ind_j not in self.veto_bad_trigger_inds[k][q]:
-                                self.veto_bad_trigger_inds[k][q][ind_j] = 'inconsistent_parts_fourier '
-                            else:
-                                self.veto_bad_trigger_inds[k][q][ind_j] = (self.veto_bad_trigger_inds[k][q][j]
-                                                                           + 'inconsistent_parts_fourier ')
-                trigger_indices_quarter = trigger_indices_quarter[isgood_parts]
-
-                # # CHECKING FOR PEAK (can only work for the full bank)
+                # # CHECKING FOR PEAK
                 # warning: here, work with unpadded!
-                trig_ind_quart_unpad = trigger_indices_quarter - self.zero_padding_ends[q][0]
+                trigger_indices_quarter_unpadded = trigger_indices_quarter_padded - zpe_0
                 dur_bins = self.tb.durations[self.tb.templates_of_indices[k]] / self.dt_days
                 if dur_bins > 5:
                     h_dur_check = int(self.tb.durations[self.tb.templates_of_indices[k]] / self.dt_days / 2)
                     decorr_coef = (np.fft.irfft(self.whitened_templates_fd[k][q] * np.conjugate(whitened_peak_temps_fd[q]))[0] /
                                    ((whitened_peak_temps_td[q] @ whitened_peak_temps_td[q])
-                                   * (self.whitened_templates_td[k][q] @ self.whitened_templates_td[k][q]))**0.5)  # not rolled, approx
+                                    * (self.whitened_templates_td[k][q] @ self.whitened_templates_td[k][q])) ** 0.5)  # not rolled, approx
                     max_peak_stats = np.array([np.max(stats_peak[q][max(0, i - h_dur_check): i + h_dur_check])
                                                for i in range(len(stats_peak[q]))])
                     min_peak_stats = np.array([np.min(stats_peak[q][max(0, i - h_dur_check): i + h_dur_check])
                                                for i in range(len(stats_peak[q]))])
-                    signs = np.sign(self.statistics_snr[k][q][trig_ind_quart_unpad])
+                    signs = np.sign(self.statistics_snr[k][q][trigger_indices_quarter_unpadded])
                     min_or_max = np.array([max_peak_stats[ind_j] if signs[j] > 0 else min_peak_stats[ind_j]
-                                           for j, ind_j in enumerate(trig_ind_quart_unpad)])
-                    is_goods = (signs * (self.statistics_snr[k][q][trig_ind_quart_unpad] * decorr_coef
-                                - min_or_max) / (1 - decorr_coef**2)**0.5 < threshold_peak_sigma)
-                    self.veto_masks[k][q][trig_ind_quart_unpad[~is_goods]] = False  # peak
-                    self.stat_masks[k][q][trig_ind_quart_unpad[~is_goods]] = False  # peak
+                                           for j, ind_j in enumerate(trigger_indices_quarter_unpadded)])
+                    is_goods = (signs * (self.statistics_snr[k][q][trigger_indices_quarter_unpadded] * decorr_coef
+                                         - min_or_max) / (1 - decorr_coef ** 2) ** 0.5 < threshold_peak_sigma)
+                    self.veto_masks[k][q][trigger_indices_quarter_unpadded[~is_goods]] = False  # peak
+                    self.stat_masks[k][q][trigger_indices_quarter_unpadded[~is_goods]] = False  # peak
                     if save_triggers_as_attribute:
-                        for j, ind_j in enumerate(trigger_indices_quarter):
-                            if not is_goods[j]:
-                                if ind_j not in self.veto_bad_trigger_inds[k][q]:
-                                    self.veto_bad_trigger_inds[k][q][ind_j] = 'peak_test '
-                                else:
-                                    self.veto_bad_trigger_inds[k][q][ind_j] = (self.veto_bad_trigger_inds[k][q][j]
-                                                                               + 'peak_test ')
-                    # trigger_indices_quarter = trigger_indices_quarter[is_goods]
+                        self.veto_bit_masks[k][q][trigger_indices_quarter_unpadded[~is_goods]] += 2**1
 
-        # Setting statistics in the masked places to zero:
+                    trigger_indices_quarter_padded = trigger_indices_quarter_padded[is_goods]
+
+                stat_mask_padded = np.concatenate((np.zeros(self.zero_padding_ends[q][0]).astype(bool), self.stat_masks[k][q],
+                                                   np.zeros(self.zero_padding_ends[q][1]).astype(bool)))  # allow small holes
+
+                # VETO OF INCONSISTENT PARTS OF TEMPLATE FITTING (SPLITTING BY SNR IN TIME DOMAIN)
+                isgood_parts = ut.veto_parts(data_wh_fd=fluxes_wh_fd_rewh[q],
+                                             template_wh_full=whitened_templates_td_renorm[k][q],
+                                             indices_padded=trigger_indices_quarter_padded,
+                                             mask_padded=stat_mask_padded, tlen=None, hlen_if_short=5, fn=fn,
+                                             n_parts=n_parts_veto_snr,
+                                             nperseg_psd=self.nperseg_psd, splitting='snr', lobe_hlen=5)
+                self.veto_masks[k][q][trigger_indices_quarter_padded[~isgood_parts] - zpe_0] = False
+                self.stat_masks[k][q][trigger_indices_quarter_padded[~isgood_parts] - zpe_0] = False
+                if save_triggers_as_attribute:
+                    self.veto_bit_masks[k][q][trigger_indices_quarter_padded[~isgood_parts] - zpe_0] += 2 ** 2
+                trigger_indices_quarter_padded = trigger_indices_quarter_padded[isgood_parts]
+
+                # VETO OF INCONSISTENT PARTS OF TEMPLATE FITTING (SPLITTING IN FOURIER)
+                isgood_parts = ut.veto_parts_fourier(data_wh_fd=fluxes_wh_fd_rewh[q],
+                                                     template_wh_fd=whitened_templates_fd_renorm[k][q],
+                                                     indices_padded=trigger_indices_quarter_padded,
+                                                     mask_padded=stat_mask_padded, n_parts=n_parts_veto_fourier,
+                                                     fn=fn, wind_len_overlap=wind_len_overlap_fourier)
+                self.veto_masks[k][q][trigger_indices_quarter_padded[~isgood_parts] - zpe_0] = False
+                self.stat_masks[k][q][trigger_indices_quarter_padded[~isgood_parts] - zpe_0] = False
+                if save_triggers_as_attribute:
+                    self.veto_bit_masks[k][q][trigger_indices_quarter_padded[~isgood_parts] - zpe_0] += 2 ** 3
+                trigger_indices_quarter_padded = trigger_indices_quarter_padded[isgood_parts]
+
+                # VETO OF TEMPLATES TOO FAR FROM THE BEST
+                # it used to me vero of marrow templates triggering on wide transits,
+                # but in the injection-recovery, we only run the search for the best template,
+                # and therefore we need to make sure that we select the parameters adequately, so that they would contribute
+                # to this template in the real search. By making this veto both for narrow and wide, we make sure that
+                # all the templates some sigma away from the best will be killed. The wide ones would be killed by the subsequent
+                # veto anyway, so it is more of a formal procedure.
+                trigger_indices_quarter_unpadded = trigger_indices_quarter_padded - zpe_0
+                for i_ind, ind in enumerate(trigger_indices_quarter_unpadded):
+                    is_good = True
+                    snr_k = self.statistics_snr[k][q][ind]
+                    if snr_k > 0:
+                        temp_max = templs_of_max_snr[q][ind]
+                        snr_max = self.statistics_snr[temp_max][q][ind]
+                        if snr_k < snr_max - delta_snr_from_best:
+                            is_good = False
+                    else:
+                        temp_min = templs_of_min_snr[q][ind]
+                        snr_min = self.statistics_snr[temp_min][q][ind]
+                        if snr_k > snr_min + delta_snr_from_best:
+                            is_good = False
+                    if not is_good:
+                        # indices and masks are both unpadded:
+                        self.veto_masks[k][q][ind] = False  # template_width
+                        self.stat_masks[k][q][ind] = False  # template_width
+                        if save_triggers_as_attribute:
+                            self.veto_bit_masks[k][q][ind] += 2 ** 4
+
+                        # Setting statistics in the masked places to zero:
         for k in range(len(self.statistics_snr)):
             for q in self.quarters:
                 self.statistics_snr[k][q][~self.stat_masks[k][q]] = 0.
-                self.statistics_raw_cor[k][q][~self.stat_masks[k][q]] = 0.
+                self.statistics_raw[k][q][~self.stat_masks[k][q]] = 0.
+                self.stat_moving_vars[k][q][~self.stat_masks[k][q]] = 0.
 
-    def correct_score(self):
+                # piece as of 15 Dec. The vetted triggers could have changed the true variance, now we want the cleaned stat to have
+                # unit variance. Also, positive can have bad distr which I do not want to impact the negative
+                # So we just repeat what was done before for moving variance correctness, but now after we updatet masks with veto
+                movvar_meas = np.array(self.stat_moving_vars[k][q])
+                statmask = np.array(self.stat_masks[k][q])
+                stat_snr = np.array(self.statistics_snr[k][q])
+                stat = np.array(self.statistics_raw[k][q])
+                # # # making positive values unit variance # # # (as of Dec 15)
+                indices_sign = statmask & (stat > 0)
+                var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
+                movvar_meas[indices_sign] *= var_snr_indices
+                # # # making negative values unit variance # # #
+                indices_sign = statmask & (stat < 0)
+                var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
+                movvar_meas[indices_sign] *= var_snr_indices
+                # # # then we use this new moving variance for all the rest
+                stat_snr[statmask] = stat[statmask] / (movvar_meas[statmask]) ** 0.5  # now should be N(0,1) for sure
+                self.statistics_snr[k][q] = stat_snr
+                self.stat_moving_vars[k][q] = movvar_meas
+
+        if not save_triggers_as_attribute:
+            self.veto_bit_masks = None
+
+    def prepare_peak_statistics(self):
+        peak_template = np.zeros(self.support)  # np.zeros_like(self.whitened_templates_td[0][0])
+        peak_template[0] = 1.
+        peak_template[1] = 0.5
+        peak_template[-1] = 0.5
+        peak_template = np.fft.rfft(peak_template)
+        whitened_peak_temps_fd = [peak_template * self.wf_fds[q] for q in self.quarters]
+        whitened_peak_temps_td = [np.fft.irfft(whitened_peak_temps_fd[q]) for q in self.quarters]
+        stats_peak = [np.real(np.fft.irfft(np.conjugate(whitened_peak_temps_fd[q]) * self.whitened_fluxes_fd[q]))
+                      for q in self.quarters]
+        stats_peak = [stats_peak[q] / ut.outlier_free_std(stats_peak[q], nsig=3, n_iterations=2,
+                                                          mask=self.big_hole_masks[q]) for q in self.quarters]
+        stats_peak = [stats_peak[q][self.zero_padding_ends[q][0]:len(stats_peak[q]) - self.zero_padding_ends[q][1]]
+                      for q in self.quarters]
+        # -> CUT THE STATISTIC BECAUSE STATISTICS_SNR IS ALSO CUT
+        return stats_peak, whitened_peak_temps_td, whitened_peak_temps_fd
+
+    def calculate_gaussianized_ses(self):
         # TODO: think how zeros in the masked region influence the period-summed distribution
-        # all_stat = np.array([])
-        # for k in range(len(self.statistics_snr)):
-        #     for q in range(len(self.statistics_snr[k])):
-        #         all_stat = np.concatenate((all_stat, self.statistics_snr[k][q][self.stat_masks[k][q]]))
-        # #  all_stat_c, transform = ut.score_correction(all_stat, return_function=True, negative_values=True)
-        # all_stat_c, transform = ut.score_correction(all_stat, return_function=True, two_sided_distr=True)
-        # # -> we do not use one-sided distr or do????????
-        # for k in range(len(self.statistics_snr)):
-        #     for q in range(len(self.statistics_snr[k])):
-        #         self.statistics_snr[k][q][self.stat_masks[k][q]] = transform(
-        #             self.statistics_snr[k][q][self.stat_masks[k][q]])
-        #         self.statistics_raw_cor[k][q][self.stat_masks[k][q]] = (self.statistics_snr[k][q][self.stat_masks[k][q]] /
-        #                                                                 self.stat_moving_vars[k][q][self.stat_masks[k][q]] ** 0.5
-        #                                                                 * np.nanmean(self.stat_moving_vars[k][q][self.stat_masks[k][q]]))
-
         # Now (27/07/2023), do it per template (which is especially important for the injections where we only have one template):
-        for k in range(len(self.statistics_snr)):
-            all_stat = np.concatenate([self.statistics_snr[k][q][self.stat_masks[k][q]] for q in range(len(self.statistics_snr[k]))])
+        self.statistics_gaussianized = copy.deepcopy(self.statistics_raw)
+        self.statistics_snr_gaussianized = copy.deepcopy(self.statistics_snr)
+        for k in range(len(self.statistics_snr_gaussianized)):
+            all_stat = np.concatenate([self.statistics_snr_gaussianized[k][q][self.stat_masks[k][q]] for q in range(
+                len(self.statistics_snr_gaussianized[k]))])
             all_stat_c, transform = ut.score_correction(all_stat, return_function=True, two_sided_distr=True)
-            for q in range(len(self.statistics_snr[k])):
-                self.statistics_snr[k][q][self.stat_masks[k][q]] = transform(
-                    self.statistics_snr[k][q][self.stat_masks[k][q]])
-                self.statistics_raw_cor[k][q][self.stat_masks[k][q]] = (self.statistics_snr[k][q][self.stat_masks[k][q]] /
-                                                                        self.stat_moving_vars[k][q][self.stat_masks[k][q]] ** 0.5
-                                                                        * np.nanmean(self.stat_moving_vars[k][q][self.stat_masks[k][q]]))
+            for q in range(len(self.statistics_snr_gaussianized[k])):
+                self.statistics_snr_gaussianized[k][q][self.stat_masks[k][q]] = transform(
+                    self.statistics_snr_gaussianized[k][q][self.stat_masks[k][q]])
+                self.statistics_gaussianized[k][q][self.stat_masks[k][q]] = (self.statistics_snr_gaussianized[k][q][self.stat_masks[k][q]] /
+                                                                             self.stat_moving_vars[k][q][self.stat_masks[k][q]] ** 0.5
+                                                                             * np.nanmean(self.stat_moving_vars[k][q][
+                                                                                              self.stat_masks[k][q]]))
+
+    def calculate_ses_distr_corrections(self):
+        # attention: the too big scores were removed before with veto
+        self.stat_non_gauss_scales_coefs = [[[] for __ in range(len(self.statistics_snr))],  # one is for negative,
+                                            [[] for __ in range(len(self.statistics_snr))]]  # the other one is for positive
+        self.log_non_gaussian_corrections = [[np.zeros_like(self.statistics_snr[k][q])
+                                              for q in self.quarters] for k in range(len(self.statistics_snr))]
+        for k in range(len(self.statistics_snr)):
+            stats_full = [self.statistics_snr[k][q][self.stat_masks[k][q]] for q in self.quarters]
+            # statistics_raw are corrected twice per variance to account for the template part,
+            # they are not expected to distribute well
+            stats_full = [stats_full[q] / np.std(stats_full[q]) for q in self.quarters]
+            stats_full = np.concatenate(stats_full)
+            stats_full_0 = np.array(stats_full)
+
+            # for negative (it will be separate from the positive because they have different distributions
+            stats_full = np.abs(np.array(stats_full[stats_full < 0]))
+            best_scale, best_coef = ut.fit_two_gaussian_mix(stats_full)
+            self.stat_non_gauss_scales_coefs[0][k] = [best_scale, best_coef]
+            for q in self.quarters:
+                indices_mask = self.statistics_snr[k][q] < 0.
+                self.log_non_gaussian_corrections[k][q][indices_mask] = ut.log_non_gaussian_correction(
+                                        stat=np.abs(self.statistics_snr[k][q][indices_mask]), ampl=best_coef, scale=best_scale)
+                # -> the minus sign is because the correction is mostly negative to punish too high scores. But since the
+                # scores are multiplied by -1 because they are negative themselves, the punishing
+                # additive correction should be positive
+                # NOOOOOOOO, IT IS JUST PROBABILITY, IT SHOULD NOT HAVE THESE SIGNS
+                self.log_non_gaussian_corrections[k][q][self.log_non_gaussian_corrections[k][q] > 0] = 0
+
+                # -> if the correction is trying to increase the score, we make it zero because we do not mant to increase the scores
+                # this can happen for small scores where the slopw of the gaussian sum is smaller than the slope of the base gaussian
+                # this thing may affect the overall variance of the scores!
+            # for positive
+            stats_full = np.array(stats_full_0)
+            stats_full = np.abs(np.array(stats_full[stats_full > 0]))
+            best_scale, best_coef = ut.fit_two_gaussian_mix(stats_full)
+            self.stat_non_gauss_scales_coefs[1][k] = [best_scale, best_coef]
+            for q in self.quarters:
+                indices_mask = self.statistics_snr[k][q] > 0.
+                self.log_non_gaussian_corrections[k][q][indices_mask] = ut.log_non_gaussian_correction(
+                    stat=self.statistics_snr[k][q][indices_mask], ampl=best_coef, scale=best_scale)
+                self.log_non_gaussian_corrections[k][q][self.log_non_gaussian_corrections[k][q] > 0] = 0
 
     def connect_quarters(self):
         """
@@ -2489,25 +2516,31 @@ class KeplerLightCurve(object):
         self.stat_masks_full : for all the templates and the shifts
         self.stat_vars_full : for all the templates and the shifts
         """
-        self.time_full, self.trend_orig_flux_full = af.connect_quarters_fun(self.times, self.trends_orig_fluxes,
-                                                                            zero_padding_ends=None,
-                                                                            is_data_cut=~self.is_zero_padded,
-                                                                            is_time_cut=~self.is_zero_padded,
-                                                                            dt=self.dt_days, fill_gaps_by_nan=False)
-        self.big_hole_masks_full = (af.connect_quarters_fun(self.times, self.big_hole_masks,
-                                                            zero_padding_ends=None,
-                                                            is_data_cut=~self.is_zero_padded,
-                                                            is_time_cut=~self.is_zero_padded,
-                                                            dt=self.dt_days, fill_gaps_by_nan=False)[1]).astype(bool)
+        if self.is_zero_padded:
+            self.cut_zero_padding_ends()
+        # self.time_full, self.trend_orig_flux_full = af.connect_quarters_fun(self.times, self.trends_orig_fluxes,
+        #                                                                     zero_padding_ends=None,
+        #                                                                     is_data_cut=~self.is_zero_padded,
+        #                                                                     is_time_cut=~self.is_zero_padded,
+        #                                                                     dt=self.dt_days, fill_gaps_by_nan=False)
+        self.time_full, self.big_hole_masks_full = af.connect_quarters_fun(self.times, self.big_hole_masks,
+                                                                           zero_padding_ends=None,
+                                                                           is_data_cut=~self.is_zero_padded,
+                                                                           is_time_cut=~self.is_zero_padded,
+                                                                           dt=self.dt_days, fill_gaps_by_nan=False)
 
-        self.statistics_full = np.zeros((len(self.statistics_raw_cor), len(self.time_full)), dtype=Dtype_r)
-        self.stat_vars_full = np.zeros((len(self.statistics_raw_cor), len(self.time_full)), dtype=Dtype_r)
-        self.stat_masks_full = np.zeros((len(self.statistics_raw_cor), len(self.time_full)), dtype=bool)
-        vars_quarters = [[np.array(np.ones(len(self.statistics_raw_cor[k][q])) * self.stat_vars[k][q], dtype=Dtype_r)
-                          for q in self.quarters] for k in range(len(self.statistics_raw_cor))]
+        self.big_hole_masks_full = self.big_hole_masks_full.astype(bool)
 
-        for k in range(len(self.statistics_raw_cor)):
-            self.statistics_full[k] = af.connect_quarters_fun(self.times, self.statistics_raw_cor[k],
+        self.statistics_full = np.zeros((len(self.statistics_raw), len(self.time_full)), dtype=Dtype_r)
+        self.stat_vars_full = np.zeros((len(self.statistics_raw), len(self.time_full)), dtype=Dtype_r)
+        self.stat_masks_full = np.zeros((len(self.statistics_raw), len(self.time_full)), dtype=bool)
+        self.corrections_full = np.zeros((len(self.statistics_raw), len(self.time_full)), dtype=Dtype_r)
+        self.statistics_gaussianized_full = np.zeros((len(self.statistics_raw), len(self.time_full)), dtype=Dtype_r)
+        # vars_quarters = [[np.array(np.ones(len(self.statistics_raw[k][q])) * self.stat_tot_vars[k][q], dtype=Dtype_r)
+        #                   for q in self.quarters] for k in range(len(self.statistics_raw))]
+
+        for k in range(len(self.statistics_raw)):
+            self.statistics_full[k] = af.connect_quarters_fun(self.times, self.statistics_raw[k],
                                                               zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
                                                               is_time_cut=~self.is_zero_padded, dt=self.dt_days,
                                                               fill_gaps_by_nan=False)[1]
@@ -2515,10 +2548,18 @@ class KeplerLightCurve(object):
                                                                zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
                                                                is_time_cut=~self.is_zero_padded, dt=self.dt_days,
                                                                fill_gaps_by_nan=False)[1]).astype(bool)
-            self.stat_vars_full[k] = af.connect_quarters_fun(self.times, vars_quarters[k],
+            self.stat_vars_full[k] = af.connect_quarters_fun(self.times, self.stat_moving_vars[k],
                                                              zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
                                                              is_time_cut=~self.is_zero_padded, dt=self.dt_days,
                                                              fill_gaps_by_nan=False)[1]
+            self.corrections_full[k] = af.connect_quarters_fun(self.times, self.log_non_gaussian_corrections[k],
+                                                               zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
+                                                               is_time_cut=~self.is_zero_padded, dt=self.dt_days,
+                                                               fill_gaps_by_nan=False)[1]
+            self.statistics_gaussianized_full[k] = af.connect_quarters_fun(self.times, self.statistics_gaussianized[k],
+                                                                           zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
+                                                                           is_time_cut=~self.is_zero_padded, dt=self.dt_days,
+                                                                           fill_gaps_by_nan=False)[1]
 
     def scramble_full_stats(self, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling):
         # if self.inds_pieces_scramble is not None:
@@ -2541,10 +2582,10 @@ class KeplerLightCurve(object):
         # how many spaces between the pieces and plus one in the end, although it effectively changes the length ->
         len_holes = ut.gen_uniform_piece_lengths(tot_len=self.tot_hole_len_scramble, n_pieces=len(inds_pieces_scramble) - 1)
         # "connect_quarters" is now destroyed. do it again to restore the original positioning
-        self.trend_orig_flux_full, self.inds_pieces_in_scrambled = ut.rearrange_pieces(self.trend_orig_flux_full,
-                                                                                       inds_pieces=inds_pieces_scramble,
-                                                                                       hole_lens=len_holes, fill_hole_with=0.,
-                                                                                       return_inds_target_res=True)
+        self.big_hole_masks_full, self.inds_pieces_in_scrambled = ut.rearrange_pieces(self.big_hole_masks_full,
+                                                                                      inds_pieces=inds_pieces_scramble,
+                                                                                      hole_lens=len_holes, fill_hole_with=0.,
+                                                                                      return_inds_target_res=True)
         for k in range(len(self.statistics_full)):
             self.statistics_full[k] = ut.rearrange_pieces(self.statistics_full[k], inds_pieces=inds_pieces_scramble,
                                                           hole_lens=len_holes, fill_hole_with=0.)
@@ -2552,10 +2593,15 @@ class KeplerLightCurve(object):
                                                           hole_lens=len_holes, fill_hole_with=False)
             self.stat_vars_full[k] = ut.rearrange_pieces(self.stat_vars_full[k], inds_pieces=inds_pieces_scramble,
                                                          hole_lens=len_holes, fill_hole_with=0.)
+            self.corrections_full[k] = ut.rearrange_pieces(self.corrections_full[k], inds_pieces=inds_pieces_scramble,
+                                                           hole_lens=len_holes, fill_hole_with=0.)
+            self.statistics_gaussianized_full[k] = ut.rearrange_pieces(self.statistics_gaussianized_full[k],
+                                                                       inds_pieces=inds_pieces_scramble, hole_lens=len_holes,
+                                                                       fill_hole_with=0.)
 
     def undo_scramble_full_stats(self):
-        self.trend_orig_flux_full = ut.rearrange_pieces(self.trend_orig_flux_full, inds_pieces=self.inds_pieces_in_scrambled,
-                                                        hole_lens=None, fill_hole_with=0., inds_target=self.inds_pieces_scramble)
+        self.big_hole_masks_full = ut.rearrange_pieces(self.big_hole_masks_full, inds_pieces=self.inds_pieces_in_scrambled,
+                                                       hole_lens=None, fill_hole_with=0., inds_target=self.inds_pieces_scramble)
         for k in range(len(self.statistics_full)):
             self.statistics_full[k] = ut.rearrange_pieces(self.statistics_full[k], inds_pieces=self.inds_pieces_in_scrambled,
                                                           hole_lens=None, fill_hole_with=0., inds_target=self.inds_pieces_scramble)
@@ -2563,6 +2609,11 @@ class KeplerLightCurve(object):
                                                           hole_lens=None, fill_hole_with=False, inds_target=self.inds_pieces_scramble)
             self.stat_vars_full[k] = ut.rearrange_pieces(self.stat_vars_full[k], inds_pieces=self.inds_pieces_in_scrambled,
                                                          hole_lens=None, fill_hole_with=0., inds_target=self.inds_pieces_scramble)
+            self.corrections_full[k] = ut.rearrange_pieces(self.corrections_full[k], inds_pieces=self.inds_pieces_in_scrambled,
+                                                           hole_lens=None, fill_hole_with=0., inds_target=self.inds_pieces_scramble)
+            self.statistics_gaussianized_full[k] = ut.rearrange_pieces(self.statistics_gaussianized_full[k],
+                                                                       inds_pieces=self.inds_pieces_in_scrambled, hole_lens=None,
+                                                                       fill_hole_with=0., inds_target=self.inds_pieces_scramble)
         self.inds_pieces_scramble = None
         self.inds_pieces_in_scrambled = None
         self.tot_hole_len_scramble = None
@@ -2573,6 +2624,9 @@ class KeplerLightCurve(object):
         manner to create continuity of sliding of this template over the data. The resulting array will have the length
         equal to the sum of the length of all the arrays for different shifts.
         """
+        if self.statistics_full is None:
+            self.connect_quarters()
+
         self.interleaved_numbers = np.array([i for i in range(len(self.indices_of_templates))
                                              if ((self.indices_of_templates[i][1] - self.indices_of_templates[i][0]) >= 2)])
         self.not_interleaved_numbers = np.array([i for i in range(len(self.indices_of_templates))
@@ -2589,6 +2643,8 @@ class KeplerLightCurve(object):
             self.statistics_interleaved = []
             self.stat_masks_interleaved = []
             self.stat_vars_interleaved = []
+            self.corrections_interleaved = []
+            self.statistics_gaussianized_interleaved = []
             for t in self.interleaved_numbers:
                 self.statistics_interleaved.append(
                     (self.statistics_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
@@ -2596,93 +2652,116 @@ class KeplerLightCurve(object):
                     (self.stat_masks_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
                 self.stat_vars_interleaved.append(
                     (self.stat_vars_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
+                self.corrections_interleaved.append(
+                    (self.corrections_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
+                self.statistics_gaussianized_interleaved.append(
+                    (self.statistics_gaussianized_full[self.indices_of_templates[t][0]:self.indices_of_templates[t][1]]).T.flatten())
             self.statistics_interleaved = np.array(self.statistics_interleaved, dtype=Dtype_r)
             self.stat_masks_interleaved = np.array(self.stat_masks_interleaved, dtype=bool)
             self.stat_vars_interleaved = np.array(self.stat_vars_interleaved, dtype=Dtype_r)
-            self.trend_orig_flux_interleaved = np.array(np.vstack((
-                self.trend_orig_flux_full, self.trend_orig_flux_full,
-                self.trend_orig_flux_full)).T.flatten(), dtype=Dtype_r)
-            self.time_interleaved = np.arange(len(self.trend_orig_flux_interleaved)) * self.dt_days / self.n_shifts + self.time_full[0]
+            self.corrections_interleaved = np.array(self.corrections_interleaved, dtype=Dtype_r)
+            self.statistics_gaussianized_interleaved = np.array(self.statistics_interleaved, dtype=Dtype_r)
+            # self.trend_orig_flux_interleaved = np.array(np.vstack((
+            #     self.trend_orig_flux_full, self.trend_orig_flux_full,
+            #     self.trend_orig_flux_full)).T.flatten(), dtype=Dtype_r)
+            self.time_interleaved = np.arange(len(self.statistics_interleaved[0])) * self.dt_days / self.n_shifts + self.time_full[0]
 
         # for not interleaved:
         if len(self.not_interleaved_numbers) > 0:
             self.statistics_not_interleaved = []
             self.stat_masks_not_interleaved = []
             self.stat_vars_not_interleaved = []
+            self.corrections_not_interleaved = []
+            self.statistics_gaussianized_not_interleaved = []
             indices_for_not_interleaved = [self.indices_of_templates[i][0] for i in self.not_interleaved_numbers]
+            self.corrections_not_interleaved = np.array(self.corrections_full[indices_for_not_interleaved],
+                                                        dtype=Dtype_r)
             self.statistics_not_interleaved = np.array(self.statistics_full[indices_for_not_interleaved], dtype=Dtype_r)
             self.stat_masks_not_interleaved = np.array(self.stat_masks_full[indices_for_not_interleaved], dtype=bool)
             self.stat_vars_not_interleaved = np.array(self.stat_vars_full[indices_for_not_interleaved], dtype=Dtype_r)
-            self.trend_orig_flux_not_interleaved = np.array(self.trend_orig_flux_full, dtype=Dtype_r)
-            self.time_not_interleaved = np.array(np.arange(len(self.trend_orig_flux_not_interleaved)) * self.dt_days
+            # self.trend_orig_flux_not_interleaved = np.array(self.trend_orig_flux_full, dtype=Dtype_r)
+            self.statistics_gaussianized_not_interleaved = np.array(self.statistics_gaussianized_full[indices_for_not_interleaved],
+                                                                    dtype=Dtype_r)
+            self.time_not_interleaved = np.array(np.arange(len(self.statistics_not_interleaved[0])) * self.dt_days
                                                  + self.time_full[0], dtype=Dtype_r)
+        self.is_shifts_interleaved = True
         if delete_fulls:
             del self.time_full
+            self.time_full = None
             del self.statistics_full
+            self.statistics_full = None
             del self.stat_vars_full
+            self.stat_vars_full = None
             del self.stat_masks_full
-            del self.trend_orig_flux_full
+            self.stat_masks_full = None
+            del self.corrections_full
+            self.corrections_full = None
+            del self.statistics_gaussianized_full
+            self.statistics_gaussianized_full = None
 
     def delete_irrelevant(self):
         if hasattr(self, 'clean_fluxes'):
             del self.clean_fluxes
+            self.clean_fluxes = None
         if hasattr(self, 'clean_masks'):
             del self.clean_masks
+            self.clean_masks = None
         if hasattr(self, 'whitened_clean_fluxes_fd'):
             del self.whitened_clean_fluxes_fd
+            self.whitened_clean_fluxes_fd = None
         if hasattr(self, 'whitened_clean_fluxes_td'):
             del self.whitened_clean_fluxes_td
+            self.whitened_clean_fluxes_td = None
         if hasattr(self, 'whitened_templates_fd'):
             del self.whitened_templates_fd
+            self.whitened_templates_fd = None
         if hasattr(self, 'whitened_templates_td'):
             del self.whitened_templates_td
-        if hasattr(self, 'initial_templates'):
-            del self.initial_templates
-        # del self.statistics_abs #not used anymore
+            self.whitened_templates_td = None
         if hasattr(self, 'stat_moving_vars'):
             del self.stat_moving_vars
+            self.stat_moving_vars = None
         if hasattr(self, 'notch_soss'):
             del self.notch_soss
+            self.notch_soss = None
         if hasattr(self, 'wf_td'):
             del self.wf_tds
+            self.wf_tds = None
         if hasattr(self, 'wf_fd'):
             del self.wf_fds
-        # del self.statistics_full #will be deleted later
-        # del self.time_full #will be deleted later
+            self.wf_fds = None
         if hasattr(self, 'psd_masks'):
             del self.psd_masks
-        # del self.zero_padding_ends
+            self.psd_masks = None
         if hasattr(self, 'notch_mask'):
             del self.notch_mask
-        if hasattr(self, 'templates'):
-            del self.templates
-
+            self.notch_mask = None
+        if hasattr(self, 'tb'):
+            del self.tb
+            self.tb = None
         if hasattr(self, 'npsds0'):
             del self.npsds0
+            self.npsds0 = None
         if hasattr(self, 'npsds'):
             del self.npsds
-
+            self.npsds = None
         if hasattr(self, 'whitened_clean_fluxes_fd'):
             del self.whitened_clean_fluxes_fd
-
+            self.whitened_clean_fluxes_fd = None
         if hasattr(self, 'triggers'):
             del self.triggers
+            self.triggers = None
         if hasattr(self, 'stats_raw_no_veto_no_score_cor'):
             del self.stats_raw_no_veto_no_score_cor
-        if hasattr(self, 'veto_bad_trigger_inds'):
-            del self.veto_bad_trigger_inds
+            self.stats_raw_no_veto_no_score_cor = None
+        if hasattr(self, 'veto_bit_masks'):
+            del self.veto_bit_masks
+            self.veto_bit_masks = None
 
     def make_periods_array(self, pmin=Pmin, pmax=Pmax, dp=None, duty_cycle=Duty_cycle, t_mission=None):
         """
-        Sums the statistics with all the possible periods and initial phases. Accounts for
-        subbin template shifts, accounts for masks.
-
-        Creates:
-        self.statistics_periodic,
-        self.statistics_periodic_counts,
-        self.statistics_phases,
-        self.statistics_periodic_lengths_filled,
-        self.statistics_periodic_relative_amplitudes
+        Creates the period grid that will be used for folding. The grid is built according to the duty cycle to cover
+        the periodicities smoothly.
 
         :param pmin: Minimal period, days
         :type pmin: float, days
@@ -2713,6 +2792,16 @@ class KeplerLightCurve(object):
         periods = np.array(periods)
         return periods
 
+    def make_periods_edges(self, pmin, pmax, per_phases_per_chunk, dp=None, duty_cycle=Duty_cycle, dt=None):
+        if dt is None:
+            dt = self.dt_days
+
+        periods = self.make_periods_array(pmin=pmin, pmax=pmax, duty_cycle=duty_cycle, dp=dp)
+        p_chunks = int(np.sum((periods / dt).astype(int)) / per_phases_per_chunk)
+        per_edges = [(pmin + (pmax - pmin) * i / p_chunks) for i in range(p_chunks + 1)]
+        per_edges = [[per_edges[i], per_edges[i + 1]] for i in range(len(per_edges) - 1)]
+        return per_edges
+
     def sum_periods(self, pmin=Pmin, pmax=Pmax, dp=None, duty_cycle=Duty_cycle, periods=None):
         """
         Sums the statistics with all the possible periods and initial phases. Accounts for
@@ -2739,8 +2828,6 @@ class KeplerLightCurve(object):
         :rtype:
         """
         """
-        
-
         Parameters
         ----------
         statistics_interleaved,  statistics_not_interleaved: numpy.array 2d of float
@@ -2776,284 +2863,368 @@ class KeplerLightCurve(object):
             self.Pmax = periods[-1]
             self.periods = periods
 
+        if not self.is_shifts_interleaved:
+            self.interleave_shifts()
+
         self._phases_interleaved = []
         self._phases_not_interleaved = []
         self.statistics_periodic_not_interleaved = []
         self.statistics_periodic_interleaved = []
-        # attention: we use the same dt for interleaved and not? it means that the phases are the same? phases are defined further.
+        self.corrections_periodic_interleaved = []
+        self.corrections_periodic_not_interleaved = []
+        # attention: we use the same dt for interleaved and not? it orig_means that the phases are the same? phases are defined further.
 
         # interleaved
         if len(self.interleaved_numbers) > 0:
-            self._phases_interleaved = np.arange(int(np.ceil((self.periods[-1]) / (self.dt_days / self.n_shifts)))) * (
-                    self.dt_days / self.n_shifts)
-            # Warning: we only try these phases and not something in-between. It should be ok, but still
-            statistics_by_trends = np.array(self.statistics_interleaved * self.trend_orig_flux_interleaved, dtype=Dtype_r)
-            statistics_by_trends = np.hstack((statistics_by_trends, np.zeros(
-                (len(statistics_by_trends), int(np.ceil(Pmax / (self.dt_days / self.n_shifts)))))))
+            dt = self.dt_days / self.n_shifts
+            len_pad = int(np.ceil(Pmax / dt))
+            self._phases_interleaved = np.arange(int(np.ceil((self.periods[-1]) / dt))) * dt
             # These phases are with respect to the beginning of the data which can be any
             # number because sometimes we reject the zeroth quarter or do other things.
             # Do not use these phases anywhere.
+            # Warning: we only try these phases and not something in-between. It should be ok, but still
+            statistics_by_trends = np.array(self.statistics_interleaved, dtype=Dtype_r)  # * self.trend_orig_flux_interleaved
+            # -> trends are now all normalized to be the same!
             # Pad by zeros to avoid extra if statements in the summation:
-            trends_sq_by_vars = np.array(self.stat_vars_interleaved * self.trend_orig_flux_interleaved ** 2, dtype=Dtype_r)
-            trends_sq_by_vars = np.hstack((trends_sq_by_vars, np.zeros(
-                (len(trends_sq_by_vars), int(np.ceil(Pmax / (self.dt_days / self.n_shifts)))))))
-
-            self.statistics_periodic_interleaved, denomsq = self.sum_periods_fast(
-                statistics_by_trends, trends_sq_by_vars, self.dt_days / self.n_shifts, self.tmax + self.dt_days * (
-                        1 - 1 / self.n_shifts), self.tmin, periods)
-            # attention: we use the same dt for interleaved and not? it means that the phase step for the interleaved could be smaller.
+            statistics_by_trends = np.hstack((statistics_by_trends, np.zeros((len(statistics_by_trends), len_pad))))
+            trends_sq_by_vars = np.array(self.stat_vars_interleaved, dtype=Dtype_r)  # * self.trend_orig_flux_interleaved ** 2
+            # -> trends are now all normalized to be the same!
+            trends_sq_by_vars = np.hstack((trends_sq_by_vars, np.zeros((len(trends_sq_by_vars), len_pad))))
+            corrections = np.array(self.corrections_interleaved, dtype=Dtype_r)
+            corrections = np.hstack((corrections, np.zeros((len(corrections), len_pad))))
+            statistics_by_trends_gaussianized = np.array(self.statistics_gaussianized_interleaved, dtype=Dtype_r)
+            statistics_by_trends_gaussianized = np.hstack((statistics_by_trends_gaussianized,
+                                                          np.zeros((len(statistics_by_trends_gaussianized), len_pad))))
+            self.statistics_periodic_interleaved, denomsq, self.corrections_periodic_interleaved, \
+                self.stats_gaussianized_periodic_interleaved = self.sum_periods_fast(
+                    statistics_by_trends, trends_sq_by_vars, corrections, statistics_by_trends_gaussianized,
+                    dt, self.tmax + self.dt_days * (1 - 1 / self.n_shifts), self.tmin, periods)
+            # attention: we use the same dt for interleaved and not? it orig_means that the phase step for the interleaved could be smaller.
             for p in range(len(self.statistics_periodic_interleaved)):
                 for t in range(len(self.statistics_periodic_interleaved[p])):
                     self.statistics_periodic_interleaved[p][t][denomsq[p][t] == 0] = np.nan
-                    self.statistics_periodic_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][
-                                                                                          denomsq[p][t] != 0] ** 0.5
+                    self.statistics_periodic_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][denomsq[p][t] != 0] ** 0.5
+                    self.stats_gaussianized_periodic_interleaved[p][t][denomsq[p][t] == 0] = np.nan
+                    self.stats_gaussianized_periodic_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][denomsq[p][t] != 0] ** 0.5
 
         # not interleaved
+        dt = self.dt_days
+        len_pad = int(np.ceil(Pmax / dt))
         if len(self.not_interleaved_numbers) > 0:
-            self._phases_not_interleaved = np.arange(int(np.ceil((self.periods[-1]) / self.dt_days))) * self.dt_days
-            statistics_by_trends = np.array(self.statistics_not_interleaved * self.trend_orig_flux_not_interleaved, dtype=Dtype_r)
-            statistics_by_trends = np.hstack((statistics_by_trends, np.zeros(
-                (len(statistics_by_trends), int(np.ceil(Pmax / self.dt_days))))))
+            self._phases_not_interleaved = np.arange(int(np.ceil((self.periods[-1]) / dt))) * dt
+            statistics_by_trends = np.array(self.statistics_not_interleaved, dtype=Dtype_r)  # * self.trend_orig_flux_not_interleaved
+            statistics_by_trends = np.hstack((statistics_by_trends, np.zeros((len(statistics_by_trends), len_pad))))
             # These phases are with respect to the beginning of the data which can be any
             # number because sometimes we reject the zeroth quarter or do other things.
             # Do not use these phases anywhere.
             # Pad by zeros to avoid extra if statements in the summation:
-            trends_sq_by_vars = np.array(self.stat_vars_not_interleaved * self.trend_orig_flux_not_interleaved ** 2, dtype=Dtype_r)
-            trends_sq_by_vars = np.hstack((trends_sq_by_vars, np.zeros(
-                (len(trends_sq_by_vars), int(np.ceil(Pmax / self.dt_days))))))
-
-            self.statistics_periodic_not_interleaved, denomsq = self.sum_periods_fast(
-                statistics_by_trends, trends_sq_by_vars, self.dt_days, self.tmax, self.tmin, periods)
+            trends_sq_by_vars = np.array(self.stat_vars_not_interleaved, dtype=Dtype_r)  # * self.trend_orig_flux_not_interleaved ** 2
+            trends_sq_by_vars = np.hstack((trends_sq_by_vars, np.zeros((len(trends_sq_by_vars), len_pad))))
+            corrections = np.array(self.corrections_not_interleaved)
+            corrections = np.hstack((corrections, np.zeros((len(corrections), len_pad))))
+            statistics_by_trends_gaussianized = np.array(self.statistics_gaussianized_not_interleaved, dtype=Dtype_r)
+            statistics_by_trends_gaussianized = np.hstack((statistics_by_trends_gaussianized, np.zeros(
+                                                          (len(statistics_by_trends_gaussianized), len_pad))))
+            self.statistics_periodic_not_interleaved, denomsq, self.corrections_periodic_not_interleaved, \
+                self.stats_gaussianized_periodic_not_interleaved = self.sum_periods_fast(
+                    statistics_by_trends, trends_sq_by_vars, corrections, statistics_by_trends_gaussianized,
+                    dt, self.tmax, self.tmin, periods)
             for p in range(len(self.statistics_periodic_not_interleaved)):
                 for t in range(len(self.statistics_periodic_not_interleaved[p])):
                     self.statistics_periodic_not_interleaved[p][t][denomsq[p][t] == 0] = np.nan
-                    self.statistics_periodic_not_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][
-                                                                                              denomsq[p][t] != 0] ** 0.5
+                    self.statistics_periodic_not_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][denomsq[p][t] != 0] ** 0.5
+                    self.stats_gaussianized_periodic_not_interleaved[p][t][denomsq[p][t] == 0] = np.nan
+                    self.stats_gaussianized_periodic_not_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][denomsq[p][t] != 0] ** 0.5
 
-    def veto_mes(self, mes_threshold=Threshold_mes_veto, veto_threshold=Veto_threshold_for_mes):
-        # WARNING: this veto, if done after the periodicity search on the score-corrected data, will destroy the
-        # distribution. Therefore, we are removing this veto from the search and will do it after the search and after
-        # the time-slides and p_periodic estimation as a post-processing veto. Also, we make sure to do it on the
-        # non-score-corrected data.
-        if len(self.interleaved_numbers) > 0:
-            self.mes_veto_masks_interleaved = np.ones(np.shape(self.statistics_periodic_interleaved)).astype(bool)
-            indices = np.array(np.where(self.statistics_periodic_interleaved < -np.abs(mes_threshold))).T
-            for pi, ti, phi in indices:
-                expected_transit_times = [self.tmin + self._phases_interleaved[phi] + i * self.periods[pi]
-                                          for i in range(
-                        int(np.ceil((self.tmax - self.tmin - self._phases_interleaved[phi]) / self.periods[pi])))]
+    def interpolate_not_interleaved(self, delete_periodic_interleaved=True):
+        n_interl = np.shape(self.statistics_periodic_interleaved)[1]
+        self.statistics_periodic = np.zeros((np.shape(self.statistics_periodic_interleaved)[0],
+                                            n_interl + np.shape(self.statistics_periodic_not_interleaved)[1],
+                                            np.shape(self.statistics_periodic_interleaved)[2]))
+        self.stats_gaussianized_periodic = np.zeros_like(self.statistics_periodic)
+        self.corrections_periodic = np.zeros_like(self.statistics_periodic)
 
-                summed_transit_points = [np.argmin(np.abs(self.time_interleaved - expected_transit_times[i])) for i in
-                                         range(len(expected_transit_times))]
-                summed_stats = np.array(self.statistics_interleaved[ti][summed_transit_points])  # raw
-                summed_trends = np.array(self.trend_orig_flux_interleaved[summed_transit_points])
-                summed_vars = np.array(self.stat_vars_interleaved[ti][summed_transit_points])
-                amplitude_vars = []
-                amplitudes_normalized = []
-                for si in range(len(summed_vars)):
-                    if not np.isclose(summed_stats[si], 0):
-                        amplitude_vars.append(1 / summed_vars[si])
-                        amplitudes_normalized.append(
-                            summed_stats[si] / summed_vars[si] / summed_trends[si] * self.mean_total)
-                    else:
-                        amplitude_vars.append(np.inf)
-                        amplitudes_normalized.append(0.)
-                veto_score = ut.unequal_amplitude_veto(values=-np.array(amplitudes_normalized), variances=amplitude_vars,
-                                                       A_all=None, indmax=None, A_1=None)
-                if veto_score > veto_threshold:
-                    self.statistics_periodic_interleaved[pi][ti][phi] = 0.
-                    self.mes_veto_masks_interleaved[pi][ti][phi] = False
+        self.statistics_periodic[:, range(n_interl), :] = np.array(self.statistics_periodic_interleaved)
+        self.stats_gaussianized_periodic[:, range(n_interl), :] = np.array(self.stats_gaussianized_periodic_interleaved)
+        self.corrections_periodic[:, range(n_interl), :] = np.array(self.corrections_periodic_interleaved)
+        self._phases = np.array(self._phases_interleaved)
 
-        if len(self.not_interleaved_numbers) > 0:
-            self.mes_veto_masks_not_interleaved = np.ones(np.shape(self.statistics_periodic_not_interleaved)).astype(
-                bool)
-            indices = np.array(np.where(self.statistics_periodic_not_interleaved < -np.abs(mes_threshold))).T
-            for pi, ti, phi in indices:
-                expected_transit_times = [self.tmin + self._phases_not_interleaved[phi] + i * self.periods[pi]
-                                          for i in range(
-                        int(np.ceil((self.tmax - self.tmin - self._phases_not_interleaved[phi]) / self.periods[pi])))]
+        for vals_interpolated, vals_not_interl in [[self.statistics_periodic, self.statistics_periodic_not_interleaved],
+                                                   [self.stats_gaussianized_periodic, self.stats_gaussianized_periodic_not_interleaved],
+                                                   [self.corrections_periodic, self.corrections_periodic_not_interleaved]]:
 
-                summed_transit_points = [np.argmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i
-                                         in range(len(expected_transit_times))]
-                summed_stats = np.array(self.statistics_not_interleaved[ti][summed_transit_points])  # raw
-                summed_trends = np.array(self.trend_orig_flux_not_interleaved[summed_transit_points])
-                summed_vars = np.array(self.stat_vars_not_interleaved[ti][summed_transit_points])
-                amplitude_vars = []
-                amplitudes_normalized = []
-                for si in range(len(summed_vars)):
-                    if not np.isclose(summed_stats[si], 0) and not np.isinf(summed_vars[si]):
-                        amplitude_vars.append(1 / summed_vars[si])
-                        amplitudes_normalized.append(
-                            summed_stats[si] / summed_vars[si] / summed_trends[si] * self.mean_total)
-                    else:
-                        amplitude_vars.append(np.inf)
-                        amplitudes_normalized.append(0.)
-                if len(np.array(amplitudes_normalized)) < 3:
-                    veto_score = np.inf
-                else:
-                    veto_score = ut.unequal_amplitude_veto(values=-np.array(amplitudes_normalized),
-                                                           variances=amplitude_vars, A_all=None, indmax=None, A_1=None)
-                if veto_score > veto_threshold:
-                    self.statistics_periodic_not_interleaved[pi][ti][phi] = 0.
-                    self.mes_veto_masks_not_interleaved[pi][ti][phi] = False
+            for ip in range(len(vals_not_interl)):  # over periods
+                for k in range(len(vals_not_interl[ip])):
+                    res = np.interp(x=self._phases_interleaved, xp=self._phases_not_interleaved, fp=vals_not_interl[ip][k])
+                    vals_interpolated[ip, n_interl + k] = res
+
+        if delete_periodic_interleaved:
+            del self.statistics_periodic_interleaved
+            self.statistics_periodic_interleaved = None
+            del self.statistics_periodic_not_interleaved
+            self.statistics_periodic_not_interleaved = None
+            del self.statistics_gaussianized_interleaved
+            self.statistics_gaussianized_interleaved = None
+            del self.statistics_gaussianized_not_interleaved
+            self.statistics_gaussianized_not_interleaved = None
+            del self._phases_interleaved
+            self._phases_interleaved = None
+            del self._phases_not_interleaved
+            self._phases_not_interleaved = None
 
     def delete_mes(self):
         del self.periods
+        self.periods = None
         del self._phases_interleaved
+        self._phases_interleaved = None
         del self._phases_not_interleaved
+        self._phases_not_interleaved = None
         del self.statistics_periodic_not_interleaved
+        self.statistics_periodic_not_interleaved = None
         del self.statistics_periodic_interleaved
+        self.statistics_periodic_interleaved = None
+        # TODO: add all other arrays!
 
-    def save_best_candidates(self, n_per_temp=N_per_temp_saving, path=None,
-                             save_to_file=True, save_inverted=True,
-                             filename_postfix_period=Default_best_candidates_filename_postfix_period,
-                             filename_postfix_inverted_period=Default_inverted_best_candidates_filename_postfix_period):
+    def calculate_periodic_scores_with_correction(self, save_uncorrected=True):
         """
-        Determines `n_per_temp` best scores for each template. For each period,
-        finds one best phase corresponding to min (negative) statistic. Then, selects
-        `n_per_temp` best periods for every template. For them, saves statistic values,
-        periods, phases, summed values (see the description of returned results).
 
-        Modifies:
-        self.best_periodic_scores_data : multi-level non-uniform nested list
-            A structure saving info about `n_per_temp` best scores per each template:
-        period_indices_selected : list of lists of len `n_per_temp`
-            `n_per_temp` period indices of best statistics for each template
-        periods_selected : list of lists of len `n_per_temp`
-            `n_per_temp` periods of best statistics for each template
-        phase_indices_selected : list of lists of len `n_per_temp`
-            best phase indices for the `n_per_temp` periods (one oer period)
-            corresponding to best statistics for each template
-        phases_selected : list of lists of len `n_per_temp`
-            best phases for the `n_per_temp` periods (one oer period)
-            corresponding to best statistics for each template
-        statistic_values_selected : list of lists of len `n_per_temp`
-            `n_per_temp` best statistins (with no repeating periods) for each template
-        summed_transit_times_selected : list of lists of len `n_per_temp` of lists
-            times used for summation to get statistic_values_selected
-        summed_stats_raw_selected : list of lists of len `n_per_temp` of lists
-            raw statistics used for summation to get statistic_values_selected
-        summed_trends_selected : list of lists of len `n_per_temp` of lists
-            trend values used for summation to get statistic_values_selected
-        summed_vars_selected : list of lists of len `n_per_temp` of lists
-            variances used for summation to get statistic_values_selected
+        Note about renormalization. We already made sure with the SES that the distribution is okay.
+        Then, the periodicity summation should also be okay if the variances are correct
 
-        :param n_per_temp: How many best scores per template to save. The default is 10.
-        :type n_per_temp: int
+        :return:
+        :rtype:
+        """
+        if not self.is_periodic_scores_corrected:
+            if save_uncorrected:
+                self.uncorrected_stats_periodic = copy.deepcopy(self.statistics_periodic)
+
+            signs = np.sign(self.statistics_periodic)
+            stats_squared = self.statistics_periodic**2 + 2 * self.corrections_periodic
+            stats_squared[stats_squared < 0] = 0.
+            self.statistics_periodic = stats_squared**0.5 * signs
+
+            self.is_periodic_scores_corrected = True
+
+    # def calculate_periodic_scores_with_correction(self):
+    #     """
+    #
+    #     Note about renormalization. We already made sure with the SES that the distribution is okay.
+    #     Then, the periodicity summation should also be okay if the variances are correct
+    #
+    #     :return:
+    #     :rtype:
+    #     """
+    #     if not self.is_periodic_scores_corrected:
+    #         self.uncorrected_stats_periodic_interleaved = copy.deepcopy(self.statistics_periodic_interleaved)
+    #         self.uncorrected_stats_periodic_not_interleaved = copy.deepcopy(self.statistics_periodic_not_interleaved)
+    #
+    #         signs = np.sign(self.statistics_periodic_interleaved)
+    #         stats_squared = self.statistics_periodic_interleaved**2 + 2 * self.corrections_periodic_interleaved
+    #         stats_squared[stats_squared < 0] = 0.
+    #         self.statistics_periodic_interleaved = stats_squared**0.5 * signs
+    #
+    #         signs = np.sign(self.statistics_periodic_not_interleaved)
+    #         stats_squared = self.statistics_periodic_not_interleaved ** 2 + 2 * self.corrections_periodic_not_interleaved
+    #         stats_squared[stats_squared < 0] = 0.
+    #         self.statistics_periodic_not_interleaved = stats_squared**0.5 * signs
+    #
+    #         self.is_periodic_scores_corrected = True
+
+    def marginalize_over_templates(self, m_1_3_r):
+        log_template_prior, m13r_bin_edges, period_edges = tm.load_template_prior()
+        m_1_3_r_bin = np.searchsorted(m13r_bin_edges, m_1_3_r) - 1
+
+        self.stats_periodic_mar_temp = np.zeros((np.shape(self.statistics_periodic)[0], np.shape(self.statistics_periodic)[2]))
+        self.stats_gaussianized_periodic_mar_temp = np.zeros_like(self.stats_periodic_mar_temp)
+
+        for marg_stats, stats in [
+              [self.stats_periodic_mar_temp, self.statistics_periodic],
+              [self.stats_gaussianized_periodic_mar_temp, self.stats_gaussianized_periodic]]:
+            for ipb in range(len(period_edges) - 1):
+                # per_bin = np.searchsorted(period_edges, period) - 1
+                period_bin_indices = np.where((self.periods >= period_edges[ipb]) & (self.periods < period_edges[ipb + 1]))[0]
+                if len(period_bin_indices) > 0:
+                    log_template_prior_bin = log_template_prior[m_1_3_r_bin, ipb]
+                    neg_ind_weights = ((stats[period_bin_indices] < 0).astype(float))
+                    summed = np.nansum(np.exp((stats[period_bin_indices]) ** 2 + np.transpose(np.array([log_template_prior_bin])))
+                                       * neg_ind_weights, axis=1)
+                    summed[summed > 0] = np.log(summed[summed > 0])
+                    marg_stats[period_bin_indices] = np.array(summed)
+
+        # for marg_stats, stats, marg_stats_gauss, stats_gauss, templ_indices in [
+        #       [self.stats_periodic_interleaved_mar_temp, self.statistics_periodic_interleaved,
+        #        self.stats_gaussianized_periodic_interleaved_mar_temp, self.stats_gaussianized_periodic_interleaved,
+        #        self.interleaved_numbers],
+        #       [self.stats_periodic_not_interleaved_mar_temp, self.statistics_periodic_not_interleaved,
+        #        self.stats_gaussianized_periodic_not_interleaved_mar_temp, self.stats_gaussianized_periodic_not_interleaved,
+        #        self.not_interleaved_numbers]]:
+        #     m_1_3_r_bin = np.searchsorted(m13r_bin_edges, m_1_3_r) - 1
+        #     for ipb in range(len(period_edges) - 1):
+        #         # per_bin = np.searchsorted(period_edges, period) - 1
+        #         period_bin_indices = np.where((self.periods >= period_edges[ipb]) & (self.periods < period_edges[ipb + 1]))[0]
+        #         if len(period_bin_indices) > 0:
+        #             log_template_prior_bin = log_template_prior[m_1_3_r_bin, ipb]
+        #             log_template_prior_bin = log_template_prior_bin[templ_indices]
+        #             neg_ind_weights = ((stats[period_bin_indices] < 0).astype(float))
+        #             # marg_stats[period_bin_indices] = np.log(np.nansum(np.exp((stats[period_bin_indices])**2 * neg_ind_weights
+        #             #                                                   + np.transpose(np.array([log_template_prior_bin]))), axis=1))
+        #             summed = np.nansum(np.exp((stats[period_bin_indices]) ** 2 + np.transpose(np.array([log_template_prior_bin])))
+        #                                * neg_ind_weights, axis=1)
+        #             summed[summed > 0] = np.log(summed[summed > 0])
+        #             marg_stats[period_bin_indices] = np.array(summed)
+        #
+        #             summed = np.nansum(np.exp((stats_gauss[period_bin_indices]) ** 2 + np.transpose(np.array([log_template_prior_bin])))
+        #                                * neg_ind_weights, axis=1)
+        #             summed[summed > 0] = np.log(summed[summed > 0])
+        #             marg_stats[period_bin_indices] = summed
+        #             # marg_stats_gauss[period_bin_indices] = np.log(np.nansum(np.exp((stats_gauss[period_bin_indices])**2
+        #                                           * neg_ind_weights + np.transpose(np.array([log_template_prior_bin]))), axis=1))
+
+    def maximize_over_phase(self):
+        # -> for every period and every template, but only for one best phase
+        best_phase_inds = np.array([np.nanargmax(self.stats_periodic_mar_temp[pp]) for pp in range(len(self.stats_periodic_mar_temp))])
+        self.best_phase_inds = best_phase_inds
+        self.stats_periodic_mar_temp_best_ph = np.array([np.nanmax(self.stats_periodic_mar_temp[pp])
+                                                        for pp in range(len(self.stats_periodic_mar_temp))])
+        phases_best_ph = np.array([np.nanmax(self._phases[best_phase_inds[pp]])
+                                   for pp in range(len(self.stats_periodic_mar_temp))])
+
+        self.stats_gaussianized_periodic_mar_temp_best_ph = np.array([self.stats_gaussianized_periodic_mar_temp[pp][best_phase_inds[pp]]
+                                                                     for pp in range(len(self.stats_periodic_mar_temp))])
+
+        self.first_transit_times_best_ph = self.tmin + phases_best_ph
+    # def maximize_over_phase(self):
+    #     # -> for every period and every template, but only for one best phase
+    #     self.best_phase_inds_interleaved = np.array([[np.nanargmin(self.statistics_periodic_interleaved[pp][tt])
+    #                                                   for tt in range(len(self.statistics_periodic_interleaved[pp]))]
+    #                                                  for pp in range(len(self.statistics_periodic_interleaved))])
+    #     self.best_phase_inds_not_interleaved = np.array([[np.nanargmin(self.statistics_periodic_not_interleaved[pp][tt])
+    #                                                       for tt in range(len(self.statistics_periodic_not_interleaved[pp]))]
+    #                                                      for pp in range(len(self.statistics_periodic_not_interleaved))])
+    #     self.statistics_periodic_interleaved_best_ph = np.array([[np.nanmin(self.statistics_periodic_interleaved[pp][tt])
+    #                                                               for tt in range(len(self.statistics_periodic_interleaved[pp]))]
+    #                                                              for pp in range(len(self.statistics_periodic_interleaved))])
+    #     self.statistics_periodic_not_interleaved_best_ph = np.array([[np.nanmin(self.statistics_periodic_not_interleaved[pp][tt])
+    #                                                                   for tt in range(len(self.statistics_periodic_not_interleaved[pp]))]
+    #                                                                  for pp in range(len(self.statistics_periodic_not_interleaved))])
+    #     self.stats_gaussianized_periodic_interleaved_best_ph = np.array([[self.stats_gaussianized_periodic_interleaved[pp][tt][
+    #                                                                           self.best_phase_inds_interleaved[tt][pp]]
+    #                                                                       for tt in range(len(self.statistics_periodic_interleaved[pp]))]
+    #                                                                      for pp in range(len(self.statistics_periodic_interleaved))])
+    #     self.stats_gaussianized_periodic_not_interleaved_best_ph = np.array([[self.stats_gaussianized_periodic_not_interleaved[pp][tt][
+    #                                                                      self.best_phase_inds_not_interleaved[tt][pp]]
+    #                                                                    for tt in range(len(self.statistics_periodic_not_interleaved[pp]))]
+    #                                                                   for pp in range(len(self.statistics_periodic_not_interleaved))])
+    #     self.corrections_periodic_interleaved_best_ph = np.array([[self.corrections_periodic_interleaved[pp][tt][
+    #                                                                           self.best_phase_inds_interleaved[tt][pp]]
+    #                                                                for tt in range(len(self.corrections_periodic_interleaved[pp]))]
+    #                                                               for pp in range(len(self.corrections_periodic_interleaved))])
+    #     self.corrections_periodic_not_interleaved_best_ph = np.array([[self.corrections_periodic_not_interleaved[pp][tt][
+    #                                                                               self.best_phase_inds_not_interleaved[tt][pp]]
+    #                                                                   for tt in range(len(self.corrections_periodic_not_interleaved[pp]))]
+    #                                                                   for pp in range(len(self.corrections_periodic_not_interleaved))])
+
+    # def calculate_volume_prior_terms(self, m_1_3_r):
+    #     log_second_derivs_cos2_shifts_templates, log_cos2_derivs_templates, \
+    #         log_occurrences_templates_periods, m13r_bin_edges, period_edges = tm.load_volume_prior_precomputed_terms()
+    #     # -> time derivative of template shifting wrt itself,
+    #     # cos squared derivative wrt the template number and the binned occurrence rates with bins.
+    #     # log_occurrences_templates_periods is normalized by the m_1_3_r to have the full axtrophysical occurrence rate
+    #     # in every m_1_3_r bin. units are rate! no probability normalization!
+    #     self.maximize_over_phase()
+    #
+    #     self.volume_terms_interleaved = np.zeros_like(self.best_phase_inds_interleaved).astype(Dtype_r)
+    #     self.volume_terms_not_interleaved = np.zeros_like(self.best_phase_inds_not_interleaved).astype(Dtype_r)
+    #     self.prior_terms_interleaved = np.zeros_like(self.best_phase_inds_interleaved).astype(Dtype_r)
+    #     self.prior_terms_not_interleaved = np.zeros_like(self.best_phase_inds_not_interleaved).astype(Dtype_r)
+    #
+    #     for vol_terms, stats_periodic, templ_indices in [
+    #             [self.volume_terms_interleaved, self.statistics_periodic_interleaved_best_ph, self.interleaved_numbers],
+    #             [self.volume_terms_not_interleaved, self.statistics_periodic_not_interleaved_best_ph, self.not_interleaved_numbers]]:
+    #         # Term 2 log snr squared. This term is the factor for the volume derivatives terms
+    #         nonzer_mask = (stats_periodic != 0) & (~np.isnan(stats_periodic))
+    #         vol_terms[nonzer_mask] = -4 * np.log(np.abs(stats_periodic[nonzer_mask]))
+    #         n_transits = np.floor(self.T_mission / self.periods)  # the number will be bigger, but the central transit gets no shift
+    #         period_terms = - np.transpose(np.array([np.log(((n_transits + 1) * (n_transits + 2)) ** 0.5)]))
+    #         vol_terms += period_terms
+    #         # Term with derivatives wrt template time shift and template number
+    #         derivatives_volume_term = - log_second_derivs_cos2_shifts_templates - log_cos2_derivs_templates
+    #         vol_terms += np.array([derivatives_volume_term[templ_indices]])
+    #
+    #     for prior_terms, stats_periodic, templ_indices in [
+    #             [self.prior_terms_interleaved, self.statistics_periodic_interleaved_best_ph, self.interleaved_numbers],
+    #             [self.prior_terms_not_interleaved, self.statistics_periodic_not_interleaved_best_ph, self.not_interleaved_numbers]]:
+    #         period_terms = - np.transpose(np.array([np.log(self.periods)]))
+    #         prior_terms += period_terms
+    #
+    #         # Term with the template-period occurrence rate prior
+    #         m_1_3_r_bin = np.searchsorted(m13r_bin_edges, m_1_3_r) - 1
+    #         for ipb in range(len(period_edges) - 1):
+    #             # per_bin = np.searchsorted(period_edges, period) - 1
+    #             period_bin_indices = np.where((self.periods >= period_edges[ipb]) & (self.periods < period_edges[ipb + 1]))[0]
+    #             if len(period_bin_indices) > 0:
+    #                 log_occurrence_rate_templates = log_occurrences_templates_periods[m_1_3_r_bin, ipb]
+    #
+    #                 indices = np.ix_(period_bin_indices,
+    #                                  np.arange(len(templ_indices)))
+    #                 prior_terms[indices] += np.array([log_occurrence_rate_templates[templ_indices]])
+
+    # def calculate_coherent_scores(self, m_1_3_r):
+    #     if not self.is_periodic_scores_corrected:
+    #         self.calculate_periodic_scores_with_correction()
+    #     self.calculate_volume_prior_terms(m_1_3_r=m_1_3_r)
+    #     if len(self.statistics_periodic_interleaved_best_ph) > 0:
+    #         self.coherent_scores_interleaved = 0.5 * self.statistics_periodic_interleaved_best_ph**2 + self.volume_prior_terms_interleaved
+    #         self.coherent_scores_interleaved[self.statistics_periodic_interleaved_best_ph >= -1] = np.nan
+    #     if len(self.statistics_periodic_not_interleaved_best_ph) > 0:
+    #         self.coherent_scores_not_interleaved = (0.5 * self.statistics_periodic_not_interleaved_best_ph**2
+    #                                                 + self.volume_prior_terms_not_interleaved)
+    #         self.coherent_scores_not_interleaved[self.statistics_periodic_not_interleaved_best_ph >= -1] = np.nan
+
+    def save_best_candidates(self, n_best=N_per_temp_saving, path=None, save_to_file=True,
+                             filename_postfix_period=Default_best_candidates_marginalized_filename_postfix_period):
+        """
+        VERSION WITH MARGINALIZATION OVER TEMPLATES! DUE TO THE CHUNK STRUCTURE OF THE SEARCH, WE CAN ASSUME THAT THE
+        PRIOR TERMS (WHICH NOW ONLY DEPEND ON THE PERIOD) ARE THE SAME FOR ALL THE PERIODS HERE. SO NO NEED TO DEAL WITH
+        COHERENT SCORES AT THE SAVING STAGE ANYMORE!)
+
+        Determines `n_BEST_SAVING` best scores for the periodicity search. For each period,
+        we already had one best phase corresponding to min (negative) statistic and marginalization over templates, and
+        squaring.
+        For the selected points, we for now save... values
+
+        :param n_best: How many best scores to save.
+        :type n_best: int
         :param path:
         :type path:
         :param save_to_file:
         :type save_to_file:
-        :param save_inverted:
-        :type save_inverted:
+        :param filename_postfix_period:
+        :type filename_postfix_period:
         :return:
         :rtype:
         """
-        # Warning: saved things are score-corrected. In order to get non-score-corrected values for amplitude estimations etc,
-        # use dedicated methods
         if path is None:
             path = self.output_location
-        # period_indices_selected = []
-        periods_selected = []
-        phase_indices_selected = []  # relative phase indices wrt the local beginning of data (quarters may be cut)
-        phases_selected = []  # phase wrt the beginning of Kepler time
-        statistic_values_selected = []
-        summed_transit_times_selected = []
-        summed_stats_raw_selected = []
-        summed_trends_selected = []
-        summed_vars_selected = []
-        if len(self.statistics_periodic_interleaved) > 0:
-            for ti in range(len(self.statistics_periodic_interleaved[0])):  # over templates
-                phase_ind_min_per = []
-                stats_min_per = []
-                for pi in range(len(self.statistics_periodic_interleaved)):  # over periods
-                    ph_i_min = np.nanargmin(self.statistics_periodic_interleaved[pi][ti])
-                    phase_ind_min_per.append(ph_i_min)
-                    stats_min_per.append(self.statistics_periodic_interleaved[pi][ti][ph_i_min])
-                stat_best_per_inds = np.argsort(stats_min_per)[:n_per_temp]
-                per_sel = self.periods[stat_best_per_inds]
-                phase_ind_sel = np.array(phase_ind_min_per)[stat_best_per_inds]
-                phases_sel = np.array(self._phases_interleaved)[phase_ind_sel]  # relative phases wrt the beginning of this data
-                phases_abs = (np.array(self.time_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
 
-                summed_transit_times_per = []
-                summed_stats_raw_per = []
-                summed_trends_per = []
-                summed_vars_per = []
-                for j in range(len(stat_best_per_inds)):
-                    period = per_sel[j]
-                    phase = phases_sel[j]
-                    expected_transit_times = [self.tmin + phase + i * period  # i am not sure tmin does not miss some nan in the beginning
-                                              for i in range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
-                    summed_transit_points = [np.nanargmin(np.abs(self.time_interleaved - expected_transit_times[i])) for
-                                             i in range(len(expected_transit_times))]
-                    summed_transit_times_per.append(self.time_interleaved[summed_transit_points])
-                    summed_stats_raw_per.append(self.statistics_interleaved[ti][summed_transit_points])
-                    summed_trends_per.append(self.trend_orig_flux_interleaved[summed_transit_points])
-                    summed_vars_per.append(self.stat_vars_interleaved[ti][summed_transit_points])
-                # period_indices_selected.append(stat_best_per_inds)
-                periods_selected.append(per_sel)
-                phase_indices_selected.append(phase_ind_sel)
-                statistic_values_selected.append(np.array(stats_min_per)[stat_best_per_inds])
-                phases_selected.append(phases_abs)
-                summed_transit_times_selected.append(summed_transit_times_per)
-                summed_stats_raw_selected.append(summed_stats_raw_per)
-                summed_trends_selected.append(summed_trends_per)
-                summed_vars_selected.append(summed_vars_per)
-        if len(self.statistics_periodic_not_interleaved) > 0:
-            for ti in range(len(self.statistics_periodic_not_interleaved[0])):  # over templates
-                phase_ind_min_per = []
-                stats_min_per = []
-                for pi in range(len(self.statistics_periodic_not_interleaved)):  # over periods
-                    ph_i_min = np.nanargmin(self.statistics_periodic_not_interleaved[pi][ti])
-                    phase_ind_min_per.append(ph_i_min)
-                    stats_min_per.append(self.statistics_periodic_not_interleaved[pi][ti][ph_i_min])
-                stat_best_per_inds = np.argsort(stats_min_per)[:n_per_temp]
-                per_sel = self.periods[stat_best_per_inds]
-                phase_ind_sel = np.array(phase_ind_min_per)[stat_best_per_inds]
-                phases_sel = np.array(self._phases_not_interleaved)[phase_ind_sel]  # relative phases wrt the beginning of this data
-                phases_abs = (np.array(self.time_not_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
+        best_period_indices = ut.nanargsort(self.stats_periodic_mar_temp_best_ph)[-n_best:][::-1]
+        best_periods = self.periods[best_period_indices]
+        best_stats_periods = np.array(self.stats_periodic_mar_temp_best_ph[best_period_indices])
+        best_stats_gaussianized_periods = np.array(self.stats_gaussianized_periodic_mar_temp_best_ph[best_period_indices])
+        best_ftts_periods = np.array(self.first_transit_times_best_ph[best_period_indices])
+        best_phase_inds_periods = np.array(self.best_phase_inds[best_period_indices])
 
-                summed_transit_times_per = []
-                summed_stats_raw_per = []
-                summed_trends_per = []
-                summed_vars_per = []
-                for j in range(len(stat_best_per_inds)):
-                    period = per_sel[j]
-                    phase = phases_sel[j]
-                    expected_transit_times = [self.tmin + phase + i * period
-                                              for i in range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
-                    summed_transit_points = [np.nanargmin(np.abs(self.time_not_interleaved - expected_transit_times[i]))
-                                             for i in range(len(expected_transit_times))]
-                    summed_transit_times_per.append(self.time_not_interleaved[summed_transit_points])
-                    summed_stats_raw_per.append(self.statistics_not_interleaved[ti][summed_transit_points])
-                    summed_trends_per.append(self.trend_orig_flux_not_interleaved[summed_transit_points])
-                    summed_vars_per.append(self.stat_vars_not_interleaved[ti][summed_transit_points])
-                # period_indices_selected.append(stat_best_per_inds)
-                periods_selected.append(per_sel)
-                phase_indices_selected.append(phase_ind_sel)
-                statistic_values_selected.append(np.array(stats_min_per)[stat_best_per_inds])
-                phases_selected.append(phases_abs)
-                summed_transit_times_selected.append(summed_transit_times_per)
-                summed_stats_raw_selected.append(summed_stats_raw_per)
-                summed_trends_selected.append(summed_trends_per)
-                summed_vars_selected.append(summed_vars_per)
+        best_periodic_scores_data = [[] for _ in range(Bet_per_results_length)]
+        for search_results_index, values_selected in [[Best_per_results_index_per, best_periods],
+                                                      [Best_per_results_index_ftt, best_ftts_periods],
+                                                      [Bet_per_results_index_stats, best_stats_periods],
+                                                      [Bet_per_results_index_stats_gauss, best_stats_gaussianized_periods],
+                                                      [Bet_per_results_index_best_phase_ind, best_phase_inds_periods],
+                                                      [Bet_per_results_index_best_per_ind, best_period_indices],
+                                                      [Best_per_results_index_per_list, self.periods]]:
+            best_periodic_scores_data[search_results_index] = values_selected
 
-        times_quarters = [(np.nanmin(self.times[q]), np.nanmax(self.times[q])) for q in
-                          self.quarters]  # attention: there should be no zero-padding
-        self.best_periodic_scores_data = [[] for _ in range(Search_results_length)]
-        self.best_periodic_scores_data[Search_results_index_per] = periods_selected
-        self.best_periodic_scores_data[Search_results_index_stat] = statistic_values_selected
-        self.best_periodic_scores_data[Search_results_index_sum_tr_times] = summed_transit_times_selected
-        self.best_periodic_scores_data[Search_results_index_sum_stats] = summed_stats_raw_selected
-        self.best_periodic_scores_data[Search_results_index_sum_trends] = summed_trends_selected
-        self.best_periodic_scores_data[Search_results_index_sum_vars] = summed_vars_selected
-        if self.inds_pieces_scramble is not None:
-            self.best_periodic_scores_data[Search_results_index_slides] = [self.inds_pieces_scramble, self.inds_pieces_in_scrambled]
-        elif self.time_slide_shifts is not None:
-            self.best_periodic_scores_data[Search_results_index_slides] = [self.time_slide_shifts, times_quarters]
-        self.best_periodic_scores_data[Search_results_index_per_list] = self.periods
-
+        self.best_periodic_scores_data = best_periodic_scores_data
         if save_to_file:
             filename_postfix = filename_postfix_period + str(self.Pmin) + '_' + str(self.Pmax)
             file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
@@ -3061,235 +3232,306 @@ class KeplerLightCurve(object):
 
             np.save(file_path, np.array(self.best_periodic_scores_data, dtype=object), allow_pickle=True)
 
-        if save_inverted:
-            # period_indices_selected = []
-            periods_selected = []
-            phase_indices_selected = []
-            phases_selected = []
-            statistic_values_selected = []
-            summed_transit_times_selected = []
-            summed_stats_raw_selected = []
-            summed_trends_selected = []
-            summed_vars_selected = []
-            if len(self.statistics_periodic_interleaved) > 0:
-                for ti in range(len(self.statistics_periodic_interleaved[0])):  # over templates
-                    phase_ind_max_per = []
-                    stats_max_per = []
-                    for pi in range(len(self.statistics_periodic_interleaved)):  # over periods
-                        ph_i_max = np.nanargmax(self.statistics_periodic_interleaved[pi][ti])
-                        phase_ind_max_per.append(ph_i_max)
-                        stats_max_per.append(self.statistics_periodic_interleaved[pi][ti][ph_i_max])
-                    stat_best_per_inds = (np.argsort(stats_max_per)[::-1])[:n_per_temp]
-                    per_sel = self.periods[stat_best_per_inds]
-                    phase_ind_sel = np.array(phase_ind_max_per)[stat_best_per_inds]
-                    phases_sel = np.array(self._phases_interleaved)[phase_ind_sel]
-                    phases_abs = (np.array(self.time_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
-
-                    summed_transit_times_per = []
-                    summed_stats_raw_per = []
-                    summed_trends_per = []
-                    summed_vars_per = []
-                    for j in range(len(stat_best_per_inds)):
-                        period = per_sel[j]
-                        phase = phases_sel[j]
-                        expected_transit_times = [self.tmin + phase + i * period
-                                                  for i in
-                                                  range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
-                        summed_transit_points = [np.nanargmin(np.abs(self.time_interleaved - expected_transit_times[i]))
-                                                 for i in range(len(expected_transit_times))]
-                        summed_transit_times_per.append(self.time_interleaved[summed_transit_points])
-                        summed_stats_raw_per.append(self.statistics_interleaved[ti][summed_transit_points])
-                        summed_trends_per.append(self.trend_orig_flux_interleaved[summed_transit_points])
-                        summed_vars_per.append(self.stat_vars_interleaved[ti][summed_transit_points])
-                    # period_indices_selected.append(stat_best_per_inds)
-                    periods_selected.append(per_sel)
-                    phase_indices_selected.append(phase_ind_sel)
-                    statistic_values_selected.append(np.array(stats_max_per)[stat_best_per_inds])
-                    phases_selected.append(phases_abs)
-                    summed_transit_times_selected.append(summed_transit_times_per)
-                    summed_stats_raw_selected.append(summed_stats_raw_per)
-                    summed_trends_selected.append(summed_trends_per)
-                    summed_vars_selected.append(summed_vars_per)
-            if len(self.statistics_periodic_not_interleaved) > 0:
-                for ti in range(len(self.statistics_periodic_not_interleaved[0])):  # over templates
-                    phase_ind_max_per = []
-                    stats_max_per = []
-                    for pi in range(len(self.statistics_periodic_not_interleaved)):  # over periods
-                        ph_i_max = np.nanargmax(self.statistics_periodic_not_interleaved[pi][ti])
-                        phase_ind_max_per.append(ph_i_max)
-                        stats_max_per.append(self.statistics_periodic_not_interleaved[pi][ti][ph_i_max])
-                    stat_best_per_inds = (np.argsort(stats_max_per)[::-1])[:n_per_temp]
-                    per_sel = self.periods[stat_best_per_inds]
-                    phase_ind_sel = np.array(phase_ind_max_per)[stat_best_per_inds]
-                    phases_sel = np.array(self._phases_not_interleaved)[phase_ind_sel]
-                    phases_abs = (np.array(self.time_not_interleaved)[phase_ind_sel]) % per_sel  # phases wrt the beginning of Kepler time
-
-                    summed_transit_times_per = []
-                    summed_stats_raw_per = []
-                    summed_trends_per = []
-                    summed_vars_per = []
-                    for j in range(len(stat_best_per_inds)):
-                        period = per_sel[j]
-                        phase = phases_sel[j]
-                        expected_transit_times = [self.tmin + phase + i * period
-                                                  for i in
-                                                  range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
-                        summed_transit_points = [
-                            np.nanargmin(np.abs(self.time_not_interleaved - expected_transit_times[i])) for i in
-                            range(len(expected_transit_times))]
-                        summed_transit_times_per.append(self.time_not_interleaved[summed_transit_points])
-                        summed_stats_raw_per.append(self.statistics_not_interleaved[ti][summed_transit_points])
-                        summed_trends_per.append(self.trend_orig_flux_not_interleaved[summed_transit_points])
-                        summed_vars_per.append(self.stat_vars_not_interleaved[ti][summed_transit_points])
-                    # period_indices_selected.append(stat_best_per_inds)
-                    periods_selected.append(per_sel)
-                    phase_indices_selected.append(phase_ind_sel)
-                    statistic_values_selected.append(np.array(stats_max_per)[stat_best_per_inds])
-                    phases_selected.append(phases_abs)
-                    summed_transit_times_selected.append(summed_transit_times_per)
-                    summed_stats_raw_selected.append(summed_stats_raw_per)
-                    summed_trends_selected.append(summed_trends_per)
-                    summed_vars_selected.append(summed_vars_per)
-
-            times_quarters = [(np.nanmin(self.times[q]), np.nanmax(self.times[q])) for q in
-                              self.quarters]  # attention: there should be no zero-padding
-            # warning: you updated time slides, but the indices of the shuffled pieces are not saved here because you did not need them yet.
-
-            self.best_inverted_periodic_scores_data = [[] for _ in range(Search_results_length)]
-            self.best_inverted_periodic_scores_data[Search_results_index_per] = periods_selected
-            self.best_inverted_periodic_scores_data[Search_results_index_stat] = statistic_values_selected
-            self.best_inverted_periodic_scores_data[Search_results_index_sum_tr_times] = summed_transit_times_selected
-            self.best_inverted_periodic_scores_data[Search_results_index_sum_stats] = summed_stats_raw_selected
-            self.best_inverted_periodic_scores_data[Search_results_index_sum_trends] = summed_trends_selected
-            self.best_inverted_periodic_scores_data[Search_results_index_sum_vars] = summed_vars_selected
-            if self.inds_pieces_scramble is not None:
-                self.best_inverted_periodic_scores_data[Search_results_index_slides] = [
-                                                                                self.inds_pieces_scramble, self.inds_pieces_in_scrambled]
-            elif self.time_slide_shifts is not None:
-                self.best_inverted_periodic_scores_data[Search_results_index_slides] = [self.time_slide_shifts, times_quarters]
-            self.best_inverted_periodic_scores_data[Search_results_index_per_list] = self.periods
-            if save_to_file:
-                filename_postfix = filename_postfix_inverted_period + str(self.Pmin) + '_' + str(self.Pmax)
-                file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
-                                                    filename_postfix=filename_postfix, file_format='npy')
-                np.save(file_path, np.array(self.best_periodic_scores_data, dtype=object), allow_pickle=True)
+    # def save_best_candidates(self, n_per_temp=N_per_temp_saving, path=None,
+    #                          save_to_file=True, filename_postfix_period=Default_best_candidates_filename_postfix_period,
+    #                          key='snr', min_gauss_snr_to_save=Min_gauss_snr_to_save):
+    #     """
+    #     VERSION WITHOUT MARGINALIZATION OVER TEMPLATES AND WITH COHERENT SCORES. NOT FINISHED IN THE PART WHERE WE
+    #     SELECT MINIMUM FOR SAVING OR SOMETHING LIKE THAT!
+    #
+    #     Determines `n_per_temp` best scores for each template. For each period,
+    #     finds one best phase corresponding to min (negative) statistic. Then, selects
+    #     `n_per_temp` best periods for every template. For them, saves statistic values,
+    #     periods, phases, summed values (see the description of returned results).
+    #     `key` is what we compare = either `snr` or `coherent`
+    #
+    #     Modifies:
+    #     self.best_periodic_scores_data : multi-level non-uniform nested list
+    #         A structure saving info about `n_per_temp` best scores per each template:
+    #     period_indices_selected : list of lists of len `n_per_temp`
+    #         `n_per_temp` period indices of best statistics for each template
+    #     periods_selected : list of lists of len `n_per_temp`
+    #         `n_per_temp` periods of best statistics for each template
+    #     phase_indices_selected : list of lists of len `n_per_temp`
+    #         best phase indices for the `n_per_temp` periods (one oer period)
+    #         corresponding to best statistics for each template
+    #     phases_selected : list of lists of len `n_per_temp`
+    #         best phases for the `n_per_temp` periods (one oer period)
+    #         corresponding to best statistics for each template
+    #     statistic_values_selected : list of lists of len `n_per_temp`
+    #         `n_per_temp` best statistins (with no repeating periods) for each template
+    #     summed_transit_times_selected : list of lists of len `n_per_temp` of lists
+    #         times used for summation to get statistic_values_selected
+    #     summed_stats_raw_selected : list of lists of len `n_per_temp` of lists
+    #         raw statistics used for summation to get statistic_values_selected
+    #     summed_trends_selected : list of lists of len `n_per_temp` of lists
+    #         trend values used for summation to get statistic_values_selected
+    #     summed_vars_selected : list of lists of len `n_per_temp` of lists
+    #         variances used for summation to get statistic_values_selected
+    #
+    #     :param n_per_temp: How many best scores per template to save. The default is 10.
+    #     :type n_per_temp: int
+    #     :param path:
+    #     :type path:
+    #     :param save_to_file:
+    #     :type save_to_file:
+    #     :param filename_postfix_period:
+    #     :type filename_postfix_period:
+    #     :return:
+    #     :rtype:
+    #     """
+    #     # Warning: saved things are score-corrected. In order to get non-score-corrected values for amplitude estimations etc,
+    #     # use dedicated methods
+    #     if path is None:
+    #         path = self.output_location
+    #
+    #     periods_selected = []
+    #     phase_indices_selected = []  # relative phase indices wrt the local beginning of data (quarters may be cut)
+    #     phases_selected = []  # phase wrt the beginning of Kepler time
+    #     statistic_values_selected = []
+    #     coherent_scores_selected = []
+    #     volumes_priors_selected = []
+    #     stats_gaussianized_selected = []
+    #     first_transit_times_selected = []
+    #     summed_transit_times_selected = []
+    #     summed_stats_raw_selected = []
+    #     # summed_trends_selected = []
+    #     summed_vars_selected = []
+    #     summed_corrections_selected = []
+    #     summed_stats_gaussianized_selected = []
+    #
+    #     for stats_periodic_best_ph, best_phase_inds, phases, times, stats, variances, cors, vol_priors, \
+    #             coh_scores, stats_gauss_periodic_best_ph, stats_gauss in [
+    #                 [self.statistics_periodic_interleaved_best_ph,
+    #                  self.best_phase_inds_interleaved,
+    #                  self._phases_interleaved,
+    #                  self.time_interleaved,
+    #                  self.statistics_interleaved,
+    #                  self.stat_vars_interleaved,
+    #                  self.corrections_interleaved,
+    #                  self.volume_prior_terms_interleaved,
+    #                  self.coherent_scores_interleaved,
+    #                  self.stats_gaussianized_periodic_interleaved_best_ph,
+    #                  self.statistics_gaussianized_interleaved],
+    #                 [self.statistics_periodic_not_interleaved_best_ph,
+    #                  self.best_phase_inds_not_interleaved,
+    #                  self._phases_not_interleaved,
+    #                  self.time_not_interleaved,
+    #                  self.statistics_not_interleaved,
+    #                  self.stat_vars_not_interleaved,
+    #                  self.corrections_not_interleaved,
+    #                  self.volume_prior_terms_not_interleaved,
+    #                  self.coherent_scores_not_interleaved,
+    #                  self.stats_gaussianized_periodic_not_interleaved_best_ph,
+    #                  self.statistics_gaussianized_not_interleaved]]:
+    #         for ti in range(len(stats_periodic_best_ph[0])):  # over templates, either interleaved ot non-interleaved
+    #             if key == 'snr':
+    #                 I AM NOT SURE AT ALL THIS IS CORRECT!!!! the argsort will skip nans and give incorrect inds
+    #                   this is better:
+    #                     aa = np.array([1, 2, np.nan, 3.])
+    #                     msk = ~np.isnan(aa)
+    #                     args = np.argsort(aa[msk])
+    #                     ii = np.arange(len(aa))
+    #                     ii[msk][args]
+    #                 valid_idx = np.where(~np.isnan(coh_scores[:, ti]))[0]
+    #                 best_per_inds = np.argsort((stats_periodic_best_ph[:, ti][valid_idx]))[:n_per_temp]
+    #             else:  # will select the best coherent score
+    #                 valid_idx = np.where((~np.isnan(coh_scores[:, ti])) &
+    #                                      (np.abs(stats_gauss_periodic_best_ph[:, ti]) >= min_gauss_snr_to_save))[0]
+    #                 if len(valid_idx) >= n_per_temp:
+    #                     best_per_inds = np.argsort((coh_scores[:, ti][valid_idx])[::-1])[:n_per_temp]
+    #                 else:
+    #                     valid_idx = np.where((~np.isnan(coh_scores[:, ti])))[0]
+    #                     best_per_inds = np.argsort((coh_scores[:, ti][valid_idx])[::-1])[:n_per_temp]
+    #             scores_sel = np.array([coh_scores[bpi, ti] for bpi in best_per_inds])
+    #             stats_sel = np.array([stats_periodic_best_ph[bpi, ti] for bpi in best_per_inds])
+    #             vol_priors_sel = np.array([vol_priors[bpi, ti] for bpi in best_per_inds])
+    #
+    #             phase_ind_sel = np.array([best_phase_inds[bpi, ti] for bpi in best_per_inds])
+    #             per_sel = self.periods[best_per_inds]
+    #             phases_rel_sel = np.array(phases)[phase_ind_sel]  # relative phases wrt the beginning of this data
+    #             first_transit_times_selected.append(self.tmin + np.array(phases_rel_sel))
+    #             stats_gauss_sel = np.array([stats_gauss_periodic_best_ph[bpi, ti] for bpi in best_per_inds])
+    #
+    #             periods_selected.append(per_sel)
+    #             phase_indices_selected.append(phase_ind_sel)
+    #             coherent_scores_selected.append(scores_sel)
+    #             statistic_values_selected.append(stats_sel)
+    #             volumes_priors_selected.append(vol_priors_sel)
+    #             stats_gaussianized_selected.append(stats_gauss_sel)
+    #             phases_selected.append((np.array(times)[phase_ind_sel]) % per_sel)  # absolute phases wrt the beginning of Kepler time
+    #
+    #             # Collecting values that were used for summation:
+    #             summed_transit_points_transits = []
+    #             for j in range(len(best_per_inds)):
+    #                 period = per_sel[j]
+    #                 phase = phases_rel_sel[j]
+    #                 expected_transit_times = [self.tmin + phase + i * period  # i am not sure tmin does not miss some nan in the beginning
+    #                                           for i in range(int(np.ceil((self.tmax - self.tmin - phase) / period)))]
+    #                 summed_transit_points = [np.nanargmin(np.abs(times - expected_transit_times[i])) for
+    #                                          i in range(len(expected_transit_times))]
+    #                 summed_transit_points_transits.append(summed_transit_points)
+    #             for time_series, selected_values in [[times, summed_transit_times_selected],
+    #                                                  [stats[ti], summed_stats_raw_selected],
+    #                                                  [variances[ti], summed_vars_selected],
+    #                                                  [cors[ti], summed_corrections_selected],
+    #                                                  [stats_gauss[ti], summed_stats_gaussianized_selected]]:
+    #                 selected_values.append([time_series[summed_transit_points]
+    #                 for summed_transit_points in summed_transit_points_transits])
+    #
+    #     periods_selected = np.array(periods_selected)
+    #     statistic_values_selected = np.array(statistic_values_selected)
+    #     coherent_scores_selected = np.array(coherent_scores_selected)
+    #     volumes_priors_selected = np.array(volumes_priors_selected)
+    #     stats_gaussianized_selected = np.array(stats_gaussianized_selected)
+    #     first_transit_times_selected = np.array(first_transit_times_selected)
+    #
+    #     times_quarters = [(np.nanmin(self.times[q]), np.nanmax(self.times[q])) for q in
+    #                       self.quarters]  # attention: there should be no zero-padding
+    #     best_periodic_scores_data = [[] for _ in range(Search_results_length)]
+    #     for search_results_index, values_selected in [[Search_results_index_per, periods_selected],
+    #                                                   [Search_results_index_ftt, first_transit_times_selected],
+    #                                                   [Search_results_index_coh_score, coherent_scores_selected],
+    #                                                   [Search_results_index_stat, statistic_values_selected],
+    #                                                   [Search_results_index_vol_prior, volumes_priors_selected],
+    #                                                   [Search_results_index_gauss_stat, stats_gaussianized_selected],
+    #                                                   [Search_results_index_sum_tr_times, summed_transit_times_selected],
+    #                                                   [Search_results_index_sum_stats, summed_stats_raw_selected],
+    #                                                   [Search_results_index_sum_vars, summed_vars_selected],
+    #                                                   [Search_results_index_sum_cors, summed_corrections_selected],
+    #                                                   [Search_results_index_sum_gauss_stat, summed_stats_gaussianized_selected],
+    #                                                   [Search_results_index_per_list, self.periods]]:
+    #         best_periodic_scores_data[search_results_index] = values_selected
+    #     if self.inds_pieces_scramble is not None:
+    #         best_periodic_scores_data[Search_results_index_slides] = [self.inds_pieces_scramble, self.inds_pieces_in_scrambled]
+    #     elif self.time_slide_shifts is not None:
+    #         best_periodic_scores_data[Search_results_index_slides] = [self.time_slide_shifts, times_quarters]
+    #
+    #     self.best_periodic_scores_data = best_periodic_scores_data
+    #     if save_to_file:
+    #         filename_postfix = filename_postfix_period + str(self.Pmin) + '_' + str(self.Pmax)
+    #         file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
+    #                                             filename_postfix=filename_postfix, file_format='npy')
+    #
+    #         np.save(file_path, np.array(self.best_periodic_scores_data, dtype=object), allow_pickle=True)
 
     def get_best_trigger(self):
-        self.best_stat = 0
         best_candidates = self.best_periodic_scores_data
-        argm = np.argmin(best_candidates[Search_results_index_stat])
-        ti, i = argm // len(best_candidates[Search_results_index_stat][0]), argm % len(best_candidates[Search_results_index_stat][0])
-        # the structure used to be (25,10), where 10 was just 10 best per each template
-        smin = best_candidates[Search_results_index_stat][ti][i]  # minimal statistic
-        if smin < self.best_stat:
-            self.best_stat = smin
-            self.best_per = best_candidates[Search_results_index_per][ti][i]
-            self.best_temp = ti
-            self.best_first_transit_time = best_candidates[Search_results_index_sum_tr_times][ti][i][0]
-            self.summed_transit_times = best_candidates[Search_results_index_sum_tr_times][ti][i]
-            self.summed_raw_stats = np.array(best_candidates[Search_results_index_sum_stats][ti][i])
-            self.summed_trends = np.array(best_candidates[Search_results_index_sum_trends][ti][i])
-            self.summed_vars = np.array(best_candidates[Search_results_index_sum_vars][ti][i])
-            self.summed_vars[self.summed_vars == 0] = np.nan
+        self.best_period = best_candidates[Best_per_results_index_per][0]
+        self.best_ftt = best_candidates[Best_per_results_index_ftt][0]
+        self.best_stat = best_candidates[Bet_per_results_index_stats][0]
+        self.best_stat_gaussianized = best_candidates[Bet_per_results_index_stats_gauss][0]
+        self.best_phase_index = best_candidates[Bet_per_results_index_best_phase_ind][0]
+        self.best_period_index = best_candidates[Bet_per_results_index_best_per_ind][0]
 
-        self.best_stat_inv = 0
-        best_candidates = self.best_inverted_periodic_scores_data
-        argm = np.argmax(best_candidates[Search_results_index_stat])  # we took inverted best scores collection, they are positive
-        ti, i = argm // len(best_candidates[Search_results_index_stat][0]), argm % len(best_candidates[Search_results_index_stat][0])
-        # the structure used to be (25,10), where 10 was just 10 best per each template
-        smax = best_candidates[Search_results_index_stat][ti][i]  # maximal statistic
-        if smax > self.best_stat_inv:
-            self.best_stat_inv = smax
-            self.best_per_inv = best_candidates[Search_results_index_per][ti][i]
-            self.best_temp_inv = ti
-            self.best_first_transit_time_inv = best_candidates[Search_results_index_sum_tr_times][ti][i][0]
-            self.summed_transit_times_inv = best_candidates[Search_results_index_sum_tr_times][ti][i]
-            self.summed_raw_stats_inv = np.array(best_candidates[Search_results_index_sum_stats][ti][i])
-            self.summed_trends_inv = np.array(best_candidates[Search_results_index_sum_trends][ti][i])
-            self.summed_vars_inv = np.array(best_candidates[Search_results_index_sum_vars][ti][i])
-            self.summed_vars_inv[self.summed_vars_inv == 0] = np.nan
+    # def get_best_trigger(self):
+    #     self.best_score = 0
+    #     best_candidates = self.best_periodic_scores_data
+    #     argm = np.argmax(best_candidates[Search_results_index_coh_score])
+    #     ti, i = (argm // len(best_candidates[Search_results_index_coh_score][0]),
+    #              argm % len(best_candidates[Search_results_index_coh_score][0]))
+    #     # the structure is something like (n_templates,n_saved_per_template)
+    #     scormax = best_candidates[Search_results_index_stat][ti][i]  # maximal coherent score statistic
+    #     if scormax > self.best_score:
+    #         self.best_score = scormax
+    #         self.best_stat = best_candidates[Search_results_index_stat][ti][i]
+    #         self.best_per = best_candidates[Search_results_index_per][ti][i]
+    #         self.best_temp = ti
+    #         self.best_vol_prior = best_candidates[Search_results_index_vol_prior][ti][i]
+    #         self.best_first_transit_time = best_candidates[Search_results_index_ftt][ti][i]
+    #         self.best_gauss_stat = best_candidates[Search_results_index_gauss_stat][ti][i]
+    #         self.summed_transit_times = best_candidates[Search_results_index_sum_tr_times][ti][i]
+    #         self.summed_raw_stats = np.array(best_candidates[Search_results_index_sum_stats][ti][i])
+    #         # self.summed_trends = np.array(best_candidates[Search_results_index_sum_trends][ti][i])
+    #         self.summed_vars = np.array(best_candidates[Search_results_index_sum_vars][ti][i])
+    #         self.summed_vars[self.summed_vars == 0] = np.nan
+    #         self.summed_corrections = np.array(best_candidates[Search_results_index_sum_cors][ti][i])
+    #         self.summed_gauss_stats = np.array(best_candidates[Search_results_index_sum_gauss_stat][ti][i])
 
-    def get_values_at_transit_times(self, in_non_corrected=True, transit_times=None, template_ind=None):
-        """
-        Get UNCORRECTED VALUES!!!
-        :param in_non_corrected:
-        :type in_non_corrected:
-        :param transit_times:
-        :type transit_times:
-        :param template_ind:
-        :type template_ind:
-        :return:
-        :rtype:
-        """
-        # TODO correct this!
-        if in_non_corrected:
-            assert self.stats_raw_no_veto_no_score_cor is not None
-            stats_raw = self.stats_raw_no_veto_no_score_cor
-        else:
-            stats_raw = self.statistics_raw_cor
-        if transit_times is None:
-            transit_times = self.summed_transit_times
-        if template_ind is None:
-            template_ind = self.best_temp
+    # def get_values_at_transit_times(self, in_non_corrected=True, transit_times=None, template_ind=None):
+    #     """
+    #     Get UNCORRECTED VALUES!!!
+    #     :param in_non_corrected:
+    #     :type in_non_corrected:
+    #     :param transit_times:
+    #     :type transit_times:
+    #     :param template_ind:
+    #     :type template_ind:
+    #     :return:
+    #     :rtype:
+    #     """
+    #     # TODOOOOOOOO correct this!
+    #     print('this function needs yet to be written!')
+    #     # if in_non_corrected:
+    #     #     assert self.stats_raw_no_veto_no_score_cor is not None
+    #     #     stats_raw = self.stats_raw_no_veto_no_score_cor
+    #     # else:
+    #     #     stats_raw = self.statistics_raw
+    #     # if transit_times is None:
+    #     #     transit_times = self.summed_transit_times
+    #     # if template_ind is None:
+    #     #     template_ind = self.best_temp
+    #     #
+    #     # best_temps_sh = np.arange(self.tb.indices_of_templates[template_ind][0], self.tb.indices_of_templates[template_ind][-1])
+    #     # best_raw_stats = []
+    #     # best_stat_vars = []
+    #     # # best_trends = []
+    #     # best_templ_depths = []
+    #     # for i, tt in enumerate(transit_times):
+    #     #     best_stat = 0.
+    #     #     best_time_ind = None
+    #     #     best_temp_ind = None
+    #     #     best_quarter = None
+    #     #     for q in self.quarters:
+    #     #         if self.times[q][~np.isnan(self.times[q])][0] <= tt <= self.times[q][~np.isnan(self.times[q])][-1]:
+    #     #             ind_tr = np.nanargmin(np.abs(self.times[q] - tt))
+    #     #             for k in best_temps_sh:
+    #     #                 ti0 = max(0, ind_tr - 1)
+    #     #                 ti1 = min(ind_tr + 1, len(stats_raw[k][q]))
+    #     #                 rel_shift = np.nanargmin(stats_raw[k][q][ti0:ti1])
+    #     #                 time_index = ti0 + rel_shift
+    #     #                 stat_here = stats_raw[k][q][time_index]
+    #     #                 if stat_here < best_stat:
+    #     #                     best_stat = stat_here
+    #     #                     best_time_ind = time_index
+    #     #                     best_temp_ind = k
+    #     #                     best_quarter = q
+    #     #     if best_time_ind is not None:  # it can be None if the transit is between the quarters or something like that
+    #     #         # TODO make sure about shifted/not
+    #     #         best_raw_stats.append(stats_raw[best_temp_ind][best_quarter][best_time_ind])
+    #     #         best_stat_vars.append(self.stat_moving_vars[best_temp_ind][best_quarter][best_time_ind])
+    #     #         # best_trends.append(self.trends_orig_fluxes[best_quarter][best_time_ind])
+    #     #         best_templ_depths.append(np.max(np.abs(self.tb.templates_shifts[best_temp_ind])))
+    #     #     else:
+    #     #         best_raw_stats.append(np.nan)
+    #     #         best_stat_vars.append(np.nan)
+    #     #         # best_trends.append(np.nan)
+    #     #         best_templ_depths.append(np.nan)
+    #     #
+    #     # self.best_raw_stats = np.array(best_raw_stats)
+    #     # self.best_stat_vars = np.array(best_stat_vars)
+    #     # # self.best_trends = np.array(best_trends)
+    #     # self.best_templ_depths = np.array(best_templ_depths)
 
-        best_temps_sh = np.arange(self.tb.indices_of_templates[template_ind][0], self.tb.indices_of_templates[template_ind][-1])
-        best_raw_stats = []
-        best_stat_denoms = []
-        best_trends = []
-        best_templ_depths = []
-        for i, tt in enumerate(transit_times):
-            best_stat = 0.
-            best_time_ind = None
-            best_temp_ind = None
-            best_quarter = None
-            for q in self.quarters:
-                if self.times[q][~np.isnan(self.times[q])][0] <= tt <= self.times[q][~np.isnan(self.times[q])][-1]:
-                    ind_tr = np.nanargmin(np.abs(self.times[q] - tt))
-                    for k in best_temps_sh:
-                        ti0 = max(0, ind_tr - 1)
-                        ti1 = min(ind_tr + 1, len(stats_raw[k][q]))
-                        rel_shift = np.nanargmin(stats_raw[k][q][ti0:ti1])
-                        time_index = ti0 + rel_shift
-                        stat_here = stats_raw[k][q][time_index]
-                        if stat_here < best_stat:
-                            best_stat = stat_here
-                            best_time_ind = time_index
-                            best_temp_ind = k
-                            best_quarter = q
-            if best_time_ind is not None:  # it can be None if the transit is between the quarters or something like that
-                # TODO make sure about shifted/not
-                best_raw_stats.append(stats_raw[best_temp_ind][best_quarter][best_time_ind])
-                best_stat_denoms.append(self.stat_denoms[best_temp_ind][best_quarter])
-                best_trends.append(self.trends_orig_fluxes[best_quarter][best_time_ind])
-                best_templ_depths.append(np.max(np.abs(self.tb.templates_shifts[best_temp_ind])))
-            else:
-                best_raw_stats.append(np.nan)
-                best_stat_denoms.append(np.nan)
-                best_trends.append(np.nan)
-                best_templ_depths.append(np.nan)
-
-        self.best_raw_stats = np.array(best_raw_stats)
-        self.best_stat_denoms = np.array(best_stat_denoms)
-        self.best_trends = np.array(best_trends)
-        self.best_templ_depths = np.array(best_templ_depths)
-
-    def measure_depths(self):
-        # TODO DOOOOOOOOOOOOOO
-        # TODO: MAKE SURE IT WAS NOT USED BECUASE IT USES WRONG STAT
-        # TODO: get rid of the redundancies, because there is a similar function in target_class!
-        if self.best_raw_stats is None:
-            if self.summed_transit_times is None:
-                self.get_best_trigger()
-            self.get_values_at_transit_times(in_non_corrected=True,
-                                             transit_times=self.summed_transit_times, template_ind=self.best_temp)
-        self.best_ampl, self.best_ppm, self.best_ampls, self.best_ampls_stds, self.best_normalized_ampls, \
-            self.best_normalized_ampls_stds, self.best_ppms, self.best_ppms_stds = \
-            af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.best_raw_stats, summed_trends=self.best_trends,
-                                              summed_stat_denoms=self.best_stat_denoms,
-                                              templ_max=self.best_templ_depths, trends_stds=None)
+    # def measure_depths(self):
+    #     print('This function is not yet written')
+    #     # # TODO DOOOOOOOOOOOOOO
+    #     # # TODO: MAKE SURE IT WAS NOT USED BECUASE IT USES WRONG STAT
+    #     # # TODO: get rid of the redundancies, because there is a similar function in target_class!
+    #     # if self.best_raw_stats is None:
+    #     #     if self.summed_transit_times is None:
+    #     #         self.get_best_trigger()
+    #     #     self.get_values_at_transit_times(in_non_corrected=True,
+    #     #                                      transit_times=self.summed_transit_times, template_ind=self.best_temp)
+    #     # self.best_ampl, self.best_ppm, self.best_ampls, self.best_ampls_stds, self.best_normalized_ampls, \
+    #     #     self.best_normalized_ampls_stds, self.best_ppms, self.best_ppms_stds = \
+    #     #     af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.best_raw_stats,  # self.best_trends,
+    #     #                                       summed_trends=np.ones(len(self.best_stat)) * self.mean_total,
+    #     #                                       summed_stat_vars=self.best_stat_vars,
+    #     #                                       templ_max=self.best_templ_depths, trends_stds=None)
 
 
-def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, dt, tmax, tmin, periods):
+def sum_periods_fun_0(statistics_by_trends, trends_sq_by_vars, dt, tmax, tmin, periods):
     """
     Sums the statistics with all the possible periods and initial phases. Accounts for
     subbin template shifts, accounts for masks.
@@ -3342,6 +3584,131 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, dt, tmax, tmin, per
             statistics_periodic[P_ind, :, :phaselen] += statistics_by_trends[:, time_ind:time_ind + phaselen]
             denomsq[P_ind, :, :phaselen] += trends_sq_by_vars[:, time_ind:time_ind + phaselen]
     return statistics_periodic, denomsq
+
+
+def sum_periods_fun_1(statistics_by_trends, trends_sq_by_vars, corrections, dt, tmax, tmin, periods):
+    """
+    Sums the statistics with all the possible periods and initial phases. Accounts for
+    subbin template shifts, accounts for masks.
+    Does not return
+
+    :param statistics_by_trends :
+    :type statistics_by_trends : ndarray 2d of float
+    :param trends_sq_by_vars :
+    :type trends_sq_by_vars : ndarray 2d of float
+    :param corrections:
+    :type corrections:
+    :param dt : Time step of equally sampled time axis.
+    :type dt : float
+    :param tmax : Maximal time in the time axis.
+    :type tmax : float
+    :param tmin : Minimal time in the time axis.
+    :type tmin : float
+    :param periods:
+    :type periods: ndarray 1d
+
+    Produces:
+    statistics_periodic : ndarray 3d
+        Sum of the statistics for the entire transit chain. For all the templates
+        with shifts, for all the periods and starting phases.
+    statistics_periodic_counts : ndarray 3d
+        Number of transits summed in each entry. For all the templates
+        with shifts, for all the periods and starting phases.
+    phases : ndarray 3d
+        Starting phases corresponding to `statistics_periodic`. For all the
+        templates with shifts, for all the periods.
+    lengths_filled : ndarray 2d
+        Number of phases corresponding to `statistics_periodic`. For all the
+        templates with shifts, for all the periods. For different periods,
+        the length of the array of all the possible starting phases has different
+        length. These are the lengths. The remaining entries in `statistics_periodic`
+        and `statistics_periodic_counts` are zero.
+    relative_amplitudes : ndarray 4d
+        SNRs of individual transits in absolute units divided by the trend level
+        in this place. For all the templates, with shifts, for all the periods
+        and starting phases.
+    corrections : ndarray 3d
+        optionally, we can also fold the non-gaussianity corrections
+    """
+    phases_size = int(np.ceil((periods[-1]) / dt))
+    statistics_periodic = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    denomsq = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    corrections_periodic = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    for P_ind in range(len(periods)):
+        p = periods[P_ind]
+        n_transits = int(np.ceil((tmax - tmin) / p))
+        phaselen = int(p / dt)
+        for n in range(n_transits):
+            time_ind = int(np.round((p * n / dt)))
+            statistics_periodic[P_ind, :, :phaselen] += statistics_by_trends[:, time_ind:time_ind + phaselen]
+            denomsq[P_ind, :, :phaselen] += trends_sq_by_vars[:, time_ind:time_ind + phaselen]
+            corrections_periodic[P_ind, :, :phaselen] += corrections[:, time_ind:time_ind + phaselen]
+    return statistics_periodic, denomsq, corrections_periodic
+
+
+def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statistics_by_trends_gaussianized,
+                    dt, tmax, tmin, periods):
+    """
+    Sums the statistics with all the possible periods and initial phases. Accounts for
+    subbin template shifts, accounts for masks.
+    Does not return
+
+    :param statistics_by_trends :
+    :type statistics_by_trends : ndarray 2d of float
+    :param trends_sq_by_vars :
+    :type trends_sq_by_vars : ndarray 2d of float
+    :param corrections:
+    :type corrections:
+    :param statistics_by_trends_gaussianized:
+    :type statistics_by_trends_gaussianized:
+    :param dt : Time step of equally sampled time axis.
+    :type dt : float
+    :param tmax : Maximal time in the time axis.
+    :type tmax : float
+    :param tmin : Minimal time in the time axis.
+    :type tmin : float
+    :param periods:
+    :type periods: ndarray 1d
+
+    Produces:
+    statistics_periodic : ndarray 3d
+        Sum of the statistics for the entire transit chain. For all the templates
+        with shifts, for all the periods and starting phases.
+    statistics_periodic_counts : ndarray 3d
+        Number of transits summed in each entry. For all the templates
+        with shifts, for all the periods and starting phases.
+    phases : ndarray 3d
+        Starting phases corresponding to `statistics_periodic`. For all the
+        templates with shifts, for all the periods.
+    lengths_filled : ndarray 2d
+        Number of phases corresponding to `statistics_periodic`. For all the
+        templates with shifts, for all the periods. For different periods,
+        the length of the array of all the possible starting phases has different
+        length. These are the lengths. The remaining entries in `statistics_periodic`
+        and `statistics_periodic_counts` are zero.
+    relative_amplitudes : ndarray 4d
+        SNRs of individual transits in absolute units divided by the trend level
+        in this place. For all the templates, with shifts, for all the periods
+        and starting phases.
+    corrections : ndarray 3d
+        optionally, we can also fold the non-gaussianity corrections
+    """
+    phases_size = int(np.ceil((periods[-1]) / dt))
+    statistics_periodic = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    denomsq = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    corrections_periodic = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    stats_gaussianized_periodic = np.zeros((len(periods), len(statistics_by_trends), phases_size), dtype=Dtype_r)
+    for P_ind in range(len(periods)):
+        p = periods[P_ind]
+        n_transits = int(np.ceil((tmax - tmin) / p))
+        phaselen = int(p / dt)
+        for n in range(n_transits):
+            time_ind = int(np.round((p * n / dt)))
+            statistics_periodic[P_ind, :, :phaselen] += statistics_by_trends[:, time_ind:time_ind + phaselen]
+            denomsq[P_ind, :, :phaselen] += trends_sq_by_vars[:, time_ind:time_ind + phaselen]
+            corrections_periodic[P_ind, :, :phaselen] += corrections[:, time_ind:time_ind + phaselen]
+            stats_gaussianized_periodic[P_ind, :, :phaselen] += statistics_by_trends_gaussianized[:, time_ind:time_ind + phaselen]
+    return statistics_periodic, denomsq, corrections_periodic, stats_gaussianized_periodic
 
 
 def variables_from_file(filename):

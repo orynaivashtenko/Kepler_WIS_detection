@@ -61,7 +61,7 @@ def get_saved_wf_fd(freqs=None, dt=dt_lc, file_dir=Default_stored_wf_fd_file_dir
     return wf_fd
 
 
-def get_red_noise(support, n_vectors=0, dt=tm.dt_lc, psd='saved'):
+def get_red_noise(support, n_vectors=0, dt=tm.dt_lc, psd='saved', return_psd=False):
     """
     Simulate the simplest red noise with the psd by default saved in the file
     :param support:
@@ -86,7 +86,48 @@ def get_red_noise(support, n_vectors=0, dt=tm.dt_lc, psd='saved'):
         noise = np.random.normal(0, 1, support)
         f_noise = np.fft.rfft(noise, norm='ortho')
         noise = np.fft.irfft(f_noise * psd**0.5, norm='ortho')
-    return noise
+    if not return_psd:
+        return noise
+    else:
+        return noise, psd
+
+
+def get_simulated_star(n_quarters=14, mean_flux=1e4, sigma_high_rel=1e-4, tmin=131, t_between=1.,
+                       inject_planet=False, period=100, first_transit_center=141, rp=0.02, a=215., inc=90., ecc=0., w=90., u1=0.47,
+                       u2=0.23):
+    lenquart = int(91 / tm.dt_lc)
+    noises = []
+    noise, psd = get_red_noise(support=lenquart, n_vectors=0, return_psd=True)
+    for i in range(n_quarters):
+        noise, psd = get_red_noise(support=lenquart, n_vectors=0, return_psd=True)
+        noises.append(noise - np.nanmean(noise))
+    sigma_there = np.mean(np.abs(np.fft.rfft(noises[0], norm='ortho')[-len(noises[0]) // 4:]) ** 2) ** 0.5
+    factor = sigma_high_rel * mean_flux / sigma_there
+    noises = [noises[i] * factor + mean_flux for i in range(len(noises))]
+    psd_ortho_there = psd * factor ** 2
+
+    times = [np.arange(len(noises[i])) * tm.dt_lc for i in range(len(noises))]
+    for i in range(1, len(times)):
+        times[i] = times[i] + times[i - 1][-1] + tm.dt_lc + t_between
+    times = [times[i] + tmin for i in range(len(noises))]
+
+    if inject_planet:
+        fluxes, transits = inject_planet_to_data(times=times, fluxes=noises,
+                                                 period=period, first_transit_center=first_transit_center, rp=rp, a=a, inc=inc, ecc=ecc,
+                                                 w=w, u1=u1, u2=u2,
+                                                 supersample_factor=20, return_template=True)
+        transits = [transits[i] * mean_flux
+                    for i in range(len(transits))]
+        snr = 0
+        for transit in transits:
+            # getting expected snr
+            if len(np.where(transit > 0)[0]) > 0:
+                transit = np.roll(transit, -np.argmax(transit))
+                snr_1 = np.sum(np.fft.irfft(np.fft.rfft(transit, norm='ortho') / psd_ortho_there ** 0.5, norm='ortho') ** 2) ** 0.5
+                snr = (snr ** 2 + snr_1 ** 2) ** 0.5
+        return times, fluxes, snr
+    else:
+        return times, noises
 
 
 def inject_planet_to_data(times=None, fluxes=None,
@@ -534,7 +575,7 @@ def inject_planet_to_data(times=None, fluxes=None,
 #
 #         # WARNING:
 #         # The PSD used for injection is measured -> there will be no loss due to error in measurement!
-#         # It means that the injected SNR is not exactly the stated.
+#         # It orig_means that the injected SNR is not exactly the stated.
 #         # As well, the mean levels are measured, so the same issue.
 #         if return_zero_padding_ends:
 #             if return_template:

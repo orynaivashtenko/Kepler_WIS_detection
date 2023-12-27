@@ -936,7 +936,7 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
     return star_part_sap_fluxes, bg_part_sap_fluxes
 
 
-def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_denoms, templ_max, trends_stds=None):
+def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_vars, templ_max, trends_stds=None):
     """
 
     :param summed_raw_stats:
@@ -963,8 +963,8 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_
         ppms = np.zeros(len(summed_raw_stats)) * np.nan
         ppms_stds = np.zeros(len(summed_raw_stats)) * np.nan
 
-        ampls[not_missed_transit_mask] = np.abs(summed_raw_stats / summed_stat_denoms)[not_missed_transit_mask]
-        ampls_stds[not_missed_transit_mask] = (np.abs(1 / summed_stat_denoms)**0.5)[not_missed_transit_mask]
+        ampls[not_missed_transit_mask] = np.abs(summed_raw_stats / summed_stat_vars)[not_missed_transit_mask]
+        ampls_stds[not_missed_transit_mask] = (np.abs(1 / summed_stat_vars)**0.5)[not_missed_transit_mask]
         mean_trend = np.nanmean(summed_trends)
         normalized_ampls[not_missed_transit_mask] = (ampls / summed_trends * mean_trend)[not_missed_transit_mask]
         if trends_stds is not None:
@@ -980,10 +980,10 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_
 
         ampl = (np.nanmean((ampls[not_missed_transit_mask] / summed_trends[not_missed_transit_mask]))
                 * np.nanmean(summed_trends[not_missed_transit_mask]))
-        ppms[not_missed_transit_mask] = (summed_raw_stats / summed_stat_denoms / summed_trends * templ_max * 1e6)[not_missed_transit_mask]
+        ppms[not_missed_transit_mask] = (summed_raw_stats / summed_stat_vars / summed_trends * templ_max * 1e6)[not_missed_transit_mask]
         ppm = np.abs(np.nanmean(ppms[not_missed_transit_mask]))
         ppms_stds[not_missed_transit_mask] = ((
-                1 / summed_stat_denoms * np.var(summed_trends[not_missed_transit_mask])
+                1 / summed_stat_vars * np.var(summed_trends[not_missed_transit_mask])
                 / summed_trends ** 4 * templ_max ** 2 * 1e12)**0.5)[not_missed_transit_mask]
         return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
 
@@ -1332,7 +1332,7 @@ def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summ
             lcp = spip.KeplerLightCurve(times=[times[q]], fluxes=[tpf], get_data=False)
             lcp.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BECAUSE WE NEED TO INVERT FAIRLY.
             lcp.condition_templates(template_index=best_temp)
-            lcp.detect_single_transits(apply_score_correction=False, apply_veto=False)
+            lcp.detect_single_transits(apply_veto=False, gaussianize=False)
             for tt in times_needed_quarters[iq]:
                 ind_tr = np.nanargmin(np.abs(times[q] - tt))
                 # std_stat = ut.outlier_free_std(lcp.statistics_snr[0][0], nsig=3, mask=lcp.masks[0], detrend=False, detr_len=128)
@@ -1342,14 +1342,14 @@ def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summ
                 stat_snr_here = np.nanmin(
                     [np.nanmin(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]) for _ in range(len(lcp.statistics_snr))])
                 stat_raw_here = np.nanmin(
-                    [np.nanmin(lcp.statistics_raw_cor[0][0][ti0:ind_tr + bins_mismatch_allowed])
-                     for _ in range(len(lcp.statistics_raw_cor))])
+                    [np.nanmin(lcp.statistics_raw[0][0][ti0:ind_tr + bins_mismatch_allowed])
+                     for _ in range(len(lcp.statistics_raw))])
                 ppm_here = (stat_raw_here / lcp.stat_denoms[0][0] / lcp.trends_orig_fluxes[0][ind_tr] * np.max(
                     np.abs(lcp.tb.templates_shifts[0])) * 1e6)
                 std_of_ppm = (1 / lcp.stat_denoms[0][0] ** 0.5 * np.std(lcp.trends_orig_fluxes[0])
                               / lcp.trends_orig_fluxes[0][ind_tr] ** 2 * np.max(np.abs(lcp.tb.templates_shifts[0])) * 1e6)
                 target_pixels_stats_pxl.append(stat_snr_here)
-                target_pixels_means_pxl.append(lcp.means[0])
+                target_pixels_means_pxl.append(lcp.orig_means[0])
                 target_pixels_ppms_pxl.append(ppm_here)
                 target_pixels_stds_of_ppms_pxl.append(std_of_ppm)
         target_pixels_stats.append(target_pixels_stats_pxl)

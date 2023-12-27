@@ -158,7 +158,7 @@ plt.clf()
 # fig1 = plt.figure(figsize=(15, 5))
 # clrs = [(0.5, 0.5, 1), (0.2, 0.7, 0.5)]
 # for q in klc.quarters:
-#     plt.plot(klc.times[q], -klc.statistics_raw_cor[temp_n_sh_inv][q], color=clrs[q % 2], linewidth=1)
+#     plt.plot(klc.times[q], -klc.statistics_raw[temp_n_sh_inv][q], color=clrs[q % 2], linewidth=1)
 # plt.plot(targ.summed_transit_times_inv, targ.summed_raw_stats_inv, 'o', color='k', label='summed raw inverted', markersize=4)
 # for q in klc.quarters:
 #     vm = klc.veto_masks[temp_n_sh_inv][q].astype(bool)
@@ -179,7 +179,7 @@ plt.clf()
 #     times=klc.times, fluxes=[-fl for fl in klc.fluxes], period=targ.best_per_inv, first_time=targ.summed_transit_times_inv[0],
 #     masks=klc.big_hole_masks,
 #     binwid=binwid_inv, time_fold=templates_durations_hours[targ.best_temp_inv] / 24 * 10, dt=klc.dt_days,
-#     means=[np.nanmean(klc.orig_fluxes[q]) for q in klc.quarters],
+#     orig_means=[np.nanmean(klc.orig_fluxes[q]) for q in klc.quarters],
 #     template=np.array(klc.templates[klc.indices_of_templates[targ.best_temp_inv][0]]))
 # plt.figure(figsize=(8, 6))
 # for i in range(len(folds_times)):
@@ -197,7 +197,7 @@ plt.clf()
 # # PLOT FOLD WHITENED FLUX
 # bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped = fold_fluxes(
 #     times=klc.times, fluxes=klc.whitened_fluxes_td, period=targ.best_per, first_time=targ.summed_transit_times[0], masks=klc.big_hole_masks,
-#     binwid=binwid, time_fold=templates_durations_hours[targ.best_temp] / 24 * 10, dt=klc.dt_days, means=None,
+#     binwid=binwid, time_fold=templates_durations_hours[targ.best_temp] / 24 * 10, dt=klc.dt_days, orig_means=None,
 #     template=np.array(klc.templates[klc.indices_of_templates[targ.best_temp][0]]))
 # N = len(time_template)
 # temp_best_1 = np.array(
@@ -222,7 +222,7 @@ plt.clf()
 # bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped = fold_fluxes(
 #     times=klc.times, fluxes=[-fl for fl in klc.whitened_fluxes_td], period=targ.best_per_inv, first_time=targ.summed_transit_times_inv[0],
 #     masks=klc.big_hole_masks,
-#     binwid=binwid_inv, time_fold=templates_durations_hours[targ.best_temp_inv] / 24 * 10, dt=klc.dt_days, means=None,
+#     binwid=binwid_inv, time_fold=templates_durations_hours[targ.best_temp_inv] / 24 * 10, dt=klc.dt_days, orig_means=None,
 #     template=np.array(klc.templates[klc.indices_of_templates[targ.best_temp_inv][0]]))
 # N = len(time_template)
 # temp_best_1 = np.array(

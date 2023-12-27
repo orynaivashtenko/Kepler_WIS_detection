@@ -2,7 +2,7 @@ import numpy as np
 import copy
 import warnings
 from scipy.optimize import minimize
-from scipy.stats import chi2, norm
+from scipy.stats import chi2, norm, binom
 from scipy.special import erfc, erfinv
 from scipy.interpolate import interp1d
 from scipy.signal import iirnotch, tf2sos, tf2zpk
@@ -11,7 +11,25 @@ from scipy.signal.windows import tukey
 from search_pipeline_parameters import *
 
 
+def nanargsort(array):
+    array = np.array(array)
+    notnan_mask = ~np.isnan(array)
+    argsort = np.argsort(array[notnan_mask])
+    return np.arange(len(array))[notnan_mask][argsort]
+
+
 def dec_to_bin(num, return_list=False, return_str=False):
+    """
+    From decimal to binary
+    :param num:
+    :type num:
+    :param return_list:
+    :type return_list:
+    :param return_str:
+    :type return_str:
+    :return:
+    :rtype:
+    """
     num = int(num)
     if num == 0:
         bits = [0]
@@ -31,7 +49,17 @@ def dec_to_bin(num, return_list=False, return_str=False):
 
 def cos_vec(h1, h2, wf_fd=None, freqmask=None):
     """
-    Calculate cosine angle between two vectors
+    Calculate cosine angle between two vectors h1, h2, which are given in the time domain
+    :param h1: First unwhitened vector in the time domain
+    :type h1: ndarray(float)
+    :param h2: Second unwhitened vector in the time domain, same length as `h1`
+    :type h2: ndarray(float)
+    :param wf_fd: whitening filter in the Fourier domain
+    :type wf_fd: ndarray(float) of length consistent with rfft of `h1` and `h2`
+    :param freqmask: Frequency-domain mask of which frequencies should participate in the product
+    :type freqmask: ndarray(bool) of length consistent with rfft of `h1` and `h2`
+    :return:
+    :rtype: float
     """
     if freqmask is None:
         freqmask = np.ones(len(h1) // 2 + 1)  # .astype(float)
@@ -39,7 +67,7 @@ def cos_vec(h1, h2, wf_fd=None, freqmask=None):
         freqmask = freqmask.astype(float)
     if wf_fd is None:
         wf_fd = np.ones(len(freqmask))
-
+    # TODO: warning! freq mask is not participating in the normalization!
     norm_1 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))) ** 2)
     norm_2 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2))) ** 2)
     return (np.sum(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))
@@ -67,13 +95,33 @@ def unb_var(arr):
     return 1 / (len(arr) - 1) * np.sum(np.abs(arr - np.mean(arr)) ** 2)
 
 
-def moving_var(signal, mask=None, nperseg=Nperseg_moving_var, ngap=Ngap_moving_var,
-               remove_outliers=False, remove_outliers_light=False, detr_length_outliers=Detr_length_outliers,
-               nsig_outliers=Nsig_outliers_stat, return_mask=False, nsamples_min=Nsamples_min_moving_var,
-               adjustable_slices=False):
+def moving_std(data, window_len, mask=None, gap_len=0):
+    """NAIVE AND SLOW. USE IT ONLY FOR DEBUGGING OF MOVING_VAR"""
+    if mask is None:
+        mask = ~np.isnan(data)
+    d = window_len // 2
+    if gap_len == 0:
+        return [unb_var(data[max(0, i - d): min(i + d + 1, len(data))][
+                               mask[max(0, i - d): min(i + d + 1, len(data))]]) ** 0.5
+                if len(np.where(mask[max(0, i - d): min(i + d + 1, len(data))])[0]) > 1 else np.inf for i in range(len(data))]
+    g = gap_len // 2
+
+    return [unb_var(np.concatenate((data[max(0, i - d): max(0, i - g)], data[min(i + g + 1, len(data)): min(i + d + 1, len(data))]))[
+                           np.concatenate(
+                               (mask[max(0, i - d): max(0, i - g)], mask[min(i + g + 1, len(data)): min(i + d + 1, len(data))]))]) ** 0.5
+            if len(
+        np.where(np.concatenate((mask[max(0, i - d): max(0, i - g)], mask[min(i + g + 1, len(data)): min(i + d + 1, len(data))])))[0]) > 1
+            else np.inf for i in range(len(data))]
+
+
+def moving_var(signal, nwind, ngap=0, mask=None,
+               nsamples_min=32,
+               remove_outliers=False, nsig_outliers=6,
+               detrend_remove_outliers=False, detr_length_outliers=512,
+               return_mask=False, return_total_var=False):
     """
     Calculates the moving variance of the signal. At every point, takes the window of length
-    nperseg symmetrically from the two sides, excludes from the middle the window of length
+    nwind symmetrically from the two sides, excludes from the middle the window of length
     ngap and calculates the unbiased variance of the remaining. It is needed to
     avoid the impact of the entries correlated with the considered point to the
     variance estimation. For example, if there is a transit in this point, the
@@ -85,7 +133,7 @@ def moving_var(signal, mask=None, nperseg=Nperseg_moving_var, ngap=Ngap_moving_v
     ----------
     signal : numpy.array 1d of float, NO NANS
         Data from which the moving variance is taken.
-    nperseg : int
+    nwind : int
         Length of the segment to calculate local variance for each bin
     ngap : int
         Length of the gap to exclude around each bin when calculating the
@@ -97,7 +145,6 @@ def moving_var(signal, mask=None, nperseg=Nperseg_moving_var, ngap=Ngap_moving_v
         Moving variance estimate at each point of the signal
     """
     signal = np.array(signal)
-    mov_var = None
 
     if mask is None:
         mask = ~np.isnan(signal)
@@ -106,118 +153,67 @@ def moving_var(signal, mask=None, nperseg=Nperseg_moving_var, ngap=Ngap_moving_v
         assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
 
     if remove_outliers:
-        data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
-                                method='median', endmethod='mean', ends='symmetric', endlen=None,
-                                return_trend=False, keep_overall_level=False, remove_outliers=True,
-                                nsig_outliers=nsig_outliers)
+        if detrend_remove_outliers:
+            data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
+                                    method='median', endmethod='mean', ends='symmetric', endlen=None,
+                                    return_trend=False, keep_overall_level=False, remove_outliers=True,
+                                    nsig_outliers=nsig_outliers)
+        else:
+            data1 = signal
         outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
         mask *= outlier_mask
-    elif remove_outliers_light:
-        outlier_mask = np.abs(signal - np.nanmean(signal[mask])) < nsig_outliers * np.nanstd(signal[mask])
-        mask *= outlier_mask
-        outlier_mask = np.abs(signal - np.nanmean(signal[mask])) < nsig_outliers * np.nanstd(signal[mask])
+        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
         mask *= outlier_mask
 
-    all_done = False
-    if (nperseg > len(signal) / 2) or (nsamples_min * 4 > len(np.where(mask)[0])):
-        if adjustable_slices:
-            if len(np.where(mask)[0]) / 2 > nsamples_min * 2:
-                nperseg = len(signal) // 2 + 1
-                # warnings.warn('Not enough data to calculate moving variance.')
-            else:
-                mov_var = np.ones(len(signal)) * unb_var(signal[mask])
-            if ngap >= nperseg // 2:
-                ngap = nperseg // 2
+    tot_var = unb_var(signal[mask])
+
+    signal[~mask] = 0.
+    sum1 = np.nancumsum(signal * mask.astype(float))
+    sum1 = np.concatenate(([0], sum1[:-1]))
+    sum2 = np.nancumsum((signal * mask.astype(float)) ** 2)
+    sum2 = np.concatenate(([0], sum2[:-1]))
+    counts = np.nancumsum(mask)
+    counts = np.concatenate(([0], counts[:-1]))
+    mov_var = np.ones(len(signal)) * np.inf
+
+    hnw = nwind // 2
+    hng = ngap // 2
+    vecs = [sum2, sum1, counts]
+    for i in range(len(vecs)):
+        vec = vecs[i]
+        temp_vec_w = np.roll(vec, -hnw - 1)
+        temp_vec_w[len(temp_vec_w) - hnw - 1:] = vec[-1]
+        temp_vec_g = np.roll(vec, -hng - 1)
+        temp_vec_g[len(temp_vec_g) - hng - 1:] = vec[-1]
+        right_vec = temp_vec_w - temp_vec_g
+
+        temp_vec_w = np.roll(vec, hnw)
+        temp_vec_w[:hnw] = vec[0]
+        temp_vec_g = np.roll(vec, hng)
+        temp_vec_g[:hng] = vec[0]
+        left_vec = temp_vec_g - temp_vec_w
+        vecs[i] = right_vec + left_vec
+    sum2, sum1, counts = vecs
+    mask_counts = counts >= max(nsamples_min, 2)
+    counts = counts.astype(float)  # for the next row
+    counts[~mask_counts] = np.nan  # only for division, to avoid dividing by zero is there is some
+    mov_var = (sum2 / counts - (sum1 / counts) ** 2) * counts / (counts - 1)
+    mov_var[~mask_counts] = tot_var
+    if not return_total_var:
+        if not return_mask:
+            return mov_var
         else:
-            mov_var = np.ones(len(signal)) * unb_var(signal[mask])
-            all_done = True
-
-    if not all_done:
-        signal[~mask] = 0.
-        sum1 = np.nancumsum(signal)
-        sum1 = np.concatenate(([0], sum1))
-        sum2 = np.nancumsum(signal ** 2)
-        sum2 = np.concatenate(([0], sum2))
-        summ = np.nancumsum(mask)
-        summ = np.concatenate(([0], summ))
-        mov_var = []
-        for i in np.arange(0, ngap // 2):
-            counts = summ[i + nperseg // 2] - summ[i + ngap // 2]
-            if counts < nsamples_min:
-                nperseg1 = nperseg + (nsamples_min - counts) * 2
-                counts = summ[i + nperseg1 // 2] - summ[i + ngap // 2]
-                mov_var.append(((sum2[i + nperseg1 // 2] - sum2[i + ngap // 2]) / counts - (
-                        (sum1[i + nperseg1 // 2] - sum1[i + ngap // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-            else:
-                mov_var.append(((sum2[i + nperseg // 2] - sum2[i + ngap // 2]) / counts - (
-                        (sum1[i + nperseg // 2] - sum1[i + ngap // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-        for i in np.arange(ngap // 2, nperseg // 2):
-            counts = summ[i - ngap // 2] - summ[0] + summ[i + nperseg // 2] - summ[i + ngap // 2]
-            if counts < nsamples_min:
-                nperseg1 = nperseg + (nsamples_min - counts) * 2
-                counts = summ[i - ngap // 2] - summ[0] + summ[i + nperseg1 // 2] - summ[i + ngap // 2]
-                mov_var.append(((sum2[i - ngap // 2] - sum2[0] + sum2[i + nperseg1 // 2] - sum2[i + ngap // 2]) / counts
-                                - ((sum1[i - ngap // 2] - sum1[0] + sum1[i + nperseg1 // 2] - sum1[
-                            i + ngap // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-            else:
-                mov_var.append(((sum2[i - ngap // 2] - sum2[0] + sum2[i + nperseg // 2] - sum2[i + ngap // 2]) / counts
-                                - ((sum1[i - ngap // 2] - sum1[0] + sum1[i + nperseg // 2] - sum1[
-                            i + ngap // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-        for i in range(nperseg // 2, len(signal) - nperseg // 2):
-            counts = summ[i + nperseg // 2] - summ[i + ngap // 2] + summ[i - ngap // 2] - summ[i - nperseg // 2]
-            if counts < nsamples_min:
-                nperseg1 = nperseg + (nsamples_min - counts)
-                counts = summ[i + nperseg1 // 2] - summ[i + ngap // 2] + summ[i - ngap // 2] - summ[i - nperseg1 // 2]
-                mov_var.append(((sum2[i + nperseg1 // 2] - sum2[i + ngap // 2] + sum2[i - ngap // 2] - sum2[
-                    i - nperseg1 // 2]) / counts
-                                - (((sum1[i + nperseg1 // 2] - sum1[i + ngap // 2] + sum1[i - ngap // 2] - sum1[
-                            i - nperseg1 // 2]) / counts) ** 2))
-                               * counts / (counts - 1))
-            else:
-                mov_var.append(((sum2[i + nperseg // 2] - sum2[i + ngap // 2] + sum2[i - ngap // 2] - sum2[
-                    i - nperseg // 2]) / counts
-                                - (((sum1[i + nperseg // 2] - sum1[i + ngap // 2] + sum1[i - ngap // 2] - sum1[
-                            i - nperseg // 2]) / counts) ** 2))
-                               * counts / (counts - 1))
-        for i in np.arange(len(signal) - nperseg // 2, len(signal) - ngap // 2):
-            counts = summ[i - ngap // 2] - summ[i - nperseg // 2] + summ[-1] - summ[i + ngap // 2]
-            if counts < nsamples_min:
-                nperseg1 = nperseg + (nsamples_min - counts) * 2
-                counts = summ[i - ngap // 2] - summ[i - nperseg1 // 2] + summ[-1] - summ[i + ngap // 2]
-                mov_var.append(
-                    ((sum2[i - ngap // 2] - sum2[i - nperseg1 // 2] + sum2[-1] - sum2[i + ngap // 2]) / counts
-                     - ((sum1[i - ngap // 2] - sum1[i - nperseg1 // 2] + sum1[-1] - sum1[i + ngap // 2]) / counts) ** 2)
-                    * counts / (counts - 1))
-            else:
-                mov_var.append(((sum2[i - ngap // 2] - sum2[i - nperseg // 2] + sum2[-1] - sum2[i + ngap // 2]) / counts
-                                - ((sum1[i - ngap // 2] - sum1[i - nperseg // 2] + sum1[-1] - sum1[
-                            i + ngap // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-        for i in np.arange(len(signal) - ngap // 2, len(signal)):
-            counts = summ[i - ngap // 2] - summ[i - nperseg // 2]
-            if counts < nsamples_min:
-                nperseg1 = nperseg + (nsamples_min - counts) * 2
-                counts = summ[i - ngap // 2] - summ[i - nperseg1 // 2]
-                mov_var.append(((sum2[i - ngap // 2] - sum2[i - nperseg1 // 2]) / counts
-                                - ((sum1[i - ngap // 2] - sum1[i - nperseg1 // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-            else:
-                mov_var.append(((sum2[i - ngap // 2] - sum2[i - nperseg // 2]) / counts
-                                - ((sum1[i - ngap // 2] - sum1[i - nperseg // 2]) / counts) ** 2)
-                               * counts / (counts - 1))
-    if not return_mask:
-        return np.abs(np.array(mov_var))  # because small fluctuations around zero can occur
+            return mov_var, mask
     else:
-        return np.abs(np.array(mov_var)), mask
+        if not return_mask:
+            return mov_var, tot_var
+        else:
+            return mov_var, mask, tot_var
 
 
-def gap_var(signal, mask=None, ngap=Ngap_moving_var,
-            remove_outliers=False, remove_outliers_light=False, detr_length_outliers=Detr_length_outliers,
-            nsig_outliers=Nsig_outliers_stat, return_mask=False, nsamples_min=Nsamples_min_moving_var,
+def gap_var(signal, mask=None, nwind=Nwind_moving_var_min, ngap=Ngap_moving_var_min,
+            remove_outliers=False, detrend_remove_outliers=False, detr_length_outliers=Detr_length_outliers,
+            nsig_outliers=Nsig_outliers_stat, return_mask=False, nsamples_min=Nwind_moving_var_min//2,
             adjustable_slices=False, return_total_var=False):
     """
     Calculates the moving variance of the signal taking for every point all the
@@ -239,8 +235,8 @@ def gap_var(signal, mask=None, ngap=Ngap_moving_var,
     :type ngap: int
     :param remove_outliers:
     :type remove_outliers:
-    :param remove_outliers_light:
-    :type remove_outliers_light:
+    :param detrend_remove_outliers:
+    :type detrend_remove_outliers:
     :param detr_length_outliers:
     :type detr_length_outliers:
     :param nsig_outliers:
@@ -265,16 +261,16 @@ def gap_var(signal, mask=None, ngap=Ngap_moving_var,
         assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
 
     if remove_outliers:
-        data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
-                                method='median', endmethod='mean', ends='symmetric', endlen=None,
-                                return_trend=False, keep_overall_level=False, remove_outliers=True,
-                                nsig_outliers=nsig_outliers)
+        if detrend_remove_outliers:
+            data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
+                                    method='median', endmethod='mean', ends='symmetric', endlen=None,
+                                    return_trend=False, keep_overall_level=False, remove_outliers=True,
+                                    nsig_outliers=nsig_outliers)
+        else:
+            data1 = signal
         outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
         mask *= outlier_mask
-    elif remove_outliers_light:
-        outlier_mask = np.abs(signal - np.nanmean(signal[mask])) < nsig_outliers * np.nanstd(signal[mask])
-        mask *= outlier_mask
-        outlier_mask = np.abs(signal - np.nanmean(signal[mask])) < nsig_outliers * np.nanstd(signal[mask])
+        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
         mask *= outlier_mask
 
     total_var = unb_var(signal[mask])
@@ -290,31 +286,34 @@ def gap_var(signal, mask=None, ngap=Ngap_moving_var,
     summ = np.concatenate(([0], summ))
     mov_var = []
 
-    for i in np.arange(0, ngap // 2):
-        counts = summ[-1] - summ[i + ngap // 2]
+    hnw = nwind // 2
+    hng = ngap // 2
+
+    for i in np.arange(0, hng):
+        counts = summ[-1] - summ[i + hng]
         if counts < nsamples_min:
             mov_var.append(total_var)
         else:
             mov_var.append(
-                ((sum2[-1] - sum2[i + ngap // 2]) / counts - ((sum1[-1] - sum1[i + ngap // 2]) / counts) ** 2)
+                ((sum2[-1] - sum2[i + hng]) / counts - ((sum1[-1] - sum1[i + hng]) / counts) ** 2)
                 * counts / (counts - 1))
 
-    for i in range(ngap // 2, len(signal) - ngap // 2, ):
-        counts = summ[-1] - summ[i + ngap // 2] + summ[i - ngap // 2]
+    for i in range(hng, len(signal) - hng, ):
+        counts = summ[-1] - summ[i + hng] + summ[i - hng]
         if counts < nsamples_min:
             mov_var.append(total_var)
         else:
-            mov_var.append(((sum2[-1] - sum2[i + ngap // 2] + sum2[i - ngap // 2]) / counts
-                            - (((sum1[-1] - sum1[i + ngap // 2] + sum1[i - ngap // 2]) / counts) ** 2))
+            mov_var.append(((sum2[-1] - sum2[i + hng] + sum2[i - hng]) / counts
+                            - (((sum1[-1] - sum1[i + hng] + sum1[i - hng]) / counts) ** 2))
                            * counts / (counts - 1))
 
-    for i in np.arange(len(signal) - ngap // 2, len(signal)):
-        counts = summ[i - ngap // 2]
+    for i in np.arange(len(signal) - hng, len(signal)):
+        counts = summ[i - hng]
         if counts < nsamples_min:
             mov_var.append(total_var)
         else:
-            mov_var.append(((sum2[i - ngap // 2]) / counts
-                            - ((sum1[i - ngap // 2]) / counts) ** 2)
+            mov_var.append(((sum2[i - hng]) / counts
+                            - ((sum1[i - hng]) / counts) ** 2)
                            * counts / (counts - 1))
     if not return_total_var:
         if not return_mask:
@@ -688,7 +687,7 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
         What to do to the ends of the data in linear method.
         'continue' is to take the first(last) value and fill by it all the rest.
         'zeros' meens to replace by zeros.
-        'keep' means to leave what was in the original data (maybe nans)
+        'keep' orig_means to leave what was in the original data (maybe nans)
     mitigate_hole_ends : bool
         If true, for the linear, mean and median interpolation, not the ends of the holes will be taken,
         but the average of points near the hole
@@ -1617,6 +1616,31 @@ def clean_small_holes(mask, max_hole=Max_small_hole):
     return mask
 
 
+def clean_small_non_holes(mask, max_non_hole=Max_small_hole):
+    """
+    Deletes from the mask holes of size <=max_small_hole,
+    replacing False with True.
+
+    Parameters
+    ----------
+    mask : numpy.array 1d of bool
+        True is good data, False is bad data
+    max_non_hole : int
+        Maximum size of hole which is considered to be small
+
+    Returns
+    -------
+    mask : np.array 1d of bool
+        Mask in which small holes are removed, i.e. made True
+    """
+    mask = np.array(mask).astype(bool)
+    mask_1 = clean_small_holes(mask, max_hole=max_non_hole)
+    mask_1_inv = ~mask_1
+    mask_1_inv = clean_small_holes(mask_1_inv, max_hole=max_non_hole)
+    mask_1 = ~mask_1_inv
+    return mask & mask_1
+
+
 def interpolate_time(time, mask=None):
     """
     Takes time (which is expected to be evenly sampled) and linearly interpolates
@@ -2385,4 +2409,186 @@ def replace_beginning(vector, replacement, min_repl_size):
         sign = np.sign(vector[ind_temp] - replacement[ind_temp])
     vector[: ind_temp] = replacement[: ind_temp]
     return vector
+
+
+def pbin_fun(x=None, dx=None, x2=None, x1=None, loc=0, scale=1, distr='norm'):
+    """
+    attention to factors of 2!!!!!!!
+    x: bin_center
+    xd: bin width
+    alternatively:
+    x2: bin upper edge
+    x1: bin lower edge
+    """
+    if x2 is None or x1 is None:
+        x2 = x + dx/2
+        x1 = x - dx/2
+    if distr == 'norm':
+        return norm.cdf(x2, loc=0, scale=1) - norm.cdf(x1, loc=loc, scale=scale)
+    elif distr == 'norm_abs':
+        assert (np.array([x1]) >= 0).all(), 'distribution of absolute values should not have negative bins!'
+        assert (np.array([x2]) >= 0).all(), 'distribution of absolute values should not have negative bins!'
+        return 2 * (norm.cdf(x2, loc=0, scale=1) - norm.cdf(x1, loc=loc, scale=scale))
+    elif distr == 'norm_quadr_bins':
+        return (norm.cdf(x2**0.5, loc=0, scale=1) - norm.cdf(x1**0.5, loc=loc, scale=scale)) * 2
+    else:
+        raise(ValueError('Undefined `distr` value!'))
+
+
+def expected_hist(total_counts, bins, loc=0, scale=1, times_per_bins=1, n_sigma=None, distr='norm_abs', non_integer=False):
+    """
+    times_per_bins: how many times per bin the value can deviate from the allowed interval. the
+            deviation will be split into two: above and below same prob
+    """
+    pbins = pbin_fun(x2=bins[1:], x1=bins[:-1], loc=loc, scale=scale, distr=distr)
+    expected = pbins * total_counts
+    if not non_integer:
+        prob = times_per_bins/(len(bins)-1)  # something which happens one per bin
+        upper = binom.isf(prob/2, n=total_counts, p=pbins, loc=0)
+        lower = binom.ppf(prob/2, n=total_counts, p=pbins, loc=0)
+        return expected, upper, lower
+    else:
+        norm_factor = total_counts * (bins[1] - bins[0]) * 2  # factor 2 because both positive and begative values
+        stds_predicted = (pbins * (1-pbins) * total_counts)**0.5
+        if n_sigma is None:
+            prob = times_per_bins/(len(bins)-1)  # something which happens one per bin
+            n_sigma = norm.isf(prob/2, loc=loc, scale=scale)  # how far we can go to still be within this prob
+        upper = expected + n_sigma * stds_predicted
+        lower = expected - n_sigma * stds_predicted
+        lower[lower<0] = 0
+        return expected, upper, lower
+
+
+def cumsum_for_sf_and_conf_ints(counts_bins, n_sigma=1):
+    """
+    counts_bins should be real counts, no normalization!
+    """
+    counts_total = np.sum(counts_bins)
+    p_be_in_bin = counts_bins / counts_total
+    vars_predicted = (p_be_in_bin * (1-p_be_in_bin) * counts_total)
+    sf_hist_quadr = (np.cumsum(counts_bins[::-1]))[::-1]
+    stds_sf_hist_quadr = ((np.cumsum(vars_predicted[::-1]))[::-1])**0.5
+    lower = sf_hist_quadr - n_sigma * stds_sf_hist_quadr
+    lower[lower < 0] = 0
+    upper = sf_hist_quadr + n_sigma * stds_sf_hist_quadr
+    return sf_hist_quadr, lower, upper
+
+
+def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
+    """
+    stats: should be one-sided
+    """
+    stats = np.abs(stats)
+    bins_linear = np.linspace(0, np.max(stats) + 0.5, n_bins)
+    centr_bins_linear = bins_linear[:-1] + (bins_linear[1] - bins_linear[0]) / 2
+    counts_linear, bins_linear = np.histogram(stats, bins=bins_linear, density=False)
+    expected, upper, lower = expected_hist(np.sum(counts_linear), bins_linear)
+
+    best_scale = 1.
+    best_coef = 0.  # if the mixture is not needed, this will be the answer
+    more_than_upper = (counts_linear - upper) > 0
+    if len(np.where(more_than_upper)[0]) > 0:
+        cum_more_than_upper = np.cumsum(more_than_upper)
+        ind_dev = np.where((cum_more_than_upper > min(7, cum_more_than_upper[-1] / 3)) & (centr_bins_linear >= beg_min))[0]
+        if len(ind_dev) == 0:
+            raise (ValueError('Something is very wrong with the distribution'))
+        else:
+            ind_dev = ind_dev[0] - 1
+        snr_start = bins_linear[ind_dev]
+        if snr_start == len(bins_linear) - 1:
+            snr_start = snr_start - 1
+
+        ###########################################################################
+        # QUADRATIC HIST
+        stats_squared = np.array(stats) ** 2
+        bins_quadr = np.linspace(0, np.max(stats_squared) + 0.5, n_bins)
+        counts_quadr_non_norm, bins_quadr = np.histogram(stats_squared, bins=bins_quadr, density=False)
+        last_non_zero = np.where(counts_quadr_non_norm > 0)[0][-1]
+        counts_quadr_non_norm = counts_quadr_non_norm[:last_non_zero + 1]
+        bins_quadr = bins_quadr[:last_non_zero + 2]
+        d_bin_quadr = bins_quadr[1] - bins_quadr[0]
+        centr_bins_quadr = bins_quadr[:-1] + d_bin_quadr / 2
+        norm_factor = 1 / (np.sum(counts_quadr_non_norm))  # * d_bin_quadr)
+        sf_hist_quadr, lower_sf_hist_quadr, upper_sf_hist_quadr = cumsum_for_sf_and_conf_ints(counts_quadr_non_norm, n_sigma=1)
+        sf_hist_quadr = sf_hist_quadr * norm_factor
+
+        lower_sf_hist_quadr = lower_sf_hist_quadr * norm_factor
+        upper_sf_hist_quadr = upper_sf_hist_quadr * norm_factor
+        log_sf_hist_quadr = np.log(sf_hist_quadr)
+        log_up_sf_hist_quadr = np.log(upper_sf_hist_quadr)
+        upper_sf_hist_quadr[upper_sf_hist_quadr == 0] = np.nanmin(upper_sf_hist_quadr[upper_sf_hist_quadr != 0])
+        lower_sf_hist_quadr[lower_sf_hist_quadr == 0] = np.nanmin(lower_sf_hist_quadr[lower_sf_hist_quadr != 0])
+        log_low_sf_hist_quadr = np.log(lower_sf_hist_quadr)
+        log_errors_sf_hist_quadr = (log_up_sf_hist_quadr - log_low_sf_hist_quadr) / 2
+        zero_indices = np.where(sf_hist_quadr == 0)[0]
+        if len(zero_indices) > 0:
+            log_errors_sf_hist_quadr[zero_indices] = log_errors_sf_hist_quadr[zero_indices + 1]
+
+        ###########################################################################
+        # OREPATING LOG QUADRATIC FIT (APPROX!)
+
+        indices_fit = np.where(centr_bins_quadr > snr_0_fit ** 2)[0]  # & (sf_hist_quadr>0) &
+        if len(indices_fit) > 0:
+            if 1 <= len(indices_fit) < 3:
+                indices_fit = np.arange(3) - 3 + len(log_sf_hist_quadr)
+
+            bins_fit_sqrt = (centr_bins_quadr[indices_fit]) ** 0.5
+            log_sf_hist_quadr_fit = log_sf_hist_quadr[indices_fit]
+            log_errors_sf_hist_quadr_fit = log_errors_sf_hist_quadr[indices_fit]
+
+            ###########################################################################
+            # INITIAL GUESS
+            ind_init_guess = np.where(centr_bins_quadr >= snr_start ** 2)[0]
+            if len(ind_init_guess) == 0:
+                raise (ValueError('Stat distribution fit initial guess array is empty!'))
+            else:
+                ind_init_guess = ind_init_guess[0]
+            bins_quad_init_guess = centr_bins_quadr[ind_init_guess:]
+
+            log_sf_init_guess = log_sf_hist_quadr[ind_init_guess:]
+            log_errors_sf_hist_quadr_init_guess = log_errors_sf_hist_quadr[ind_init_guess:]
+
+            sol = minimize(lambda x: np.sum(
+                (log_sf_init_guess - (x[0] + x[1] * bins_quad_init_guess)) ** 2 / log_errors_sf_hist_quadr_init_guess ** 2),
+                           x0=np.array([0, -1]))
+            # if not sol.success:
+            #     print('initial guess linear fit failed!!!')
+            best_scale = (1 / (-sol.x[1] * 2)) ** 0.5  # initial_guess_scale
+            if best_scale <= 0:
+                raise ValueError('Stat distribution fit best is not positive!')
+
+            ###########################################################################
+            # FIT
+            normal_part = norm.sf(bins_fit_sqrt, loc=0, scale=1)
+
+            def opt_fun(x, scal):
+                return np.sum((log_sf_hist_quadr_fit - np.log(
+                    2*(normal_part + np.abs(x[0]) * norm.sf(bins_fit_sqrt, loc=0, scale=scal)) / (1 + np.abs(x[0])))) ** 2
+                              / log_errors_sf_hist_quadr_fit ** 2)
+
+            coefs_refinement = [[0.8, 1.7], [0.95, 1.1]]
+            for co1, co2 in coefs_refinement:
+                scale_grid = np.linspace(max(1.1, best_scale * co1), best_scale * co2, 20)
+                ress = []
+                funs = []
+                successes = []
+                for scale in scale_grid:
+                    sol = minimize(opt_fun, x0=np.array([0.01]), args=(scale))
+                    ress.append(np.abs(sol.x[0]))
+                    funs.append(sol.fun)
+                    successes.append(sol.success)
+                best_sol_index = np.argmin(funs)
+                best_scale = scale_grid[best_sol_index]
+                best_coef = ress[best_sol_index]
+    return best_scale, best_coef
+
+
+def gauss_sum_pdf(x, scale=1., ampl=0.):
+    return (norm.pdf(x, loc=0, scale=1) + ampl * norm.pdf(x, loc=0, scale=scale)) / (1 + ampl)
+
+
+def log_non_gaussian_correction(stat, ampl, scale):
+    ng_pdf = gauss_sum_pdf(stat, scale=scale, ampl=ampl)
+    g_pdf = gauss_sum_pdf(stat, scale=1., ampl=0.)
+    return np.log(g_pdf) - np.log(ng_pdf)
 

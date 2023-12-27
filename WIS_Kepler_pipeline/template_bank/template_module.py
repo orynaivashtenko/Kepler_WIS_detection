@@ -13,24 +13,26 @@ import os
 import auxiliary_functions as af
 from pipeline_parameters import Default_template_bank_folder, Default_templates_filename, \
     Default_templates_shifts_filename, Default_shifts_filename, Default_durations_filename, Default_indices_of_templates_filename, \
-    Default_templates_of_indices_filename, Default_template_params_filename
+    Default_templates_of_indices_filename, Default_template_params_filename, Precomputed_tables_location, \
+    Log_occurrences_templates_periods_m13r_per_edges_filename, Log_second_derivs_cos2_shifts_templates_filename, \
+    Log_cos2_derivs_templates_filename, Log_template_prior_m13r_per_edges_filename
 
 # dt_lc = 1765.5 / (60 * 60 * 24)  # days long cadence interval
 dt_lc = 0.02043368  # almost the same. measured from data
-L_ban = 105  # Length of the templates
+L_ban = 105  # Length of the templates  # based on the maximal considered duration
 T_ban = L_ban * dt_lc
 Min_edge_zeros = 7  # Minimal number of zeros in the edge of the templates
 
 Durations = np.load(os.path.join(Default_template_bank_folder, Default_durations_filename), allow_pickle=True)  # days
 Indices_of_templates = np.load(os.path.join(Default_template_bank_folder, Default_indices_of_templates_filename), allow_pickle=True)
 Templates_of_indices = np.load(os.path.join(Default_template_bank_folder, Default_templates_of_indices_filename), allow_pickle=True)
-N_templates = 79
+N_templates = len(Indices_of_templates)
 Max_cos = 0.97  # was used in the bank generation. If cos was smaller, it was added to the bank
 Limb_darkening_coefs_sun = (0.47, 0.23)
 
 
 def get_default_templates_params(folder=Default_template_bank_folder, filename=Default_template_params_filename):
-    # m_1_3_r_s, period, a, ecc, w, inc
+    # m_1_3_r_s, period, a, inc, ecc, w, u1, u2
     params_temps = np.load(os.path.join(folder, filename),  allow_pickle=True)
     return params_temps
 
@@ -38,6 +40,8 @@ def get_default_templates_params(folder=Default_template_bank_folder, filename=D
 # noinspection PyUnresolvedReferences
 class TemplateBank(object):
     def __init__(self, templates=None,
+                 # from_parameters=False,
+                 parameters=None,
                  template_bank_folder=Default_template_bank_folder,
                  templates_filename=Default_templates_filename,
                  templates_shifts_filename=Default_templates_shifts_filename,
@@ -45,6 +49,7 @@ class TemplateBank(object):
                  durations_filename=Default_durations_filename,
                  indices_of_templates_filename=Default_indices_of_templates_filename,
                  templates_of_indices_filename=Default_templates_of_indices_filename,
+                 # parameters_file_dir=Default_template_params_filename,
                  template_index='all', shifts=None, dt=dt_lc, support=None,
                  enforce_centering=False,
                  enforce_same_length=False,
@@ -84,6 +89,7 @@ class TemplateBank(object):
         self.durations_file_dir = os.path.join(template_bank_folder, durations_filename)
         self.indices_of_templates_file_dir = os.path.join(template_bank_folder, indices_of_templates_filename)
         self.templates_of_indices_file_dir = os.path.join(template_bank_folder, templates_of_indices_filename)
+        # self.parameters_file_dir = os.path.join(template_bank_folder, parameters_file_dir)
 
         self.initial_templates = None
         self.shifts = None
@@ -98,13 +104,14 @@ class TemplateBank(object):
         self.templates_shifts = None
         self.num_templates_shifts = None
         self.template_index = -1 if template_index == 'all' else int(template_index)
+        self.parameters = parameters
 
         self.support = None
 
         ########################################################
         # Reading from the file:
         ########################################################
-        if load_essentials:
+        if (templates is None) and load_essentials:
             self.load_npy_bank(only_essentials=True)
             if template_index != 'all':
                 if not hasattr(template_index, '__len__'):
@@ -128,7 +135,7 @@ class TemplateBank(object):
                                              for _ in range(self.indices_of_templates[k][0], self.indices_of_templates[k][1])]
             self.calculate_len_and_number()
         else:
-            if just_load:
+            if (templates is None) and just_load:
                 self.load_npy_bank(only_essentials=False)
             else:
                 if templates is None:
@@ -149,7 +156,7 @@ class TemplateBank(object):
 
                 # Load or set the subbin time shifts of the templates:
                 if shifts is None:
-                    if self.shifts_file_dir is not None:
+                    if (self.shifts_file_dir is not None) and (load_essentials or just_load):
                         if self.shifts_file_dir[-4:] == '.npy':
                             self.shifts = np.load(self.shifts_file_dir, allow_pickle=True)
                         elif self.shifts_file_dir[-4:] == '.txt':
@@ -163,7 +170,7 @@ class TemplateBank(object):
                     self.shifts = shifts
 
                 # Load or measure the durations of the templates:
-                if self.durations_file_dir is not None:
+                if (self.durations_file_dir is not None) and (load_essentials or just_load):
                     if self.durations_file_dir[-4:] == '.npy':
                         self.durations = np.load(self.durations_file_dir, allow_pickle=True)
                     elif self.durations_file_dir[-4:] == '.txt':
@@ -219,6 +226,8 @@ class TemplateBank(object):
                 self.initial_templates = [self.initial_templates[ind] for ind in indices_for_reordering]
                 self.shifts = [self.shifts[ind] for ind in indices_for_reordering]
                 self.durations = [self.durations[ind] for ind in indices_for_reordering]
+                if self.parameters is not None:
+                    self.parameters = [self.parameters[ind] for ind in indices_for_reordering]
             ###########################################################################################################################
             self.templates = copy.deepcopy(self.initial_templates)
             ########################################################
@@ -289,15 +298,25 @@ class TemplateBank(object):
         if self.templates_shifts is not None:
             self.templates_shifts = roll_templates(self.templates_shifts)
 
-    def save_bank(self, templates_file_dir=None, shifts_file_dir=None, durations_file_dir=None):
+    def save_bank(self, templates_file_dir=None, shifts_file_dir=None, durations_file_dir=None,
+                  templates_shifts_file_dir=None, indices_of_templates_file_dir=None, templates_of_indices_file_dir=None):
         if templates_file_dir is None:
             templates_file_dir = self.templates_file_dir
         if shifts_file_dir is None:
             shifts_file_dir = self.shifts_file_dir
         if durations_file_dir is None:
             durations_file_dir = self.durations_file_dir
+        if templates_shifts_file_dir is None:
+            templates_shifts_file_dir = self.templates_shifts_file_dir
+        if indices_of_templates_file_dir is None:
+            indices_of_templates_file_dir = self.indices_of_templates_file_dir
+        if templates_of_indices_file_dir is None:
+            templates_of_indices_file_dir = self.templates_of_indices_file_dir
 
-        for file_dir, value in [[templates_file_dir, self.templates], [shifts_file_dir, self.shifts], [durations_file_dir, self.durations]]:
+        for file_dir, value in [[templates_file_dir, self.templates], [shifts_file_dir, self.shifts], [durations_file_dir, self.durations],
+                                [templates_shifts_file_dir, self.templates_shifts],
+                                [indices_of_templates_file_dir, self.indices_of_templates],
+                                [templates_of_indices_file_dir, self.templates_of_indices]]:
             if file_dir[-4:] == '.npy':
                 np.save(file_dir, np.array(value, dtype=object), allow_pickle=True)
             elif file_dir[-4:] == '.txt':
@@ -305,6 +324,19 @@ class TemplateBank(object):
                     print(*value, file=file)
             else:
                 raise TypeError('Unrecognized template bank file type!')
+
+    def save_parameters(self, parameters_file_dir=None):
+        if parameters_file_dir is None:
+            parameters_file_dir = self.parameters_file_dir
+
+        file_dir, value = parameters_file_dir, self.parameters
+        if file_dir[-4:] == '.npy':
+            np.save(file_dir, np.array(value, dtype=object), allow_pickle=True)
+        elif file_dir[-4:] == '.txt':
+            with open(file_dir, 'w') as file:
+                print(*value, file=file)
+        else:
+            raise TypeError('Unrecognized template bank file type!')
 
     def load_npy_bank(self, templates_file_dir=None, shifts_file_dir=None, durations_file_dir=None, templates_shifts_file_dir=None,
                       indices_of_templates_file_dir=None, templates_of_indices_file_dir=None, only_essentials=False):
@@ -713,7 +745,7 @@ def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=
     :type rp: float, unitless
     :param a: major semi-axis, in units of stellar radius. The default is 215.
     :type a: float, units of stellar radii
-    :param inc: inclination in degrees. The default is 90., it means there is no inclination, a straight transit.
+    :param inc: inclination in degrees. The default is 90., it orig_means there is no inclination, a straight transit.
     :type inc: float, deg, 90 is direct transit.
     :param ecc: eccentricity. The default is 0.
     :type ecc: float, from 0 to 1
@@ -775,16 +807,171 @@ def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=
     return flux
 
 
+def make_template_from_pars(L, per, a, inc, ecc, w, u1=0.47, u2=0.23, template_support=256, min_cos_shift=0.93, n_shifts=3, rp=0.02,
+                            enforce_symmetrization=True, dt=dt_lc, effective_wf_fd=None):
+    shift_step = dt / n_shifts
+    if effective_wf_fd is None:
+        from simulations.lightcurve_simulation import get_saved_wf_fd
+        freqs = np.fft.rfftfreq(template_support, d=dt)
+        effective_wf_fd = get_saved_wf_fd(freqs=freqs, dt=dt)
+
+    t_red = time(t_tot=L * dt, parity='odd')
+    flux_obs = 1. - flux_par(t=t_red, params=None, per=per, rp=rp, a=a, inc=inc, ecc=ecc, w=w, u1=u1, u2=u2, t0=0, supersample_factor=20,
+                             exp_time=dt_lc)
+    flux_obs_0 = np.array(flux_obs)
+    flip = 1
+    if enforce_symmetrization:
+        flux_obs = np.roll(flux_obs, -np.argmax(flux_obs))
+        l2 = (len(flux_obs) + 1) // 2
+        s1 = np.sum(flux_obs[1:l2])
+        s2 = np.sum(flux_obs[-l2 + 1:])
+        if s1 < s2:
+            flip = -1
+            flux_obs = np.array(flux_obs_0)[::-1]
+        else:
+            flux_obs = np.array(flux_obs_0)
+    init_roll = -(np.argmax(flux_obs) - (len(flux_obs) - 1) // 2)
+    flux_obs = np.roll(flux_obs, init_roll)
+    flux_obs = flux_obs / np.linalg.norm(flux_obs)
+
+    flux_obs_to_wh = np.roll(flux_obs, -np.argmax(flux_obs))
+    flux_obs_to_wh = np.concatenate((flux_obs_to_wh[:len(flux_obs_to_wh) // 2],
+                                     np.zeros(template_support - len(flux_obs_to_wh)), flux_obs_to_wh[len(flux_obs_to_wh) // 2:]))
+    wh_flux_obs = np.fft.rfft(flux_obs_to_wh) * effective_wf_fd
+    wh_flux_obs = wh_flux_obs / np.linalg.norm(np.fft.irfft(wh_flux_obs))
+    # wh_flux_obs_prepared_for_cos_fd = np.conj(wh_flux_obs) * cosine_coeffs
+
+    return_temp = [np.array(flux_obs)]
+    return_wh = [np.array(wh_flux_obs)]
+
+    cos_angle_shift = np.fft.irfft(wh_flux_obs) @ np.roll(np.fft.irfft(wh_flux_obs), -1)
+    # cos_angle_shift = np.real(wh_flux_obs_prepared_for_cos_fd @ np.fft.rfft(np.roll(np.fft.irfft(wh_flux_obs), -1)))
+    if cos_angle_shift < min_cos_shift:
+        for i_sh in range(1, n_shifts):
+            flux_obs = 1. - flux_par(t=t_red, params=None, per=per, rp=rp, a=a, inc=inc, ecc=ecc, w=w, u1=u1, u2=u2,
+                                     t0=i_sh * shift_step * flip,
+                                     supersample_factor=20, exp_time=dt_lc)
+            if flip == -1:
+                flux_obs = flux_obs[::-1]
+            flux_obs = np.roll(flux_obs, init_roll)
+            flux_obs = flux_obs / np.linalg.norm(flux_obs)
+
+            flux_obs_to_wh = np.roll(flux_obs, -np.argmax(flux_obs))
+            flux_obs_to_wh = np.concatenate((flux_obs_to_wh[:len(flux_obs_to_wh) // 2],
+                                             np.zeros(template_support - len(flux_obs_to_wh)), flux_obs_to_wh[len(flux_obs_to_wh) // 2:]))
+            wh_flux_obs = np.fft.rfft(flux_obs_to_wh) * effective_wf_fd
+            wh_flux_obs = wh_flux_obs / np.linalg.norm(np.fft.irfft(wh_flux_obs))
+
+            return_temp.append(np.array(flux_obs))
+            return_wh.append(np.array(wh_flux_obs))
+    return return_temp, return_wh
+
+
+def prepare_fd_for_cos(vec_fd):
+    vec_fd = vec_fd / np.linalg.norm(np.fft.irfft(vec_fd))
+    support = 2 * (len(vec_fd) - 1)
+    # cosine_coeffs = np.ones(support // 2 + 1) * 2
+    cosine_coeffs = np.ones(len(vec_fd)) * 2
+    cosine_coeffs[0] = 1.
+    cosine_coeffs[-1] = 1.
+    cosine_coeffs = cosine_coeffs / support
+    return np.conj(vec_fd) * cosine_coeffs
+
+
+def load_volume_prior_precomputed_terms(
+        precomputed_tables_location=Precomputed_tables_location,
+        log_occurrences_templates_periods_m13r_per_edges_filename=Log_occurrences_templates_periods_m13r_per_edges_filename,
+        log_second_derivs_cos2_shifts_templates_filename=Log_second_derivs_cos2_shifts_templates_filename,
+        log_cos2_derivs_templates_filename=Log_cos2_derivs_templates_filename):
+    """
+    log_cos2_derivs_templates : time derivative of template shifting wrt itself,
+    log_second_derivs_cos2_shifts_templates : cos squared derivative wrt the template number and
+    log_occurrences_templates_periods_m13r_per_edges : the binned occurrence rates with bins.
+    log_occurrences_templates_periods is normalized by the m_1_3_r to have the full axtrophysical occurrence rate
+    in every m_1_3_r bin. units are rate! no probability normalization!
+    :param precomputed_tables_location: in which directory all that resides
+    :type precomputed_tables_location:
+    :param log_occurrences_templates_periods_m13r_per_edges_filename:
+    :type log_occurrences_templates_periods_m13r_per_edges_filename:
+    :param log_second_derivs_cos2_shifts_templates_filename:
+    :type log_second_derivs_cos2_shifts_templates_filename:
+    :param log_cos2_derivs_templates_filename:
+    :type log_cos2_derivs_templates_filename:
+    :return:
+    :rtype:
+    """
+    log_second_derivs_cos2_shifts_templates = np.load(
+        os.path.join(precomputed_tables_location, log_second_derivs_cos2_shifts_templates_filename), allow_pickle=True)
+    # -> time derivative of template shifting wrt itself
+    log_cos2_derivs_templates = np.load(os.path.join(precomputed_tables_location, log_cos2_derivs_templates_filename),
+                                        allow_pickle=True)
+    log_occurrences_templates_periods, m13r_bin_edges, period_edges = np.load(
+        os.path.join(precomputed_tables_location, log_occurrences_templates_periods_m13r_per_edges_filename), allow_pickle=True)
+    # log_occurrences_templates_periods is normalized by the m_1_3_r!
+    return log_second_derivs_cos2_shifts_templates, log_cos2_derivs_templates, \
+        log_occurrences_templates_periods, m13r_bin_edges, period_edges
+
+
+def load_template_prior(
+        precomputed_tables_location=Precomputed_tables_location,
+        log_template_prior_m13r_per_edges_filename=Log_template_prior_m13r_per_edges_filename):
+    """
+    log_template_prior_periods_m13r_per_edges : the binned normalized occurrence rates with bins.
+    normalized to have sum one over the templates in each bin.
+    :param precomputed_tables_location: in which directory all that resides
+    :type precomputed_tables_location:
+    :param log_template_prior_m13r_per_edges_filename:
+    :type log_template_prior_m13r_per_edges_filename:
+    :return:
+    :rtype:
+    """
+    log_template_prior, m13r_bin_edges, period_edges = np.load(
+        os.path.join(precomputed_tables_location, log_template_prior_m13r_per_edges_filename), allow_pickle=True)
+    # log_occurrences_templates_periods is normalized by the m_1_3_r!
+    return log_template_prior, m13r_bin_edges, period_edges
+
+
+def calculate_depth_factor(params):
+    """
+    Calculates how deep is the transit wrt the area part (due to limb darkening and inclination)
+    For the search it is not important because we are pnly looking at cosines. For these templates
+    there can be different parameters with different depth factor.
+    :param params:
+    :type params:
+    :return:
+    :rtype:
+    """
+    was_many_params = True
+    if not hasattr(params[0], '__len__'):
+        params = [params]
+        was_many_params = False
+    rp_1 = 0.2
+    depth_factors = []
+    tim = time(t_tot=T_ban, parity='odd')[1:]
+    for m_1_3_r_s_1, period_1, a_1, inc_1, ecc_1, w_1, u1_1, u2_1 in params:
+        flux_best = 1. - flux_par(t=tim, params=None,
+                                  per=period_1, rp=rp_1, a=a_1, inc=inc_1, ecc=ecc_1, w=w_1, u1=u1_1, u2=u2_1, t0=0,
+                                  supersample_factor=20, exp_time=dt_lc)
+        depth_factors.append(np.max(flux_best) / rp_1 ** 2)
+    if not was_many_params:
+        depth_factors = depth_factors[0]
+    return depth_factors
+
+
 """
 How I prepared the whitened array for injections:
 
 sprt = 256  # we can make 8192, but it will take too much time in the injections code. 
 # and also, in the real life, we measure the psd with a smaller resolution. the template length is only 105, so we can take this.
-tb = tm.TemplateBank(just_load=True)
+#tb = tm.TemplateBank(just_load=True)
 tb.pad_templates(support=sprt)
 swffd = sim.get_saved_wf_fd(freqs=np.fft.rfftfreq(sprt, d=tm.dt_lc))
-templates_rolled_left = [np.roll(tt, -np.argmax(tt))for tt in tb.templates_shifts]  
+# rolls = [-np.argmax(tt[0]) for tt in tb.templates]
+# templates_rolled_left = [np.roll(tt, rolls[tb.templates_of_indices[i]]) for i, tt in enumerate(tb.templates_shifts)]
 # -> rolled to the max because it is easier for detection in injections
+templates_rolled_left = [np.roll(tt, -np.argmax(tt)) for i, tt in enumerate(tb.templates_shifts)]
+# -> roll everyone to the left because how do real injections know what are the shifts? they will be rolled all, too!
+
 templates_whitened_fd = [np.fft.rfft(tt) * swffd for tt in templates_rolled_left]
 templates_whitened_fd = [tt/ np.linalg.norm(np.fft.irfft(tt)) for tt in templates_whitened_fd]
 
@@ -792,4 +979,10 @@ templates_whitened_fd = [tt/ np.linalg.norm(np.fft.irfft(tt)) for tt in template
 # templates_whitened_td = [tt / np.linalg.norm(tt) for tt in templates_whitened_td]  
 np.save('/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/WIS_Kepler_pipeline'
         +'/template_bank/templates_whitened_normalized_fd_for_injections.npy', templates_whitened_fd)
+"""
+
+
+"""
+
+
 """
