@@ -19,15 +19,9 @@ class KeplerTCE(target_class.KeplerTarget):
                  villanova_dict_file=Villanova_dict_file,
                  overwrite_parameters_by_unpickle=False):
         super().__init__(target_id=target_id, data_location=data_location, output_location=output_location,
-                         # mes_candidate=pp.Mes_candidate_search,
-                         # p_min_search=pp.P_min_search, p_max_search=pp.P_max_search, p_chunks_search=pp.P_chunks_search,
-                         load_pickled_attributes=load_pickled_attributes,
-                         get_transit_and_binary_info=True,
-                         gaia_kepler_file_path=gaia_kepler_file_path,
-                         koi_dict_file=koi_dict_file,
-                         ttv_dict_file=ttv_dict_file,
-                         villanova_dict_file=villanova_dict_file,
-                         overwrite_parameters_by_unpickle=overwrite_parameters_by_unpickle)
+                         load_pickled_attributes=load_pickled_attributes, get_transit_and_binary_info=True,
+                         gaia_kepler_file_path=gaia_kepler_file_path, koi_dict_file=koi_dict_file, ttv_dict_file=ttv_dict_file,
+                         villanova_dict_file=villanova_dict_file, overwrite_parameters_by_unpickle=overwrite_parameters_by_unpickle)
 
         data_location = af.get_correct_tid_folder(target_id, data_location)
         output_location = af.get_correct_tid_folder(target_id, output_location)
@@ -170,7 +164,7 @@ class KeplerTCE(target_class.KeplerTarget):
         if target_pixels_folder is None:
             target_pixels_folder = self.target_pixels_location
         return af.get_trigger_star_bg_ppms(target_id=self.target_id,
-                                           best_first_transit_time=self.best_first_transit_time,
+                                           best_first_transit_time=self.best_ftt,
                                            best_per=self.best_per, best_temp=self.best_temp,
                                            target_pixels_folder=target_pixels_folder,
                                            number_of_pixels_cut=number_of_pixels_cut,

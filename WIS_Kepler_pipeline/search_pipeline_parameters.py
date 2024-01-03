@@ -80,18 +80,17 @@ Std_time_scrambling = 10.  # days # for time slides
 Max_hole_pieces_scrampling = 30  # <1 day # Hole which is considered a reason to split the statistic to two pieces which can be shuffled
 Max_piece_scrambling = int(50 * 24 * 2)  # 50 days # Maximal possible length of a piece which will be shuffled
 Min_piece_scrambling = int(5 * 24 * 2)  # 5 days # Minimal possible length of a piece which will be shuffled
-N_per_temp_saving = 1  # how many best candidates per template to save
+N_best_saving = 10  # how many best candidates per template to save
 Min_gauss_snr_to_save = 6.
 # track_process = False
 
 Best_per_results_index_per = 0
 Best_per_results_index_ftt = 1  # first transit time
-Bet_per_results_index_stats = 2
-Bet_per_results_index_stats_gauss = 3
-Bet_per_results_index_best_phase_ind = 4
-Bet_per_results_index_best_per_ind = 5
-Best_per_results_index_per_list = 6
-Bet_per_results_length = 7
+Best_per_results_index_stats = 2
+Best_per_results_index_stats_gauss = 3
+Best_per_results_index_best_integral = 4
+Best_per_results_index_per_list = 5
+Best_per_results_length = 6
 
 # Search_results_index_per = 0
 # Search_results_index_ftt = 1  # first transit time

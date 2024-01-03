@@ -18,9 +18,9 @@ Target_id = '010187017'
 # '008700506',  # villanova morph 0.04
 
 targ = target_class.KeplerTarget(target_id=Target_id,
-                                 load_pickled_attributes=False,
                                  data_location='/Users/orynaivashtenko/Work/Kepler_Project/Intermediate_tasks/Runs_files_not_marvin/Data',
-                                 output_location='/Users/orynaivashtenko/Work/Kepler_Project/Intermediate_tasks/Runs_files_not_marvin',)
+                                 output_location='/Users/orynaivashtenko/Work/Kepler_Project/Intermediate_tasks/Runs_files_not_marvin',
+                                 load_pickled_attributes=False)
 
 # # targ1 = target_class.KeplerTarget(# target_id='005302100',  # with no planet
 # #                                   # target_id='011853905',  # with planet

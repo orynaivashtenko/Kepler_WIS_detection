@@ -59,7 +59,7 @@ if koi_period is not None and koi_time0bk is not None:
     with open(results_list_file, 'a') as fil1:  # will save here these target_ids outputs
         print(targ.target_id, koi_period,
               koi_time0bk, koi_duration, koi_depth, koi_max_sngle_ev, koi_max_mult_ev, koi_model_snr,
-              targ.klc.best_stat, targ.klc.best_per, targ.klc.best_first_transit_time, targ.klc.best_temp,
+              targ.klc.best_stat, targ.klc.best_per, targ.klc.best_ftt, targ.klc.best_temp,
               targ.klc.summed_raw_stats, targ.klc.summed_vars, targ.klc.summed_trends,
               sep=' ', end='\n', file=fil1)
 

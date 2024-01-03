@@ -62,7 +62,7 @@ with open(tid_to_run_file, 'r') as ttrf:
 trig_ids = [tid.strip() for tid in trig_ids]
 
 slides_mes_inv_filename_postfix = Slides_mes_inv_filename_postfix
-slides_mes_filename_postfix = Slides_mes_filename_postfix
+slides_mes_filename_postfix = Slides_stats_filename_postfix
 slides_pers_inv_filename_postfix = Slides_pers_inv_filename_postfix
 slides_pers_filename_postfix = Slides_pers_filename_postfix
 slides_first_times_inv_filename_postfix = Slides_first_times_inv_filename_postfix

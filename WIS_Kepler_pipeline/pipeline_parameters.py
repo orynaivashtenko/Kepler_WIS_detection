@@ -1,6 +1,6 @@
 import numpy as np
 import os
-from scipy.interpolate import RegularGridInterpolator
+# from scipy.interpolate import RegularGridInterpolator
 
 ######################################################################################################################################
 # PHYSICAL CONSTANTS AND RATES
@@ -94,8 +94,6 @@ def get_occurrence_table_enlarged():
         [0.1,   0.1,   0.069, 0.017,  0.017]])
     return log2_rp_re_edges_enlarged, log10_per_edges_enlarged, occurrences_table_enlarged
 
-
-
 # def get_occurrence_rate(stellar_radius, per_days, rp_rearth, rp_rstar=None):
 #     """
 #     Per one star
@@ -150,17 +148,19 @@ def get_occurrence_table_enlarged():
 # TARGET CLASS PARAMETERS
 P_min_search = 30  # days
 P_max_search = 500  # days
+Rp_re_max = 11  # this number of earth radii we search for now. 11 is Jupiter
+Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune to Sun
 # this one is used for the main search
 # P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
 # -> this one used to be when I had 25 templates. Now I have more, so we must increase
-P_chunks_search = 1000  # 1440
-Per_phases_per_chunk = 660000
+# P_chunks_search = 1000  # 1440
+Per_phases_per_chunk = 1000000  # 660000
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
-N_periods_per_chunk = 80  # Now I run for the full bank
+# N_periods_per_chunk = 80  # Now I run for the full bank
 # I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
-Mes_candidate_search = 40**0.5  # mes in units of SNR (not squared)
+Stat_candidate_search = 40  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
 N_slides_total = 10000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
@@ -170,12 +170,12 @@ N_injections_chunk = 20  # number of injections per job so that it will take 10/
 # I decreased it from 50 to 20 in run_7 because now we need more time for veto
 Per_wing_injection_and_slides_relative = 2 / 50  # Range to the left and to the right of the best period in units of period. Will be used
 # to generate injections and time slides with variable periods around the best one
-N_per_temp_saving_slides = 2  # how many best candidates per template to save when doing the time slides
+N_best_saving_slides = 3  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 # Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
 Max_phase_mismatch_to_dur = 0.3  # Maximal relative phase difference for defining successful injections
-Default_min_plot_mes2 = 10
-Default_max_plot_mes2 = 140
+Default_min_plot_stat = 10
+Default_max_plot_stat = 140
 
 Figsize_fluxes = (15, 5)
 Figsize_folds = (8, 6)
@@ -186,7 +186,7 @@ Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a f
 Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
 Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
-Run_name = 'run_8'
+Run_name = 'run_9'
 
 if Working_place == 'Home':
     Gaia_kepler_file = '/Users/orynaivashtenko/Work/Kepler_Project/kepler_dr3_good.fits'
@@ -243,13 +243,13 @@ Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
 All_templates_injection_parameters_filename_postfix = 'all_templates_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'
 # these stupid names are because of the search which checks `in`, and I need one file not to be in another one
-Slides_mes_filename_postfix = 'scramble_mes_scramble'  # 'slides_mes_slides'
+Slides_res_filename_postfix = 'scramble_res_scramble'
+Slides_stats_filename_postfix = 'scramble_stats_scramble'  # 'slides_mes_slides'
 Slides_pers_filename_postfix = 'scramble_pers_scramble'  # 'slides_pers_slides'
 Slides_first_times_filename_postfix = 'scramble_first_times_scramble'  # 'slides_first_times_slides'
-Slides_coh_scores_filename_postfix = 'scramble_coh_scores_scramble'
-Slides_gauss_mes_filename_postfix = 'scramble_gauss_mes_scramble'
+Slides_gauss_stats_filename_postfix = 'scramble_gauss_stats_scramble'
 
-Histogram_mes2_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
+Histogram_stats_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
 
 #########################################################################################################################
 # Template Bank

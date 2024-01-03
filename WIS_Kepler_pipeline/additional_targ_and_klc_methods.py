@@ -1034,7 +1034,7 @@ def save_trigger_info(self, triggers, path=None, filename_postfix='trigger_info'
     np.save(os.path.join(path, str(self.target_id) + '_' + filename_postfix), np.array(triggers, dtype=object), allow_pickle=True)
 
 
-def save_all_results(self, path=None, n_per_temp_saving=spip.N_per_temp_saving):
+def save_all_results(self, path=None, n_per_temp_saving=spip.N_best_saving):
     """
     klc method
     :param self:
@@ -1616,7 +1616,7 @@ def veto_mes(self, mes_threshold=Threshold_mes_veto, veto_threshold=Veto_thresho
         #         self.best_inverted_periodic_scores_data[Search_results_index_slides] = [self.time_slide_shifts, times_quarters]
         #     self.best_inverted_periodic_scores_data[Search_results_index_per_list] = self.periods
         #     if save_to_file:
-        #         filename_postfix = filename_postfix_inverted_period + str(self.Pmin) + '_' + str(self.Pmax)
+        #         filename_postfix = filename_postfix_inverted_period + str(self.pmin) + '_' + str(self.pmax)
         #         file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
         #                                             filename_postfix=filename_postfix, file_format='npy')
         #         np.save(file_path, np.array(self.best_periodic_scores_data, dtype=object), allow_pickle=True)

@@ -550,7 +550,7 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
         result[:mid_point] = wf_td[:mid_point]
         result[-mid_point:] = wf_td[-mid_point:]
 
-        wf_td = np.fft.fftshift(result)
+        wf_td = np.array(result)  # np.fft.fftshift(result)
         wf_fd = np.abs(np.fft.rfft(result))  # It is complex, which is weird, but what can we do
         if ((conditional_zero_zeroth_freq and (
                 np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < 0.3))
@@ -560,7 +560,7 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
             lentuk = 2 * first_measured_bin
             wf_fd[:lentuk // 2] = wf_fd[:lentuk // 2] * tukey(lentuk, alpha=3 * first_measured_bin / lentuk,
                                                               sym=True)[:lentuk // 2]
-            wf_td = np.fft.fftshift(ifftfun(wf_fd))
+            wf_td = ifftfun(wf_fd)  # np.fft.fftshift(ifftfun(wf_fd))
         wf_tds.append(wf_td)
         wf_fds.append(wf_fd)
 
@@ -2553,7 +2553,10 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
                            x0=np.array([0, -1]))
             # if not sol.success:
             #     print('initial guess linear fit failed!!!')
-            best_scale = (1 / (-sol.x[1] * 2)) ** 0.5  # initial_guess_scale
+            if sol.x[1] < -1.e-6:
+                best_scale = (1 / (-sol.x[1] * 2)) ** 0.5  # initial_guess_scale
+            else:
+                best_scale = 1.
             if best_scale <= 0:
                 raise ValueError('Stat distribution fit best is not positive!')
 
@@ -2568,7 +2571,7 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
 
             coefs_refinement = [[0.8, 1.7], [0.95, 1.1]]
             for co1, co2 in coefs_refinement:
-                scale_grid = np.linspace(max(1.1, best_scale * co1), best_scale * co2, 20)
+                scale_grid = np.linspace(max(1.05, best_scale * co1), best_scale * co2, 20)
                 ress = []
                 funs = []
                 successes = []

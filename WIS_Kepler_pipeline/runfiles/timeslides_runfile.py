@@ -18,6 +18,6 @@ targ = target_class.KeplerTarget(target_id=Target_id,
                                  load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
 targ.unpickle_small_attributes()
 # The KeplerLightCurve object is created inside the method, no need in initialization.
-rt = rand() * 10.  # make it sleep random number of seconds because maybe many jobs will want to access the same file...
+rt = rand() * 20.  # make it sleep random number of seconds because maybe many jobs will want to access the same file...
 time.sleep(rt)
 targ.run_timeslides(use_period_chunks=True, use_shuffling_pieces=True)  # ATTENTION: NEW!

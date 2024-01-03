@@ -1072,7 +1072,7 @@ def get_trigger_star_bg_ppms(target_id=None,
     #     targ = target_class.KeplerTarget(target_id=target_id, load_pickled_attributes=True, data_location=data_location,
     #                                      output_location=output_location)
     # target_id = targ.target_id
-    # best_first_transit_time = targ.best_first_transit_time
+    # best_ftt = targ.best_ftt
     # best_per = targ.best_per
     # best_temp = targ.best_temp
 
