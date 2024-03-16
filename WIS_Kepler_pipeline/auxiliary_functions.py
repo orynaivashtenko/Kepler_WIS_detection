@@ -1,3 +1,9 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import numpy as np
 import matplotlib.pyplot as plt
 import warnings
@@ -76,6 +82,17 @@ def get_data_fun(target_id, location=Default_data_location):
     times, fluxes = list(map(list, zip(*pairs)))
     return times, fluxes
 
+
+def find_indices(time, first_time, period, first_index=None, return_times=False):
+    if first_time is None:
+        first_time = time[first_index]
+    max_time = np.nanmax(time)
+    expected_times = [first_time + i * period for i in range(int(np.ceil((max_time - first_time) / period)))]
+    found_indices = [np.nanargmin(np.abs(time - expected_times[i])) for i in range(len(expected_times))]
+    if not return_times:
+        return found_indices
+    else:
+        return found_indices, expected_times
 
 def connect_quarters_fun(time_quarters, data_quarters, zero_padding_ends=None, is_data_cut=False,
                          is_time_cut=False, dt=None, fill_gaps_by_nan=False):

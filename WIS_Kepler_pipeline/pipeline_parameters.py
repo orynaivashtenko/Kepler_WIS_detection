@@ -154,26 +154,28 @@ Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune
 # P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
 # -> this one used to be when I had 25 templates. Now I have more, so we must increase
 # P_chunks_search = 1000  # 1440
-Per_phases_per_chunk = 1000000  # 660000
+Per_phases_per_chunk = 1200000  # 660000
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
 # N_periods_per_chunk = 80  # Now I run for the full bank
 # I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
 Stat_candidate_search = 40  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
-N_slides_total = 10000  # for one template and narrow periods for all the runs
+N_slides_total = 50000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
-N_slides_chunk = 100  # in run 8, it was 1000, but now I run for the full bank, so it takes time
+N_slides_chunk = 40  # in run 8, it was 1000, but now I run for the full bank, so it takes time
 N_injections_total = 10000  # total number of all injections (all radii and periods etc.)
-N_injections_chunk = 20  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
+N_injections_chunk = 40  # the previous one was perhaps run_8, but now we have full bank
+# N_injections_chunk = 20  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
 # I decreased it from 50 to 20 in run_7 because now we need more time for veto
 Per_wing_injection_and_slides_relative = 2 / 50  # Range to the left and to the right of the best period in units of period. Will be used
 # to generate injections and time slides with variable periods around the best one
+Per_wing_injection_and_slides_absolute = 2 / 50  # Range to the left and to the right of the best period in days. Will be used
 N_best_saving_slides = 3  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 # Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
-Max_phase_mismatch_to_dur = 0.3  # Maximal relative phase difference for defining successful injections
+Max_phase_mismatch_to_dur = 0.5  # Maximal relative phase difference for defining successful injections
 Default_min_plot_stat = 10
 Default_max_plot_stat = 140
 
@@ -240,7 +242,7 @@ No_veto_no_score_cor_stats_filename_postfix = 'no_veto_no_cor_stats'
 Connected_statistic_data_filename_postfix = 'connected_stats'
 Best_periodic_scores_filename_postfix = 'best_periodic_scores_all_p'
 Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
-All_templates_injection_parameters_filename_postfix = 'all_templates_injection_parameter_sets'
+All_injection_parameters_filename_postfix = 'all_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'
 # these stupid names are because of the search which checks `in`, and I need one file not to be in another one
 Slides_res_filename_postfix = 'scramble_res_scramble'

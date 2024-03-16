@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 
 import time
-from numpy.random import rand
+import numpy.random as npr
 import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -18,6 +23,7 @@ targ = target_class.KeplerTarget(target_id=Target_id,
                                  load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
 targ.unpickle_small_attributes()
 # The KeplerLightCurve object is created inside the method, no need in initialization.
-rt = rand() * 20.  # make it sleep random number of seconds because maybe many jobs will want to access the same file...
+npr.seed(None)
+rt = npr.rand() * 10.  # make it sleep random number of seconds because maybe many jobs will want to access the same file...
 time.sleep(rt)
 targ.run_timeslides(use_period_chunks=True, use_shuffling_pieces=True)  # ATTENTION: NEW!

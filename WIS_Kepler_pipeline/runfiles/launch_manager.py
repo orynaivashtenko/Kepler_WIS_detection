@@ -2,6 +2,11 @@
 
 import time
 import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -15,7 +20,7 @@ Max_jobs_submitted = 4900  # Maximal number of jobs that we can have in bjobs at
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
 
-
+queues = ['physics-short', 'new-short']
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
 timeout_start = time.time()
@@ -24,8 +29,11 @@ while (time.time() < timeout_start + Max_work_time) and (
         len(os.listdir(Job_files_folder)) > 0 or len(os.listdir(Running_jobs_folder)) > 0
         or len(os.listdir(Output_files_folder)) > 0 or len(os.listdir(Error_files_folder)) > 0):
     if time.time() - timeout_start > time_counter * 10 * 60:  # check every 10 min
-        wc = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder)
+        # wc = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder)
+        wcs = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder, queues=queues)
+        wc = wcs[0] + wcs[1]
         for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
+            time.sleep(2.)
             os.system('bsub < '+os.path.join(Job_files_folder, ff))
             # os.replace(os.path.join(Job_files_folder, ff), os.path.join(Running_jobs_folder, ff))  # move the jobs to the running folder
             os.remove(os.path.join(Job_files_folder, ff))

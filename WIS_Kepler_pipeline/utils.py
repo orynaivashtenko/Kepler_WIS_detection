@@ -1,3 +1,9 @@
+import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import numpy as np
 import copy
 import warnings
@@ -364,6 +370,39 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
     return np.nanstd(data[mask])
 
 
+def get_average_dt(times):
+    """
+    take list of time arrays and get the average time step.
+    It would be correct to weigh them by lenght, but we do not do it
+    :param times:
+    :type times: list of numpy.ndarray of float
+    :return:
+    :rtype: float
+    """
+    dts = []
+    for q in range(len(times)):
+        dts.append(np.nanmean((times[q] - np.roll(times[q], 1))[1:]))
+    return float(np.nanmean(dts))  # although it would be correct to weight by the lengths of the quarters
+
+
+def get_average_mean(fluxes):
+    """
+    Find the average (weighted by lengths) mean of a list of arrays
+    :param fluxes: list of arrays of which the mean is to be found
+    :type fluxes: list of numpy.ndarray of float
+    :return: average mean
+    :rtype: float
+    """
+    mean_total = 0.
+    len_total = 0
+    for q in range(len(fluxes)):
+        mean = np.nanmean(fluxes[q])
+        ll = len(fluxes[q][~np.isnan(fluxes[q])])
+        mean_total += mean * ll
+        len_total += ll
+    mean_total = mean_total / len_total
+    return mean_total
+
 def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, return_zero_padding_ends=False):
     """
     Pads data by zeros from the two sides.
@@ -608,14 +647,28 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
 
 
 def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32):
+    """
+    In `fluxes`, fill holes marked by `masks` with the inpainting filter which makes it so
+    that the response of the statistic to the flux in the hole is zero.
+    Do not change here any types or anything because numba can get broken.
+    :param fluxes: list of data for quarters which is to be inpainted
+    :type fluxes: list of numpy.ndarrays 1d of float
+    :param masks: masks marking with `False` holes in the `fluxes`
+    :type masks: list of numpy.ndarrays 1d of bool
+    :param wf_tds: Whilening filters in time domain corresponding to `fluxes`
+    :type wf_tds: list of numpy.ndarrays 1d of float
+    :param dtype:
+    :type dtype:
+    :return:
+    :rtype:
+    """
     length = len(fluxes[0])
     # I was afraid that wf_tds are fftshifted to the center, but since here we have the inner product, it is not important
-    # fluxes = np.array(fluxes)  # , dtype=dtype)
     inpainted_fluxes = np.zeros((len(fluxes), length), dtype=dtype)
     for q in range(len(fluxes)):
         # filter2cov_matrix:
-        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])  # , dtype=dtype)
-        c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)])  # , dtype=dtype)
+        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])
+        c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)])
 
         a_t_c_inv = c_inv[~masks[q]]
         m_inv = np.linalg.inv(a_t_c_inv[:, ~masks[q]])
@@ -855,8 +908,8 @@ def trend_fft(data, nperseg, endlen=None, mask=None, data_low=None, fit_order='c
         # parabolic fit or the entire data
         if fit_order == 'quadratic':
             msk1 = np.array(mask).astype(bool)
-            dat1 = (data_i)[msk1]
-            tim1 = (time)[msk1]
+            dat1 = data_i[msk1]
+            tim1 = time[msk1]
             x00 = np.nanmean(dat1)
             cent = dat1[len(dat1) // 2]
             x10 = (tim1[-1] + tim1[0]) / 2
@@ -866,8 +919,8 @@ def trend_fft(data, nperseg, endlen=None, mask=None, data_low=None, fit_order='c
             data_low = (sol.x[2] * (np.arange(len(data)) - sol.x[1]) ** 2 + sol.x[0])
         else:
             msk1 = np.array(mask).astype(bool)
-            dat1 = (data_i)[msk1]
-            tim1 = (time)[msk1]
+            dat1 = data_i[msk1]
+            tim1 = time[msk1]
             tim10 = tim1[0]
             tim1 = tim1 - tim10
             x00 = (dat1[0] * tim1[-1] - dat1[-1] * tim1[0]) / (tim1[-1] - tim1[0])
@@ -1015,9 +1068,7 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
     """
     threshold_step_size_std = residual_threshold_step_in_sigma  # redefining names
     medlen = slice_for_residual_step
-
     data = np.array(data)  # copying and going to numpy
-
     nanmask = ~np.isnan(data)
     if not nanmask.all():  # interpolating data if it contains nans
         data_i = interpolate_over_mask(data, mask=nanmask)  # will need for fft
@@ -1054,7 +1105,7 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
     begpieces = np.concatenate(([ind_i], begpieces))
 
     fdat = np.abs(np.fft.rfft(data_i))
-    std_fast_0 = (np.mean((fdat[-len(data) // 4:]) ** 2) / (len(data))) ** 0.5  # standard deviation of fase modes
+    std_fast_0 = (np.mean((fdat[-len(data) // 4:]) ** 2) / (len(data))) ** 0.5  # standard deviation of fast modes
     std_fast = std_fast_0 + np.max(fdat) / 20000  # I don't remember why exactly this was made but it worked
 
     # now we will select the bad pieces which have to be detrended separately:
@@ -1503,14 +1554,12 @@ def mask_outliers_fun(data, mask=None, nsig0=Nsig_outliers_0, nsig1=Nsig_outlier
         If None, will be measured to mask NaN.
     :type mask: ndarray 1d of bool
     :param nsig0: Maximum deviation from the trend in units of std of data (more extreme
-        values will be marked as outliers). Is dominated by nsig_positive
-        and nsig_negative.
+        values will be marked as outliers). Is overriden by nsig_positive and nsig_negative.
     :type nsig0: float
-    :param nsig1: Same as `nsig0` but for the second check
+    :param nsig1: Same as `nsig0` but for the second check if `return_symmetric_mask` is True
     :type nsig1:
     :param nsig_positive: Maximum positive deviation from the trend in units of std of data (more extreme
-        values will be marked as outliers). Dominates over nsig. If is None,
-        will be replaced by nsig.
+        values will be marked as outliers). Overrides nsig. If is None, will be replaced by nsig.
     :type nsig_positive: float
     :param nsig_negative: Maximum positive deviation from the trend in units of std of data (more extreme
         values will be marked as outliers). Dominates over nsig. If is None,
@@ -1527,12 +1576,11 @@ def mask_outliers_fun(data, mask=None, nsig0=Nsig_outliers_0, nsig1=Nsig_outlier
     :type detr_endmethod: str, 'mean' or 'median'
     :param detr_ends: See the desctiption in detrend_mov_ave. The default is 'symmetric'.
     :type detr_ends: str, 'symmetric' or 'asymmetric' or 'cut'.
-    :param detr_endlen: Minimal length to take feom the end for determining the average in the
-        first (last) point. If None, will then be redefined
-        depending on the detr_endmethod
+    :param detr_endlen: Minimal length to take from the end for determining the average in the
+        first (last) point. If None, will then be redefined depending on the detr_endmethod
     :type detr_endlen: int or None
-    :param return_symmetric_mask:
-    :type return_symmetric_mask:
+    :param return_symmetric_mask: Whether to make another check with `nsig1` symmetrically for positive and negative
+    :type return_symmetric_mask: bool
     :return:
     :rtype:
     """
@@ -1929,21 +1977,12 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
     :return: is_goods
     :rtype: ndarray[bool]
     """
-    # for parts snr do the entire template
-    # for parts len, do the manually selected template maybe? in the meas_len
-    # make partial templates and matched-filter them. maybe indeed easier with the convolution than fft, although not sure
-
-    # maybe make two different sets of splittings. for example, one of them may focus on the central petal of the whitened template
-    # and just fit its shape. Yes, take a certain number of central points and make their fit.
-
-    # make then partial veto in the frequency domain, split by snr. do fft of a small frequency range
-
     # Indices are assumed to be given in the padded coordinates!
     template_wh_full = np.array(template_wh_full)  # this is template in Time domain
     if mask_padded is None:
         mask_padded = ~np.ones(len(template_wh_full)).astype(bool)  # data is given in Fourier, do there will be no nans in time
     if splitting == 'snr':
-        # reason = 'inconsistent_parts_time '
+        # PREPARING TEMPLATE
         if tlen is None:
             temp_smthnd = np.abs(template_wh_full - template_wh_full[len(template_wh_full) // 2])
             # -> the value in the middle is supposed to be close to zero, but sometines no
@@ -1953,111 +1992,124 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
             inds_small = inds_small[np.where((inds_small > nperseg_psd) & (inds_small <= len(template_wh_full) - nperseg_psd))[0]]
             # -> if suddenly there is zero in the beginning, ignore
             tlen = inds_small[0] + (len(temp_smthnd) - inds_small[-1])  # taking parts where the template is not close to zero
-            # this weird procedure is needed because we are dealing with the whitened template, and its shape can be complex, so at some point
-            # it can reach zero, but it does not mean that it is the end of the transit.
+            # this weird procedure is needed because we are dealing with the whitened template, and its shape can be complex,
+            # so at some point it can reach zero, but it does not mean that it is the end of the transit.
             # We are smoothening it, so that if it is zero only in one point,
             # the smoothened one will be nonzero.
             # then, we are setting a threshold and selecting everything non-zero
             # note the rolling! the transit center should be in the zeroth index!
         template_wh_full[tlen // 2: len(template_wh_full) - tlen // 2] = 0.
         template_wh_full = template_wh_full / np.linalg.norm(template_wh_full)
-        cs = np.cumsum(template_wh_full ** 2)
-        chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
-        # # this was len split, I'm removing it because I don't want to fit zeros.
-        # nonzero_inds = np.nonzero(template_wh_full)[0]
-        # chi2_temp_indices = list(nonzero_inds[(len(nonzero_inds) * np.arange(n_parts) / n_parts).astype(int)]
-        #                          ) + [nonzero_inds[-1] + 1]
-        chi2_temp_indices = list(set(chi2_temp_indices))  # remove repetitions
-        chi2_temp_indices.sort()
+        # DETERMINING NUMBER OF SPLITTING PARTS
+        chi2_temp_indices = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts)
         n_parts = len(chi2_temp_indices) - 1
-        while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < 4).any():  # want every piece to be at least 4 Bins
-            n_parts -= 1
-            cs = np.cumsum(template_wh_full ** 2)
-            chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
+        # FOR TOO SHORT TEMPLATES:
         # if the template is so short that there is only one part, we will just make one vetting on it and not parts.
-        if len(chi2_temp_indices) <= 2:
-            # reason = 'inconsistent_chi2_lobe '
-            hlen = hlen_if_short
-            data_wh_full = np.fft.irfft(data_wh_fd)
-            template_for_fit = np.array(template_wh_full)
-            template_for_fit[hlen: len(template_for_fit) - hlen] = 0
-            template_for_fit = template_for_fit / np.linalg.norm(template_for_fit)
-            template_cut_td = np.concatenate((template_for_fit[-hlen:], template_for_fit[: hlen]))
-            template_for_fit = np.fft.rfft(template_for_fit)
-            stat = np.real(np.fft.irfft(np.conjugate(template_for_fit) * data_wh_fd))
-            stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
-            # -> this is supposed to ensure the template normalization, although formally this biases amplitude
-            p_values = []
-            for ind in indices_padded:
-                residuals = (data_wh_full[ind - hlen: ind + hlen] - template_cut_td * stat[ind])
-                residuals = residuals[mask_padded[ind - hlen: ind + hlen]]
-                score = np.sum(residuals ** 2)
-                df = len(residuals) - 1
-                if df > 1:
-                    p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
-                else:
-                    p_values.append(0.)
-            is_good = np.array(p_values) >= fn
+        if n_parts <= 1:
+            is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
+                                      mask_padded=mask_padded, indices_padded=indices_padded, fn=fn, lobe_hlen=lobe_hlen)
+        # FOR LONG ENOUGH TEMPLATES:
         else:
-            n_parts = len(chi2_temp_indices) - 1
-            templates_parts = np.zeros((n_parts, len(template_wh_full)))
-            for i in range(n_parts):
-                templates_parts[i][chi2_temp_indices[i]: chi2_temp_indices[i+1]] = template_wh_full[chi2_temp_indices[i]:
-                                                                                                    chi2_temp_indices[i+1]]
-            norms_templates_parts = [np.linalg.norm(templates_parts[i]) for i in range(len(templates_parts))]
-            templates_parts = np.fft.rfft(templates_parts, axis=1)
-            scores = []
-            for i in range(n_parts):
-                stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
-                stat = stat / norms_templates_parts[i]  # outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
-                # -> this is supposed to ensure the templ normalization, although formally this biases amplitude
-                # stat = stat[zero_padding_ends[0]: len(stat) - zero_padding_ends[1]]  # indices are provided in padded coordinates now!
-                # this will give a biased amplitude, but since we only look at the amplitudes differences, maybe it is not so bad?
-                scores.append(stat)
-            stat_full = np.real(np.fft.irfft(np.conjugate(np.fft.rfft(template_wh_full)) * data_wh_fd))
-            # -> norm is one, templ and data were norm
-            stat_full = stat_full[indices_padded]
-            scores = np.array(scores)[:, indices_padded]
-            scores_parts = np.abs(scores - stat_full)
-            p_values_parts = norm.sf(scores_parts, scale=(1 - 1 / n_parts) ** 0.5, loc=0) * 2
-            is_good_parts = np.sum((p_values_parts >= fn / n_parts).astype(float), axis=0) >= n_parts // 2
-
-            scores = np.sum(scores ** 2, axis=0) - stat_full ** 2
-            p_values = chi2.sf(scores, loc=0, scale=1, df=n_parts - 1)
-            is_good = np.array(p_values) >= fn
-            is_good = is_good & is_good_parts
-    # TODO measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5 -> IF NEEDED
+            is_good = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
+                                                       template_wh_full=template_wh_full, chi2_temp_indices=chi2_temp_indices, fn=fn)
+            if n_parts >= 3:  # at least 3 parts so that there can be less
+                if n_parts % 2 == 1:
+                    n_parts_additional = 2
+                else:
+                    n_parts_additional = 3
+                chi2_temp_indices_additional = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts_additional)
+                is_good_additional = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
+                                                                      template_wh_full=template_wh_full,
+                                                                      chi2_temp_indices=chi2_temp_indices_additional, fn=fn)
+                is_good = is_good & is_good_additional
     elif splitting == 'lobe':
-        # reason = 'veto_lobe '
-        hlen = lobe_hlen
-        data_wh_full = np.fft.irfft(data_wh_fd)
-        template_for_fit = np.array(template_wh_full)
-        template_for_fit[hlen: len(template_for_fit) - hlen] = 0
-        template_for_fit = template_for_fit / np.linalg.norm(template_for_fit)
-        template_cut_td = np.concatenate((template_for_fit[-hlen:], template_for_fit[: hlen]))
-        template_for_fit = np.fft.rfft(template_for_fit)
-        stat = np.real(np.fft.irfft(np.conjugate(template_for_fit) * data_wh_fd))
-        stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
-        # -> this is supposed to ensure the template normalization, although formally this biases amplitude
-        p_values = []
-        for ind in indices_padded:
-            residuals = (data_wh_full[ind - hlen: ind + hlen] - template_cut_td * stat[ind])
-            residuals = residuals[mask_padded[ind - hlen: ind + hlen]]
-            score = np.sum(residuals ** 2)
-            df = len(residuals) - 1
-            if df > 1:
-                p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
-            else:
-                p_values.append(0.)
-        is_good = np.array(p_values) >= fn
+        is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
+                                  mask_padded=mask_padded, indices_padded=indices_padded, fn=fn, lobe_hlen=lobe_hlen)
     else:
         raise ValueError("`splitting` must be 'snr' or 'lobe'!")
-    # reason = reason[:-1] + '_' + str(n_parts) + ' '
-    return is_good  # , reason
+    return is_good
+
+
+def _split_template_by_snr(template_wh_full, n_parts):
+    cs = np.cumsum(template_wh_full ** 2)
+    chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
+    # # this was len split, I'm removing it because I don't want to fit zeros.
+    # nonzero_inds = np.nonzero(template_wh_full)[0]
+    # chi2_temp_indices = list(nonzero_inds[(len(nonzero_inds) * np.arange(n_parts) / n_parts).astype(int)]
+    #                          ) + [nonzero_inds[-1] + 1]
+    chi2_temp_indices = list(set(chi2_temp_indices))  # remove repetitions
+    chi2_temp_indices.sort()
+    n_parts = len(chi2_temp_indices) - 1
+    while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < 4).any():  # want every piece to be at least 4 Bins
+        n_parts -= 1
+        cs = np.cumsum(template_wh_full ** 2)
+        chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
+    return chi2_temp_indices
+
+
+def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_full, chi2_temp_indices, fn):
+    n_parts = len(chi2_temp_indices) - 1
+    templates_parts = np.zeros((n_parts, len(template_wh_full)))
+    for i in range(n_parts):
+        templates_parts[i][chi2_temp_indices[i]: chi2_temp_indices[i + 1]] = template_wh_full[chi2_temp_indices[i]:
+                                                                                              chi2_temp_indices[i + 1]]
+    norms_templates_parts = np.array([np.linalg.norm(templates_parts[i]) for i in range(len(templates_parts))])
+    templates_parts = np.fft.rfft(templates_parts, axis=1)
+    scores = []
+    for i in range(n_parts):
+        stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
+        stat = stat / norms_templates_parts[i]  # outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
+        # -> this is supposed to ensure the templ normalization, although formally this biases amplitude
+        # stat = stat[zero_padding_ends[0]: len(stat) - zero_padding_ends[1]]  # indices are provided in padded coordinates now!
+        # this will give a biased amplitude, but since we only look at the amplitudes differences, maybe it is not so bad?
+        scores.append(stat)
+    stat_full = np.real(np.fft.irfft(np.conjugate(np.fft.rfft(template_wh_full)) * data_wh_fd))
+    # -> norm is one, templ and data were norm
+    stat_full = stat_full[indices_padded]
+    scores = np.array(scores)[:, indices_padded]
+
+    ampl_scores_parts = np.abs(scores - stat_full * norms_templates_parts.reshape(len(norms_templates_parts), 1))
+    # The amplitude difference score in the normalized distribution is this:
+    # abs(scores_parts / norms_parts - score_full / norm_full) * norms_parts
+    # note norm_full = 1
+    p_values_parts = norm.sf(ampl_scores_parts, scale=(1 - 1 / n_parts) ** 0.5, loc=0) * 2
+    is_good_parts = np.sum((p_values_parts >= fn / n_parts).astype(float), axis=0) >= n_parts // 2
+
+    scores = np.sum(scores ** 2, axis=0) - stat_full ** 2
+    p_values = chi2.sf(scores, loc=0, scale=1, df=n_parts - 1)
+    is_good = np.array(p_values) >= fn
+    is_good = is_good & is_good_parts
+    # TODO measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5 -> IF NEEDED
+    return is_good
+
+
+def _veto_lobe_time(data_wh_fd, template_wh_full, mask_padded, indices_padded, fn, lobe_hlen):
+    hlen = lobe_hlen
+    data_wh_full = np.fft.irfft(data_wh_fd)
+    template_for_fit = np.array(template_wh_full)
+    template_for_fit[hlen: len(template_for_fit) - hlen] = 0
+    template_for_fit = template_for_fit / np.linalg.norm(template_for_fit)
+    template_cut_td = np.concatenate((template_for_fit[-hlen:], template_for_fit[: hlen]))
+    template_for_fit = np.fft.rfft(template_for_fit)
+    stat = np.real(np.fft.irfft(np.conjugate(template_for_fit) * data_wh_fd))
+    stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
+    # -> this is supposed to ensure the template normalization, although formally this biases amplitude
+    p_values = []
+    for ind in indices_padded:
+        residuals = (data_wh_full[ind - hlen: ind + hlen] - template_cut_td * stat[ind])
+        residuals = residuals[mask_padded[ind - hlen: ind + hlen]]
+        score = np.sum(residuals ** 2)
+        df = len(residuals) - 1
+        if df > 1:
+            p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
+        else:
+            p_values.append(0.)
+    is_good = np.array(p_values) >= fn
+    return is_good
 
 
 def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=None, n_parts=3, fn=0.1,
-                       wind_len_overlap=64):
+                       wind_len_overlap=64, nperseg_psd=Nperseg_psd):
     """
 
     The template in the Fourier domain is cut into several parts which undergo windowing in order not to be too long in the time
@@ -2083,7 +2135,11 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
     """
     data_wh_fd = np.array(data_wh_fd)
     template_wh_fd_full = np.array(template_wh_fd)
-    # template_wh_fd_full = template_wh_fd_full / np.linalg.norm(np.fft.irfft(template_wh_fd_full))  # must be normalized initially!
+    # when the detrending was performed, the low freqs were removed, so we should not reject a trigger is something is wrong with them:
+    template_wh_fd_full[:int(len(template_wh_fd_full) / nperseg_psd * 3 / 2)] = 0.
+    template_wh_fd_full = template_wh_fd_full / np.linalg.norm(np.fft.irfft(template_wh_fd_full))
+    # -> must have been normalized initially, but we detrended it
+
     wind_len = wind_len_overlap  # must be even!
     half_wind_len = wind_len // 2
     window = 0.5 * (1 - np.cos(0.5 * 2 * np.pi * np.arange(wind_len) / wind_len))  # Hann window
@@ -2130,17 +2186,22 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
     scores = np.zeros_like(templates_parts_td)
     for i in range(n_parts):
         stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
-        # no need to apply any norm because it will be divided by the normalization afterwards
+        # since the noise may be too blue, the distribution may not be with unit variance.
+        # -> so we force it to have the same variance as it should be according to the norm
+        stat = stat / np.std(stat[mask_padded]) * (templ_prod_matrix[i, i])**0.5
         scores[i] = stat
+
     stat_full = np.real(np.fft.irfft(np.conjugate(template_wh_fd_full) * data_wh_fd))
-    # No need to renormalize, it is already in good norm because the template and the noise were normalized initially
-    scores = (np.array([scores[:, j] @ templ_prod_matrix_inv @ scores[:, j] for j in range(len(scores[0]))]) - stat_full ** 2)
-    # they all have the same names to save some memory (if it works like that...)
-    measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5
-    # -> since the noise may be too blue, the distribution may not be with unit variance, so chi squared
-    # will have a different scale.
+    stat_full = stat_full / np.std(stat_full[mask_padded])
+    # -> the template norm was 1, so no need to multuply by it
+    scores = np.array([scores[:, j] @ templ_prod_matrix_inv @ scores[:, j] for j in range(len(scores[0]))])
+    # -> this has distr chi2(n_parts), and it has var of trace of unity matrix, which is n_parts
     scores = scores[indices_padded]
-    p_values = chi2.sf(scores, loc=0, scale=measured_scale, df=n_parts - 1)
+    stat_full = stat_full[indices_padded]
+    scores = scores - stat_full ** 2
+    # they all have the same names to save some memory (if it works like that...)
+    # We already renormalized the stuff, so the scale should be 1 here:
+    p_values = chi2.sf(scores, loc=0, scale=1., df=n_parts - 1)
     is_good = np.array(p_values) >= fn
     return is_good
 
@@ -2168,7 +2229,50 @@ def score_correction(scores_i, return_function=False, two_sided_distr=True):
         return scores_f
 
 
-def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=None, units_of_snr=True):
+def cdf_max_norm(x, n=2, loc=0, scale=1):
+    if not hasattr(loc, '__len__') and not hasattr(scale, '__len__'):
+        return norm(loc=loc, scale=scale).cdf(x) ** n
+    else:
+        loc = loc * np.ones(n)
+        scale = scale * np.ones(n)
+        prod = 1.
+        for i in range(n):
+            prod = prod * norm(loc=loc[i], scale=scale[i]).cdf(x)
+    return prod
+
+
+def sf_max_norm(x, n=2, loc=0, scale=1):
+    """
+    it returns just 1 - cdf
+    """
+    if not hasattr(loc, '__len__') and not hasattr(scale, '__len__'):
+        return 1 - norm(loc=loc, scale=scale).cdf(x) ** n
+    else:
+        loc = loc * np.ones(n)
+        scale = scale * np.ones(n)
+        prod = 1.
+        for i in range(n):
+            prod = prod * norm(loc=loc[i], scale=scale[i]).cdf(x)
+    return 1 - prod
+
+
+def pdf_max_norm(x, n=2, loc=0, scale=1):
+    if not hasattr(loc, '__len__') and not hasattr(scale, '__len__'):
+        return n * norm(loc=loc, scale=scale).cdf(x) ** (n - 1) * norm(loc=loc, scale=scale).pdf(x)
+    else:
+        loc = loc * np.ones(n)
+        scale = scale * np.ones(n)
+        ssum = 0
+        for j in range(n):
+            prod = norm(loc=loc[j], scale=scale[j]).pdf(x)
+            for i in range(n):
+                if i != j:
+                    prod = prod * norm(loc=loc[i], scale=scale[i]).cdf(x)
+            ssum = ssum + prod
+    return sum
+
+
+def unequal_amplitude_veto_old(values, variances=None, A_all=None, indmax=None, A_1=None, units_of_snr=True):
     values = np.array(values)
 
     if variances is None:
@@ -2197,6 +2301,45 @@ def unequal_amplitude_veto(values, variances=None, A_all=None, indmax=None, A_1=
     else:
         statistic = statistic / expected_variance_H_all
     return statistic
+
+
+def unequal_amplitude_veto(stats_raw, stat_vars=None, negative=True):
+    stats_raw = np.array(stats_raw)
+
+    if stat_vars is None:
+        stat_vars = np.ones(len(stats_raw))
+    else:
+        stat_vars = np.array(stat_vars)
+
+    mask = (stat_vars != 0) & (~np.isnan(stats_raw))
+    stats_raw = stats_raw[mask]
+    stat_vars = stat_vars[mask]
+
+    if negative:
+        stats_raw = - stats_raw
+
+    n_transits = len(stat_vars)
+    h = np.ones(n_transits) * stat_vars
+    denoms = h * h / stat_vars
+    stats_stats = stats_raw * h / stat_vars
+    # ampls = stats_stats / denoms
+    # # The following can be used if we want to use sets of 2, that is to summarize 2 indices as max
+    # # But this is too many dofs, so the test is weaker
+    # import itertools
+    # combs_inds = list(itertools.combinations(set(range(n_transits)), n_max))
+    # combs_inds = [list(el) for el in combs_inds]
+    combs_inds = np.arange(n_transits).reshape((n_transits, 1))
+    combs_inds_other = [[i for i in range(n_transits) if i not in ci] for ci in combs_inds]
+    ampls_combs = np.array([np.nansum(stats_stats[ci]) / np.nansum(denoms[ci]) for ci in combs_inds])
+    ampls_other = np.array([np.nansum(stats_stats[io]) / np.nansum(denoms[io]) for io in combs_inds_other])
+    vars_combs = np.array([1 / np.nansum(denoms[ci]) for ci in combs_inds])
+    vars_other = np.array([1 / np.nansum(denoms[io]) for io in combs_inds_other])
+    scales = (vars_combs + vars_other) ** 0.5
+    scores = (ampls_combs - ampls_other) / scales
+    i_inds_max = np.argmax(scores)
+    score = scores[i_inds_max]
+    p_val = (1 - cdf_max_norm(score, n=n_transits, loc=0, scale=1))
+    return p_val
 
 
 def fstr(f, nzdig=2, maxdec=5, flexible_length=True):  # nicely formatted string from numbers
@@ -2246,7 +2389,8 @@ def get_p_value_gaussian(x, mean, std):
 #######################################################################################################################
 # Functions for reshuffled time slides #
 #######################################################################################################################
-def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling):
+def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling,
+                       random_seed=None, random_state=None):
     """
     Produces a way to split an array into pieces of lengths from `min_piece` till `max_piece`. The pieces are primarily taken
     as parts between the holes in the `mask` whose size is more than `max_hole`. If these pieces exceed `max_piece`, they will be
@@ -2263,7 +2407,12 @@ def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_
     :rtype: list[list[int,int]]
     """
     mask = np.array(mask).astype(bool)
-    np.random.seed(seed=None)
+    if random_state is not None:
+        np.random.set_state(random_state)
+    elif random_seed is not None:
+        np.random.seed(random_seed)
+    else:
+        np.random.seed(None)
     ind1 = (np.where(mask)[0])[0]
     ind2 = (np.where(mask)[0])[-1]
     mask1 = np.concatenate((np.ones(ind1), np.array(mask[ind1:ind2 + 1]), np.ones(len(mask) - ind2 - 1))).astype(bool)
@@ -2595,3 +2744,148 @@ def log_non_gaussian_correction(stat, ampl, scale):
     g_pdf = gauss_sum_pdf(stat, scale=1., ampl=0.)
     return np.log(g_pdf) - np.log(ng_pdf)
 
+
+def select_connected_component(image, center):
+    def indices_square(center_coords, d, x_max=None, y_max=None):
+        cc = center_coords
+        x_left = cc[0] - d
+        x_right = cc[0] + d
+        span_x = np.arange(x_left, x_right + 1)
+        y_left = cc[1] - d
+        y_right = cc[1] + d
+        span_y = np.arange(y_left, y_right + 1)
+        top = [span_x, np.ones(len(span_x), dtype=int) * y_right]
+        bottom = [span_x, np.ones(len(span_x), dtype=int) * y_left]
+        left = [np.ones(len(span_y), dtype=int) * x_left, span_y]
+        right = [np.ones(len(span_y), dtype=int) * x_right, span_y]
+        all_coords = np.hstack((top, right, bottom, left))
+
+        all_coords = all_coords[:, all_coords[0] >= 0]
+        all_coords = all_coords[:, all_coords[1] >= 0]
+        if x_max is not None:
+            all_coords = all_coords[:, all_coords[0] <= x_max]
+        if y_max is not None:
+            all_coords = all_coords[:, all_coords[1] <= y_max]
+        # all_coords.T  # - for coordinate pairs list
+        # (all_coords[0], all_coords[1])  # - for matrix indexing
+        return list(zip(all_coords[0], all_coords[1]))  # gives list of tuples which is super important for array indexing!
+
+    image = image.astype(bool)
+    included_mask = np.zeros_like(image).astype(bool)
+    if image[center[0], center[1]]:
+        x, y = center[0], center[1]
+        included_mask[x, y] = True
+        coords_boundary = [(x, y)]
+        safety_counter = 0
+        safety_counter_max = image.size / 8
+        while len(coords_boundary) > 0:
+            # 0) take all recently included and in image
+            # 1) all squares
+            # 2) set -> border
+            # 3) if there are image true in the border, include them and take as the next border formation
+            # 4) the old ones can be deleted because they already served
+            new_coords_boundary = []
+            for coor_boun in coords_boundary:
+                square_coords_point = indices_square(center_coords=coor_boun, d=1, x_max=image.shape[0] - 1, y_max=image.shape[1] - 1)
+                new_coords_boundary += square_coords_point
+            new_coords_boundary = list(set(new_coords_boundary))
+            ncb_reshaped = list(zip(*new_coords_boundary))
+            in_image_inds_new_coords_boundary = \
+            np.where((image[ncb_reshaped[0], ncb_reshaped[1]]) & (~included_mask[ncb_reshaped[0], ncb_reshaped[1]]))[0]
+            if len(in_image_inds_new_coords_boundary) == 0:
+                break
+            new_coords_boundary = [new_coords_boundary[ind] for ind in in_image_inds_new_coords_boundary]
+            ncb_reshaped = list(zip(*new_coords_boundary))
+            included_mask[ncb_reshaped[0], ncb_reshaped[1]] = True
+            # new_coords_boundary = list(zip(*ncb_reshaped))
+            coords_boundary = copy.deepcopy(new_coords_boundary)
+            safety_counter += 1
+            if safety_counter > safety_counter_max:
+                break
+    return included_mask
+
+
+def make_periods_array(p_min=Pmin, p_max=Pmax, dp=None, duty_cycle=Duty_cycle, t_mission=1300):
+    """
+    Creates the period grid that will be used for folding. The grid is built according to the duty cycle to cover
+    the periodicities smoothly.
+
+    :param p_min: Minimal period, days
+    :type p_min: float, days
+    :param p_max: Maximal period to consider.
+    :type p_max: float, days
+    :param dp: Step in the list of all the investigated periods
+    :type dp: float, days
+    :param duty_cycle:
+    :type duty_cycle: float
+    :param t_mission: total duration between the beginning and the end of the data
+    :type t_mission: float, days
+    :return:
+    :rtype:
+    """
+    per = p_min
+    periods = [per]
+    if dp is None:
+        while per <= p_max:
+            dp = duty_cycle * per / t_mission
+            per += dp
+            periods.append(per)
+    else:
+        while per <= p_max:
+            per += dp
+            periods.append(per)
+    periods = np.array(periods)
+    return periods
+
+
+def make_periods_edges(p_min, p_max, per_phases_per_chunk, dp=None, duty_cycle=Duty_cycle, dt=0.02043368):
+    periods = make_periods_array(p_min=p_min, p_max=p_max, dp=dp, duty_cycle=duty_cycle)
+    p_chunks = int(np.sum((periods / dt).astype(int)) / per_phases_per_chunk)
+    per_edges = [(p_min + (p_max - p_min) * i / p_chunks) for i in range(p_chunks + 1)]
+    per_edges = [[per_edges[i], per_edges[i + 1]] for i in range(len(per_edges) - 1)]
+    return per_edges
+
+
+def make_periods_chunks(p_min, p_max, per_phases_per_chunk, duty_cycle, dt=0.02043368, t_mission=1300):
+    if per_phases_per_chunk is not None:
+        per_edges = make_periods_edges(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk, duty_cycle=duty_cycle, dt=dt)
+    else:
+        per_edges = [[p_min, p_max]]
+
+    periods = make_periods_array(p_min=p_min, p_max=p_max, duty_cycle=duty_cycle, t_mission=t_mission)
+    i_last = 0
+    periods_in_chunks = []
+    for edge in per_edges:
+        end_edge = np.searchsorted(periods, edge[-1])
+        periods_in_chunks.append(periods[i_last:end_edge + 1])
+        i_last = end_edge + 1
+    return periods_in_chunks
+
+
+def add_safety_overlap(period_list, safety_bins=P_bins_overlap):
+    period_list = np.array(period_list)
+    dp_low = period_list[1] - period_list[0]
+    dp_high = period_list[-1] - period_list[-2]
+    array_low = period_list[0] + np.arange(-safety_bins, 0) * dp_low
+    array_high = period_list[-1] + np.arange(1, safety_bins + 1) * dp_high
+    return np.concatenate((array_low, period_list, array_high))
+
+
+def find_closest_chunk(per_chunks, period, overlap_bins=0):
+    """
+    period chunks are defined without overlap in the TargetClass, the overlap is
+    added in the periodicity search of the KeplerLightCurve
+    :param per_chunks:
+    :type per_chunks:
+    :param period:
+    :type period:
+    :param overlap_bins: ZERO. period chunks are defined without overlap in the TargetClass, the overlap is
+                         added in the periodicity search of the KeplerLightCurve
+    :type overlap_bins: int, default 0
+    """
+    for i, per_chun in enumerate(per_chunks):
+        last_val = per_chun[-1] if i == len(per_chunks) - 1 else per_chunks[i+1][0]
+        if (period >= per_chun[0]) and (period <= last_val):
+            ind_close = np.argmin(np.abs(np.array(per_chun) - period))
+            if ind_close >= overlap_bins and overlap_bins <= len(per_chun) - overlap_bins:
+                return per_chun, i

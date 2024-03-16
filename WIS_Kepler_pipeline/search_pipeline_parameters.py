@@ -1,8 +1,16 @@
 import os
-# -> this is needed!
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import numpy as np
 
 # PARAMETERS INITIALIZATION
+
+Default_m_1_3_r_s = 1.  # Mass of the star in usits of solar mass divided by the radius of the star to the power 1/3
+# Normalization
+Average_flux_method = 'mean'  # can be 'mean' or 'median
 
 # Masking:
 Nsig_outliers_0 = 6.
@@ -15,6 +23,7 @@ Nsig_outliers_w = 6
 Nsig_outliers_w_pos = 6.
 Nsig_outliers_w_neg = 6.
 Nsig_outliers_stat = 4.  # is supposed to happen less than once per quarter
+
 # Masking. Detrending in outliers detection:
 Detr_length_outliers = 256
 Detr_method_outliers = 'median'
@@ -30,6 +39,7 @@ Npsdsmin = 40
 Use_rfft = True
 Subtract_mean_in_psd = True
 Smoothen_psds = True
+Always_zero_zeroth_freq_psd = False
 Tukey_steps_len_psd = 16
 Wf_td_window_extension_coef = 2.5
 
@@ -75,7 +85,10 @@ Get_gaussianized_ses = True
 
 Pmin = 30  # days
 Pmax = 500
-Duty_cycle = 0.05  # this was 0.1, but I changed it because sometimes it is not enough
+P_bins_overlap = 5
+Duty_cycle = 0.03  # this was 0.1, but I changed it because sometimes it is not enough
+Fn_threshold_veto_mes = 0.02
+Max_mes_veto_trials = 20000
 Std_time_scrambling = 10.  # days # for time slides
 Max_hole_pieces_scrampling = 30  # <1 day # Hole which is considered a reason to split the statistic to two pieces which can be shuffled
 Max_piece_scrambling = int(50 * 24 * 2)  # 50 days # Maximal possible length of a piece which will be shuffled
@@ -89,8 +102,9 @@ Best_per_results_index_ftt = 1  # first transit time
 Best_per_results_index_stats = 2
 Best_per_results_index_stats_gauss = 3
 Best_per_results_index_best_integral = 4
-Best_per_results_index_per_list = 5
-Best_per_results_length = 6
+Best_per_results_index_template = 5
+Best_per_results_index_per_list = 6
+Best_per_results_length = 7
 
 # Search_results_index_per = 0
 # Search_results_index_ftt = 1  # first transit time

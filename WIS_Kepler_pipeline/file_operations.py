@@ -512,9 +512,11 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
 
 
 def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_output.txt', output_dir=None,
-                                   queue='physics-short'):
+                                   queues=('physics-short',), running=False):
     """Performs bjobs and checks how many submitted jobs there
     For WEXAC IBM job manager. Returns the number of running, waiting and all the other jobs.
+    :param running:
+    :type running:
     :param output_file: file to which the output of the bjobs command will be written. Not important because will be removed in the end.
     :type output_file:
     :param output_filename: if `output_file` is None, it will be created from `output_filename` which is the name of the file without the
@@ -523,30 +525,66 @@ def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_outp
     :param output_dir: if `output_file` is None, it will be created from `output_filename` which is the name of the file without the
     path to its folder, and `output_file_dir`, which is the path to its folder.
     :type output_dir: str
-    :param queue:
-    :type queue:
+    :param queues:
+    :type queues:
     :return:
-    :rtype: int
+    :rtype: int or list
     """
+    had_len = True
+    if not hasattr(queues, '__len__'):
+        queues = (queues,)
+        had_len = False
+
     if output_file is None:
         if output_dir is None:
             output_dir = os.getcwd()
         output_file = os.path.join(output_dir, output_filename)
     if (output_file[-4] != '.') and (output_file[-3] != '.') and (output_file[-5] != '.'):
         output_file += '.txt'
-    with open(output_file, 'w'):  # clean file if it was there or create if not
-        pass
-    try:
-        os.system('bjobs -q ' + queue + ' | wc > ' + output_file)
-    except Exception as e:
-        with open(output_file) as fil1:
-            print(str(e), file=fil1)
+    wcs = []
+    for queue in queues:
+        with open(output_file, 'w'):  # clean file if it was there or create if not
+            pass
+        try:
+            if not running:
+                os.system('bjobs -q ' + queue + ' | wc > ' + output_file)
+            else:
+                os.system('bjobs -r -q ' + queue + ' | wc > ' + output_file)
+        except Exception as e:
+            with open(output_file) as fil1:
+                print(str(e), file=fil1)
 
-    with open(output_file, 'r') as out_file:
-        text = out_file.read()
-        if 'No unfinished job found' in text:
-            wc = 0
-        else:
-            wc = int((text.split())[0])
-    os.remove(output_file)
-    return wc
+        with open(output_file, 'r') as out_file:
+            text = out_file.read()
+            if 'No unfinished job found' in text:
+                wc = 0
+            else:
+                wc = int((text.split())[0])
+        os.remove(output_file)
+        wcs.append(wc)
+    res = wcs
+    if not had_len:
+        res = wcs[0]
+    return res
+
+
+def report_exception(exception, file_to_append, title='', info=''):
+    import sys
+    import traceback
+    import datetime
+    tb = sys.exc_info()
+    list_str_exc = traceback.format_exception(exception, value=tb[1], tb=tb[2])
+    with open(file_to_append, 'a') as err_list_fil:
+        print('NEW', file=err_list_fil)
+        print(datetime.datetime.now(), file=err_list_fil)
+        if title != '':
+            print(title, file=err_list_fil)
+        if info != '':
+            print(info, file=err_list_fil)
+        for str_exc in list_str_exc:
+            print(str_exc.strip(), file=err_list_fil)
+        print('', file=err_list_fil)
+        print('SHORTLY:', file=err_list_fil)
+        print(str(exception), file=err_list_fil)
+        print('END', file=err_list_fil)
+        print('', file=err_list_fil)

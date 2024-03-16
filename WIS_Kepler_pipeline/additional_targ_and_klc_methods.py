@@ -71,7 +71,7 @@ threshold_to_std_veto = 35 ** 0.5
 #                                               per_wing_injection_relative=Per_wing_injection_and_slides,
 #                                               injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
 #                                               all_templates_injection_parameters_filename_postfix=
-#                                               All_templates_injection_parameters_filename_postfix
+#                                               All_injection_parameters_filename_postfix
 #                                               ):
 #     """
 #     This is not so randomized because dor one ecc we generate many other parameters, but ecc is always teh same.
@@ -192,6 +192,69 @@ threshold_to_std_veto = 35 ** 0.5
 #         len(targ.best_temp_injection_par_list))]
 #
 #     targ.save_injection_parameters()
+
+def copy_output_to_marvin(self, marvin_path=Home_output_storage_folder):
+    os.system('scp -r ' + self.output_location + ' ' + marvin_path + '/' + self.target_id[:4])
+
+
+    def check_low_freq_whitening_residuals(self, resid_len_permission=3, wf_td_window_extension_coef=Wf_td_window_extension_coef):
+        """
+        Check that there are no residuals from the whitening at low frequencies which were not
+        killed by the whitening filter because it lacked resolution
+        :param resid_len_permission:
+        :type resid_len_permission:
+        :param wf_td_window_extension_coef:
+        :type wf_td_window_extension_coef:
+        :return:
+        :rtype:
+        """
+        wf_fds_new = []
+        wf_tds_new = []
+        for q in self.quarters:
+            whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * self.wf_fds[q]
+            first_measured_bin = int(np.ceil(self.support / self.nperseg_psd))
+            too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]
+                                        ) ** 2 / np.mean(np.abs(
+                whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
+            if len(too_noisy) > resid_len_permission:
+                len_kill = int(np.ceil(too_noisy[-1] * 1.1))
+                lentuk = len_kill
+                wf_fd_new = np.array(self.wf_fds_unwindowed[q])
+                while len(too_noisy) > resid_len_permission:
+                    wf_fd_new = np.array(self.wf_fds_unwindowed[q])
+                    wf_fd_new[:lentuk // 2] = wf_fd_new[:lentuk // 2] * ut.tukey(lentuk, alpha=1, sym=True)[:lentuk // 2]
+                    whitened_clean_flux_fd = np.fft.rfft(self.clean_fluxes[q]) * wf_fd_new
+                    too_noisy = np.where(np.abs(whitened_clean_flux_fd[:4 * first_measured_bin]
+                                                ) ** 2 / np.mean(np.abs(
+                        whitened_clean_flux_fd[len(whitened_clean_flux_fd) // 2:]) ** 2) > chi2.isf(1 / (4 * first_measured_bin), df=1))[0]
+                    lentuk += resid_len_permission
+                wf_td_new, wf_fd_new = ut.window_wf_td_fun(wf_fd_new, extension_coef=wf_td_window_extension_coef)
+                wf_fds_new.append(wf_fd_new)
+                wf_tds_new.append(wf_td_new)
+            else:
+                wf_fds_new.append(self.wf_fds[q])
+                wf_tds_new.append(self.wf_tds[q])
+        self.wf_fds = wf_fds_new
+        self.wf_tds = wf_tds_new
+
+
+    def select_connected_stats_indices(self, indices):
+        indices_with_shifts = [i for ind in indices
+                               for i in range(tm.Indices_of_templates[ind][0], tm.Indices_of_templates[ind][1])]
+        self.indices_of_templates = np.array(self.indices_of_templates)[indices]
+        self.statistics_full = self.statistics_full[indices_with_shifts]
+        self.stat_vars_full = self.stat_vars_full[indices_with_shifts]
+        self.stat_masks_full = self.stat_masks_full[indices_with_shifts]
+        indices_of_templates = []
+        index_last = 0
+        for i in range(len(self.indices_of_templates)):
+            indices_current = np.array(self.indices_of_templates[i])
+            indices_current = indices_current - indices_current[0] + index_last
+            index_last = indices_current[1]
+            indices_of_templates.append(list(indices_current))
+        self.indices_of_templates = np.array(indices_of_templates)
+        self.templates_of_indices = np.array([k for k in range(len(self.indices_of_templates))
+                                              for _ in range(self.indices_of_templates[k][0], self.indices_of_templates[k][1])])
 
 
 def minimize_over_chunks(klc, time_chunk_size=time_chunk_minimization_size):

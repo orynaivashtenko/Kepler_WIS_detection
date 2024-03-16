@@ -2,6 +2,11 @@
 
 import pickle
 import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -254,17 +259,17 @@ plt.clf()
 # self.pickle_small_attributes()
 # self.print_dict_file()
 #
-# Bins = targ.bins_mes2_histogram
+# Bins = targ.bins_stat_histogram
 #
 # # UNIFORMLY FORMATTED PLOT
 # plt.figure(figsize=(10, 5))
 #
-# plt.stairs(targ.distr_mes2_inj_all, Bins, label='all injections', linewidth=2)  # after density correction factor, get per one star
-# plt.stairs(targ.distr_mes2_inj_success, Bins, label='success injections', linewidth=2)  # after density correction factor, get per one star
+# plt.stairs(targ.distr_stat_inj_all, Bins, label='all injections', linewidth=2)  # after density correction factor, get per one star
+# plt.stairs(targ.distr_stat_inj_success, Bins, label='success injections', linewidth=2)  # after density correction factor, get per one star
 # # Divide by the number of the timeslides, get effectively per one star:
 # plt.stairs(targ.distr_mes2_h0_direct, Bins, label='background direct H0', linewidth=2)
 # plt.stairs(targ.distr_mes2_h0_inv, Bins, label='background inv H0', linewidth=2)
-# plt.stairs(targ.distr_mes2_h0, Bins, label='background total H0', linewidth=2)
+# plt.stairs(targ.distr_stat_h0, Bins, label='background total H0', linewidth=2)
 #
 # plt.axvline(targ.best_stat ** 2, color='k', label='trigger, period=' + str(np.round(targ.best_per, 1)))
 # plt.title('KOI' + targ.target_id + ', periods ['
@@ -285,9 +290,9 @@ plt.clf()
 #             bbox_inches='tight', dpi=320)
 #
 # # MAKE EXTRAPOLATION
-# coefs = targ.extrapolation_coefs_mes2_h0_hist
-# bin_extra_max = (np.log(np.nanmin(targ.distr_mes2_h0)) - coefs[0]) / coefs[1]  # determine intersection with horizontal axis in log scale
-# bins_extra = np.linspace(Bins[np.nanargmax(targ.distr_mes2_h0) + 1], np.nanmax([(targ.best_stat ** 2) + 1, bin_extra_max + 1]), 10)
+# coefs = targ.extrapolation_coefs_stat_h0_hist
+# bin_extra_max = (np.log(np.nanmin(targ.distr_stat_h0)) - coefs[0]) / coefs[1]  # determine intersection with horizontal axis in log scale
+# bins_extra = np.linspace(Bins[np.nanargmax(targ.distr_stat_h0) + 1], np.nanmax([(targ.best_stat ** 2) + 1, bin_extra_max + 1]), 10)
 # plt.plot(bins_extra, np.exp(bins_extra * coefs[1] + coefs[0]), label='extrapolation, FAP='+f"{targ.false_alarm_prob_trigger:.2e}")
 # plt.xlim(0.5 * Bins[0], 1.1 * Bins[-1])
 # plt.savefig(os.path.join(targ.output_location, str(targ.target_id) + '_background_injection_trigger_extrapolation.png'),
