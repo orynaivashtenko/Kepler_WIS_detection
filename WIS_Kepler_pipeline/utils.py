@@ -1,10 +1,3 @@
-import os
-os.environ["OMP_NUM_THREADS"] = "1"  #
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"  #
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
-import numpy as np
 import copy
 import warnings
 from scipy.optimize import minimize
@@ -120,35 +113,45 @@ def moving_std(data, window_len, mask=None, gap_len=0):
             else np.inf for i in range(len(data))]
 
 
-def moving_var(signal, nwind, ngap=0, mask=None,
-               nsamples_min=32,
+def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
                remove_outliers=False, nsig_outliers=6,
                detrend_remove_outliers=False, detr_length_outliers=512,
                return_mask=False, return_total_var=False):
     """
     Calculates the moving variance of the signal. At every point, takes the window of length
-    nwind symmetrically from the two sides, excludes from the middle the window of length
-    ngap and calculates the unbiased variance of the remaining. It is needed to
+    `nwind` symmetrically from the two sides, excludes from the middle the window of length
+    `ngap` and calculates the unbiased variance of the remaining. It is needed to
     avoid the impact of the entries correlated with the considered point to the
     variance estimation. For example, if there is a transit in this point, the
     variance is taken around the transit, so its presence does not alter the measurement.
     At the ends of the singal, the data is taken only from one side of the
     considered point up to the available length.
-
-    Parameters
-    ----------
-    signal : numpy.array 1d of float, NO NANS
-        Data from which the moving variance is taken.
-    nwind : int
-        Length of the segment to calculate local variance for each bin
-    ngap : int
-        Length of the gap to exclude around each bin when calculating the
-        variance in this bin in order to avoid influence of these
+    :param signal: The array from which the moving variance should be calculated.
+    :type signal: numpy.ndarray of float, NO NANS
+    :param nwind: Size of the moving window
+    :type nwind: int
+    :param ngap: Size of the gap inside the moving window to exclude the point around which the variance is taken.
+        Points are excluded around each bin when calculating the variance in this bin in order to avoid influence of these
         points on the variance estimation.
-    Returns
-    -------
-    mov_var : numpy.array 1d of float, len(signal)
-        Moving variance estimate at each point of the signal
+    :type ngap: int, should be <`nwind`
+    :param mask: Array with `True` where `signal` is food for processing and `False` where it is bad
+    :type mask: numpy.ndarray of bool
+    :param nsamples_min: Minimal number of samples in the window to take the variance
+    :type nsamples_min: int
+    :param remove_outliers: Whether to remove outliers before calculating the moving variance
+    :type remove_outliers: bool
+    :param nsig_outliers: Threshold in units of sigma if `remove_outliers` is True
+    :type nsig_outliers: float
+    :param detrend_remove_outliers: Whether to detrend the signal before removing the outliers from it
+    :type detrend_remove_outliers: bool
+    :param detr_length_outliers: Detrending length to use if `detrend_remove_outliers` is true
+    :type detr_length_outliers: int
+    :param return_mask: whether to return the mask
+    :type return_mask: bool
+    :param return_total_var: whether to return the total scalar variance of `signal`
+    :type return_total_var: bool
+    :return: mov_var Moving variance estimate at each point of the signal
+    :rtype: numpy.ndarray 1d of float, len(`signal`)
     """
     signal = np.array(signal)
 
@@ -215,122 +218,6 @@ def moving_var(signal, nwind, ngap=0, mask=None,
             return mov_var, tot_var
         else:
             return mov_var, mask, tot_var
-
-
-def gap_var(signal, mask=None, nwind=Nwind_moving_var_min, ngap=Ngap_moving_var_min,
-            remove_outliers=False, detrend_remove_outliers=False, detr_length_outliers=Detr_length_outliers,
-            nsig_outliers=Nsig_outliers_stat, return_mask=False, nsamples_min=Nwind_moving_var_min//2,
-            adjustable_slices=False, return_total_var=False):
-    """
-    Calculates the moving variance of the signal taking for every point all the
-    values that are outside `ngap` and obeying the mask. If needed, removes outliers.
-    At every point,  excludes around it symmetric window of length `ngap` and
-    calculates the unbiased variance of the remaining non-masked signal. It is needed to
-    avoid the impact of the entries correlated with the considered point to the
-    variance estimation. For example, if there is a transit in this point, the
-    variance is taken around the transit, so its presence does not alter the measurement.
-    At the ends of the singal, the data is taken only from one side of the
-    considered point up to the available length.
-    :param signal: Data from which the moving variance is taken.
-    :type signal: numpy.array 1d of float, NO NANS
-    :param mask:
-    :type mask:
-    :param ngap: Length of the gap to exclude around each bin when calculating the
-        variance in this bin in order to avoid influence of these
-        points on the variance estimation.
-    :type ngap: int
-    :param remove_outliers:
-    :type remove_outliers:
-    :param detrend_remove_outliers:
-    :type detrend_remove_outliers:
-    :param detr_length_outliers:
-    :type detr_length_outliers:
-    :param nsig_outliers:
-    :type nsig_outliers:
-    :param return_mask:
-    :type return_mask:
-    :param nsamples_min:
-    :type nsamples_min:
-    :param adjustable_slices:
-    :type adjustable_slices:
-    :param return_total_var:
-    :type return_total_var:
-    :return: mov_var : Moving variance estimate at each point of the signal
-    :rtype: numpy.array 1d of float, len(signal)
-    """
-    signal = np.array(signal)
-
-    if mask is None:
-        mask = ~np.isnan(signal)
-    else:
-        mask = np.array(mask)
-        assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
-
-    if remove_outliers:
-        if detrend_remove_outliers:
-            data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
-                                    method='median', endmethod='mean', ends='symmetric', endlen=None,
-                                    return_trend=False, keep_overall_level=False, remove_outliers=True,
-                                    nsig_outliers=nsig_outliers)
-        else:
-            data1 = signal
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
-        mask *= outlier_mask
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
-        mask *= outlier_mask
-
-    total_var = unb_var(signal[mask])
-
-    # return np.ones(len(signal)) * total_var, total_var
-
-    signal[~mask] = 0.
-    sum1 = np.nancumsum(signal)
-    sum1 = np.concatenate(([0], sum1))
-    sum2 = np.nancumsum(signal ** 2)
-    sum2 = np.concatenate(([0], sum2))
-    summ = np.nancumsum(mask)
-    summ = np.concatenate(([0], summ))
-    mov_var = []
-
-    hnw = nwind // 2
-    hng = ngap // 2
-
-    for i in np.arange(0, hng):
-        counts = summ[-1] - summ[i + hng]
-        if counts < nsamples_min:
-            mov_var.append(total_var)
-        else:
-            mov_var.append(
-                ((sum2[-1] - sum2[i + hng]) / counts - ((sum1[-1] - sum1[i + hng]) / counts) ** 2)
-                * counts / (counts - 1))
-
-    for i in range(hng, len(signal) - hng, ):
-        counts = summ[-1] - summ[i + hng] + summ[i - hng]
-        if counts < nsamples_min:
-            mov_var.append(total_var)
-        else:
-            mov_var.append(((sum2[-1] - sum2[i + hng] + sum2[i - hng]) / counts
-                            - (((sum1[-1] - sum1[i + hng] + sum1[i - hng]) / counts) ** 2))
-                           * counts / (counts - 1))
-
-    for i in np.arange(len(signal) - hng, len(signal)):
-        counts = summ[i - hng]
-        if counts < nsamples_min:
-            mov_var.append(total_var)
-        else:
-            mov_var.append(((sum2[i - hng]) / counts
-                            - ((sum1[i - hng]) / counts) ** 2)
-                           * counts / (counts - 1))
-    if not return_total_var:
-        if not return_mask:
-            return np.abs(np.array(mov_var))  # because small fluctuations around zero can occur
-        else:
-            return np.abs(np.array(mov_var)), mask
-    else:
-        if not return_mask:
-            return np.abs(np.array(mov_var)), total_var  # because small fluctuations around zero can occur
-        else:
-            return np.abs(np.array(mov_var)), mask, total_var
 
 
 def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128):
@@ -402,6 +289,22 @@ def get_average_mean(fluxes):
         len_total += ll
     mean_total = mean_total / len_total
     return mean_total
+
+
+def window_data(data, alpha=0.1):
+    """
+    Apply Tukey window that smoothly zeroes the ends of the arrays.
+    :param data: The vector or the list of vectors to be windowed.
+    :type data: numpy.ndarray 1d or list of numpy.ndarray 1d
+    :param alpha: smoothness parameter of the window
+    :type alpha: float
+    :return: data, the resulting windowed vector or vectors
+    :rtype: same as `data`
+    """
+    if hasattr(data[0], '__len__'):
+        for i in range(len(data)):
+            data[i] = data * tukey(len(data), alpha=alpha, sym=True)
+
 
 def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, return_zero_padding_ends=False):
     """
@@ -1652,15 +1555,17 @@ def clean_small_holes(mask, max_hole=Max_small_hole):
         Mask in which small holes are removed, i.e. made True
     """
     mask = np.array(mask).astype(bool)
-    ind1 = (np.where(mask)[0])[0]
-    ind2 = (np.where(mask)[0])[-1]
-    mask1 = np.concatenate((np.ones(ind1), np.array(mask[ind1:ind2 + 1]), np.ones(len(mask) - ind2 - 1))).astype(bool)
-    begholes = np.where(mask1 * np.roll(~mask1, -1))[0] + 1
-    endholes = np.where(mask1 * np.roll(~mask1, 1))[0]
-    lenholes = endholes - begholes
-    small_holes = np.where(lenholes <= max_hole)[0]
-    for i in range(len(small_holes)):
-        mask[begholes[small_holes[i]]:endholes[small_holes[i]]] = True  # mask with only big holes left
+    where_mask = np.where(mask)[0]
+    if len(where_mask) > 0:
+        ind1 = where_mask[0]
+        ind2 = where_mask[-1]
+        mask1 = np.concatenate((np.ones(ind1), np.array(mask[ind1:ind2 + 1]), np.ones(len(mask) - ind2 - 1))).astype(bool)
+        begholes = np.where(mask1 * np.roll(~mask1, -1))[0] + 1
+        endholes = np.where(mask1 * np.roll(~mask1, 1))[0]
+        lenholes = endholes - begholes
+        small_holes = np.where(lenholes <= max_hole)[0]
+        for i in range(len(small_holes)):
+            mask[begholes[small_holes[i]]:endholes[small_holes[i]]] = True  # mask with only big holes left
     return mask
 
 
@@ -1947,35 +1852,42 @@ def veto_step(data, indices_center_exclude=None, mask=None, min_len_to_process=3
 
 
 def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
-               tlen=None, hlen_if_short=5, fn=0.01, n_parts=4, nperseg_psd=Nperseg_psd,
-               splitting='snr', lobe_hlen=5):
+               tlen=None, fn=0.01, n_parts=4, min_bins_part=4, nperseg_psd=Nperseg_psd,
+               splitting='snr', lobe_hlen=4):
     """
-    Parameters:
-    ---------------------------
-    data_wh_full : numpy.array of float
-        Whitened data for the entire quarter with cut zero padding ends.
-    template_wh_full :
-        Whitened template rolled in such a way that the center of the transit is at zero index
-    indices : array-like 1d of bool
-        The position where the transit center is located
-    tlen : int or None
-        Length of the non-zero part of the template (usually set by the whitening filter, can be
+    Splits the tamplate into parts and tests between two cases: all parts are of the same amplitude
+    or every part has a different amplitude.
+    :param data_wh_fd: Whitened data in the Fourier domain for the entire quarter.
+    :type data_wh_fd: numpy.ndarray 1d of float
+    :param template_wh_full: Whitened template in time domain rolled in such a way that the
+        center of the transit is at zero index.
+    :type template_wh_full: numpy.ndarray 1d of float
+    :param indices_padded: The position where the transit center is located. Should be in the padded units,
+        meaning it is counted from the beginning of the padded arrays.
+    :type indices_padded: numpy.ndarray 1d of int
+    :param mask_padded: Goodness mask corresponding to `data_wh_fd` but in time domain.
+    :type mask_padded: numpy.ndarray 1d of bool
+    :param tlen: Length of the non-zero part of the template (usually set by the whitening filter, can be
         also affected by the notch filter). If None, will be measured.
-    fn : float
-        False negative rate that is needed to ve achieved in the veto. Calculated from chi2 distribution
-    n_parts : int
-        Number of parts to which the template should be split (expecting to have the same SNR in them)
-    nsig_outliers_var : float
-        deviation from the mean in units of STD to be considered as outlier in statistic when measuring variance
-    return_scores : bool
-        Whether to return also the chi2 scores or only the veto result
-    splitting : str : 'snr' or 'len'
-        According to what to split the template: equal parts in snr or in length.
-
-    Returns
-    ---------------------------
-    :return: is_goods
-    :rtype: ndarray[bool]
+    :type tlen: int or None
+    :param fn: False negative rate that is needed to ve achieved in the veto. Calculated from chi2 distribution
+    :type fn: float
+    :param n_parts: Number of parts to which the template should be split (expecting to have the same SNR in them)
+    :type n_parts: int
+    :param min_bins_part: Minimal number of bins that should be in every part.
+        If less, number of parts will be decreased
+    :type min_bins_part: int
+    :param nperseg_psd: size of the slice that was used for PSD measurement in the pipeline
+    :type nperseg_psd: int
+    :param splitting: According to what to split the template: equal parts in snr or in just take the main
+        lobe of the template, for example if it is too short and can be tested in a usual chi-square veto
+        and not in parts veto.
+    :type splitting: str: 'snr' or 'lobe'
+    :param lobe_hlen: half-length of the lobe if `splitting`=='lobe' or if the number of parts is only one.
+    :type lobe_hlen: int
+    :return: is_goods, `True` where the trigger passed the veto, and `False` otherwise.
+        Same size as the input `indices_padded`
+    :rtype: numpy.ndarray of bool. Same size as the input `indices_padded`
     """
     # Indices are assumed to be given in the padded coordinates!
     template_wh_full = np.array(template_wh_full)  # this is template in Time domain
@@ -1985,7 +1897,7 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
         # PREPARING TEMPLATE
         if tlen is None:
             temp_smthnd = np.abs(template_wh_full - template_wh_full[len(template_wh_full) // 2])
-            # -> the value in the middle is supposed to be close to zero, but sometines no
+            # -> the value in the middle is supposed to be close to zero, but sometimes no
             temp_smthnd = (temp_smthnd + np.roll(temp_smthnd, 1) + np.roll(temp_smthnd, -1)) / 3
             # -> averaging the rolled template making it smooth
             inds_small = np.where((temp_smthnd / np.max(temp_smthnd) < 0.001))[0]  # choosing where the template is close to zero
@@ -2001,7 +1913,7 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
         template_wh_full[tlen // 2: len(template_wh_full) - tlen // 2] = 0.
         template_wh_full = template_wh_full / np.linalg.norm(template_wh_full)
         # DETERMINING NUMBER OF SPLITTING PARTS
-        chi2_temp_indices = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts)
+        chi2_temp_indices = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts, min_bins_part=min_bins_part)
         n_parts = len(chi2_temp_indices) - 1
         # FOR TOO SHORT TEMPLATES:
         # if the template is so short that there is only one part, we will just make one vetting on it and not parts.
@@ -2017,7 +1929,8 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
                     n_parts_additional = 2
                 else:
                     n_parts_additional = 3
-                chi2_temp_indices_additional = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts_additional)
+                chi2_temp_indices_additional = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts_additional,
+                                                                      min_bins_part=min_bins_part)
                 is_good_additional = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
                                                                       template_wh_full=template_wh_full,
                                                                       chi2_temp_indices=chi2_temp_indices_additional, fn=fn)
@@ -2030,7 +1943,7 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
     return is_good
 
 
-def _split_template_by_snr(template_wh_full, n_parts):
+def _split_template_by_snr(template_wh_full, n_parts, min_bins_part=4):
     cs = np.cumsum(template_wh_full ** 2)
     chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
     # # this was len split, I'm removing it because I don't want to fit zeros.
@@ -2040,7 +1953,8 @@ def _split_template_by_snr(template_wh_full, n_parts):
     chi2_temp_indices = list(set(chi2_temp_indices))  # remove repetitions
     chi2_temp_indices.sort()
     n_parts = len(chi2_temp_indices) - 1
-    while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < 4).any():  # want every piece to be at least 4 Bins
+    # Want every piece to be at least min_bins_part bins:
+    while ((chi2_temp_indices - np.roll(chi2_temp_indices, 1))[1:] < min_bins_part).any():
         n_parts -= 1
         cs = np.cumsum(template_wh_full ** 2)
         chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
@@ -2079,7 +1993,10 @@ def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_ful
     p_values = chi2.sf(scores, loc=0, scale=1, df=n_parts - 1)
     is_good = np.array(p_values) >= fn
     is_good = is_good & is_good_parts
-    # TODO measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5 -> IF NEEDED
+    # See in the veto_parts_fourier regarding the scale. The following empirical scale can be thought of:
+    # measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5
+    # But as mentioned in veto_parts_fourier, the norm is already one. I am not completely sure,
+    # but I think I checked it, and it was indeed fine.
     return is_good
 
 
@@ -2115,23 +2032,31 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
     The template in the Fourier domain is cut into several parts which undergo windowing in order not to be too long in the time
     domain. The minimal size of a piece is bounded by the window size. If the piece is too big, the number of pieces is decreased.
 
-    :param data_wh_fd:data must be really white, including the constant multiple!
-    :type data_wh_fd:
-    :param template_wh_fd: template should be normalized to have unit norm in the time domain! I do not to waste time and renormalize it inside the functions!ß
-    warnings: data can be blue because we oversuppress the low frequencies.
-    :type template_wh_fd:
-    :param indices_padded:
-    :type indices_padded:
-    :param mask_padded:
-    :type mask_padded:
-    :param n_parts:
-    :type n_parts:
-    :param fn:
-    :type fn:
-    :param wind_len_overlap: must be even!
-    :type wind_len_overlap:
-    :return:
-    :rtype: ndarray[bool]
+    :param data_wh_fd: Whitened data in the Fourier domain for the entire quarter.
+        Data must be really white, including the constant multiple!
+    :type data_wh_fd: numpy.ndarray 1d of float
+    :param template_wh_fd: Whitened template in Fourier domain rolled in time in such a way that the
+        center of the transit is at zero index. Template should be normalized to have unit norm in the time domain!
+        Not to waste time and renormalize it inside the functions!
+        Warning: data can be blue because we oversuppress the low frequencies.
+    :type template_wh_fd: numpy.ndarray 1d of float
+    :param indices_padded: The position where the transit center is located. Should be in the padded units,
+        meaning it is counted from the beginning of the padded arrays.
+    :type indices_padded: numpy.ndarray 1d of int
+    :param mask_padded: Goodness mask corresponding to `data_wh_fd` but in time domain.
+    :type mask_padded: numpy.ndarray 1d of bool
+    :param n_parts: Number of parts to which the template should be split (expecting to have the same SNR in them)
+    :type n_parts: int
+    :param fn: False negative rate that is needed to ve achieved in the veto. Calculated from chi2 distribution
+    :type fn: float
+    :param wind_len_overlap: Must be even! Window length of the overlapping parts into which the template will be split.
+        Hann window will be used. All this is to make parts have finite support in the time domain.
+    :type wind_len_overlap: int
+    :param nperseg_psd: size of the slice that was used for PSD measurement in the pipeline
+    :type nperseg_psd: int
+    :return: is_good, `True` where the trigger passed the veto, and `False` otherwise.
+        Same size as the input `indices_padded`
+    :rtype: numpy.ndarray of bool. Same size as the input `indices_padded`
     """
     data_wh_fd = np.array(data_wh_fd)
     template_wh_fd_full = np.array(template_wh_fd)
@@ -2193,7 +2118,7 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
 
     stat_full = np.real(np.fft.irfft(np.conjugate(template_wh_fd_full) * data_wh_fd))
     stat_full = stat_full / np.std(stat_full[mask_padded])
-    # -> the template norm was 1, so no need to multuply by it
+    # -> the template norm was 1, so no need to multiply by it
     scores = np.array([scores[:, j] @ templ_prod_matrix_inv @ scores[:, j] for j in range(len(scores[0]))])
     # -> this has distr chi2(n_parts), and it has var of trace of unity matrix, which is n_parts
     scores = scores[indices_padded]
@@ -2395,14 +2320,19 @@ def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_
     Produces a way to split an array into pieces of lengths from `min_piece` till `max_piece`. The pieces are primarily taken
     as parts between the holes in the `mask` whose size is more than `max_hole`. If these pieces exceed `max_piece`, they will be
     cut randomly, so that the length of the part is between `min_piece` and `max_piece`.
-    :param mask: mask in which holes will be considered breaks between the pieces
+    :param mask: Mask in which holes will be considered breaks between the pieces
     :type mask: ndarray of bool
-    :param max_hole:
+    :param max_hole: Maximal hole which can be ignored. Bigger holes will be cuts between pieces
     :type max_hole: int
-    :param max_piece:
+    :param max_piece: Maximal piece. Bigger pieces will be split.
     :type max_piece: int
-    :param min_piece:
+    :param min_piece: Minimal piece that can be obtained in the splitting.
     :type min_piece: int
+    param random_state: random state of numpy.random.set_state to fix the random slides generation.
+        Overrides `random_seed`
+    :type random_state: tuple[str, numpy.ndarray] corresponding to numpy.random.get_state()
+    :param random_seed: Sets randon seed of numpy.random. Overriden by `random_state`
+    :type random_seed: int
     :return: inds_pieces, beginnings of the pieces and next indices after the ends of the pieces.
     :rtype: list[list[int,int]]
     """
@@ -2625,7 +2555,22 @@ def cumsum_for_sf_and_conf_ints(counts_bins, n_sigma=1):
 
 def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
     """
-    stats: should be one-sided
+    Making histograms of the distributions of SNRS squared for every template, fitting the two-gaussian model and
+    finding the parameters of the tail gaussian. The first gaussian is supposed to be the standard one because the
+    data was brought to units of SNR by normalizing with its variance. However, the tail can be too heavy. Usually,
+    the distribution which is a sum of two gaussians fits the data. Therefore, the histogram is fitted for the
+    scale anf the amplitude of the tail gaussian. We do not make likelihood optimization of the tail, we just
+    fit the CDF of the bins in a stupid way. The likelihood fit with too many points will not work, so it could
+    only be used in the very tail. We are not too much afraid that we will overfit large single outliers,
+    we do not want to save these outliers anyway. We even cut some of them in the veto.
+    :param stats: Statistics in units of SNR for which we make the fit. Should be one-sided
+    :type stats: numpy.ndarray 1d of float
+    :param n_bins: number of bins to use in the histogram. The recommended is 50
+    :type n_bins: int
+    :param snr_0_fit: The smallest snr from which to start the fitting of the tail. Recommended 2.5
+    :type snr_0_fit: float
+    :param beg_min: Consider deviations from the distribution srarting from this SNR
+    :type beg_min: float
     """
     stats = np.abs(stats)
     bins_linear = np.linspace(0, np.max(stats) + 0.5, n_bins)
@@ -2634,8 +2579,9 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
     expected, upper, lower = expected_hist(np.sum(counts_linear), bins_linear)
 
     best_scale = 1.
-    best_coef = 0.  # if the mixture is not needed, this will be the answer
-    more_than_upper = (counts_linear - upper) > 0
+    best_coef = 0.  # If the mixture is not needed, this will be the answer
+    more_than_upper = (counts_linear - upper) > 0  # Checking where the histigram deviates
+    # If the histogram does deviate somewhere:
     if len(np.where(more_than_upper)[0]) > 0:
         cum_more_than_upper = np.cumsum(more_than_upper)
         ind_dev = np.where((cum_more_than_upper > min(7, cum_more_than_upper[-1] / 3)) & (centr_bins_linear >= beg_min))[0]
@@ -2697,9 +2643,8 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
             log_sf_init_guess = log_sf_hist_quadr[ind_init_guess:]
             log_errors_sf_hist_quadr_init_guess = log_errors_sf_hist_quadr[ind_init_guess:]
 
-            sol = minimize(lambda x: np.sum(
-                (log_sf_init_guess - (x[0] + x[1] * bins_quad_init_guess)) ** 2 / log_errors_sf_hist_quadr_init_guess ** 2),
-                           x0=np.array([0, -1]))
+            sol = minimize(lambda x: np.sum((log_sf_init_guess - (x[0] + x[1] * bins_quad_init_guess)
+                                             ) ** 2 / log_errors_sf_hist_quadr_init_guess ** 2), x0=np.array([0, -1]))
             # if not sol.success:
             #     print('initial guess linear fit failed!!!')
             if sol.x[1] < -1.e-6:
@@ -2820,8 +2765,8 @@ def make_periods_array(p_min=Pmin, p_max=Pmax, dp=None, duty_cycle=Duty_cycle, t
     :type duty_cycle: float
     :param t_mission: total duration between the beginning and the end of the data
     :type t_mission: float, days
-    :return:
-    :rtype:
+    :return: periods, one-dimensional period grid
+    :rtype: numpy.ndarray 1d
     """
     per = p_min
     periods = [per]
@@ -2839,6 +2784,27 @@ def make_periods_array(p_min=Pmin, p_max=Pmax, dp=None, duty_cycle=Duty_cycle, t
 
 
 def make_periods_edges(p_min, p_max, per_phases_per_chunk, dp=None, duty_cycle=Duty_cycle, dt=0.02043368):
+    """
+    Creates edges of period chunks for which the periodicity search will be performed separately.
+    This is needed because of memory restrictions per core. Returns the edges of the chunks.
+    :param per_phases_per_chunk: The total number of period-phase bins which should be in one chunk.
+        Is set by memory estimation. Number of phases is different for every period, therefore chunks will have
+        different number of periods in them.
+    :type per_phases_per_chunk: int
+    :param p_min: Minimal period in the search.
+    :type p_min: float or None
+    :param p_max: Maximal period in the search.
+    :type p_max: float or None
+    :param dp: Period step. If None, will be calculated from the `duty_cycle`. Usually is always None.
+    :type dp: float or None
+    :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
+        In units of days.
+    :type duty_cycle: float
+    :param dt: Time step of the data. Default is the typical Kepler time step.
+    :type dt: float
+    :return: per_edges, list of pairs of periods: the beginning and the end of every chunk.
+    :rtype: list[list[float, float]]
+    """
     periods = make_periods_array(p_min=p_min, p_max=p_max, dp=dp, duty_cycle=duty_cycle)
     p_chunks = int(np.sum((periods / dt).astype(int)) / per_phases_per_chunk)
     per_edges = [(p_min + (p_max - p_min) * i / p_chunks) for i in range(p_chunks + 1)]
@@ -2847,6 +2813,30 @@ def make_periods_edges(p_min, p_max, per_phases_per_chunk, dp=None, duty_cycle=D
 
 
 def make_periods_chunks(p_min, p_max, per_phases_per_chunk, duty_cycle, dt=0.02043368, t_mission=1300):
+    """
+    Creates the period grid that will be used for periodicity search and splits it into chunks.
+        The grid is built according to the duty cycle to cover the periodicities smoothly.
+        Splitting into chunks is needed because of memory restrictions per core.
+    :param per_phases_per_chunk: The total number of period-phase bins which should be in one chunk.
+        Is set by memory estimation. Number of phases is different for every period, therefore chunks will have
+        different number of periods in them.
+    :type per_phases_per_chunk: int
+    :param p_min: Minimal period in the search.
+    :type p_min: float or None
+    :param p_max: Maximal period in the search.
+    :type p_max: float or None
+    :param dp: Period step. If None, will be calculated from the `duty_cycle`. Usually is always None.
+    :type dp: float or None
+    :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
+        In units of days.
+    :type duty_cycle: float
+    :param dt: Time step of the data. Default is the typical Kepler time step.
+    :type dt: float
+    :param t_mission: Total duration of the mission in days.
+    :type t_mission: float
+    :return: periods_in_chunks, list of chunks of period grids
+    :rtype: list of np.ndarray 1d
+    """
     if per_phases_per_chunk is not None:
         per_edges = make_periods_edges(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk, duty_cycle=duty_cycle, dt=dt)
     else:
@@ -2863,6 +2853,18 @@ def make_periods_chunks(p_min, p_max, per_phases_per_chunk, duty_cycle, dt=0.020
 
 
 def add_safety_overlap(period_list, safety_bins=P_bins_overlap):
+    """
+    Adds spare period bins to the periods array for the best trigger not to be at the boundary of the array.
+    This is needed because the integral score will not be full if the trigger is on the boundary.
+    :param period_list: Grid of periods
+    :type period_list: numpy.ndarray of float
+    :param safety_bins: Number of spare period bins added to the periods array for the best trigger
+            not to be at the boundary of the array. This is needed because the integral score will not be full
+            if the trigger is on the boundary.
+        :type safety_bins: int
+    :return: new extended period array
+    :rtype: numpy.ndarray of float
+    """
     period_list = np.array(period_list)
     dp_low = period_list[1] - period_list[0]
     dp_high = period_list[-1] - period_list[-2]

@@ -49,7 +49,7 @@ def get_data_fun(target_id, location=Default_data_location):
     times, fluxes : lists of numpy.arrays 1d (may contain numpy.nan)
     """
     target_id = target_id.rjust(9, "0")
-    folder = get_correct_tid_folder(target_id, location)
+    folder = get_correct_tid_folder(target_id, location, allow_creation=True)
 
     if len([ff for ff in os.listdir(folder) if '.fits' in ff]) < 1:
         webdir = 'https://archive.stsci.edu/pub/kepler/lightcurves/'
@@ -93,6 +93,7 @@ def find_indices(time, first_time, period, first_index=None, return_times=False)
         return found_indices
     else:
         return found_indices, expected_times
+
 
 def connect_quarters_fun(time_quarters, data_quarters, zero_padding_ends=None, is_data_cut=False,
                          is_time_cut=False, dt=None, fill_gaps_by_nan=False):
@@ -357,6 +358,19 @@ def get_correct_tid_folder(target_id, location, allow_creation=False):
 
 
 def get_saving_file_path(output_location, target_id, filename_postfix, file_format):
+    """
+
+    :param output_location: The directory in which the output of this tarhet is saved
+    :type output_location: str
+    :param target_id:
+    :type target_id:
+    :param filename_postfix:
+    :type filename_postfix:
+    :param file_format:
+    :type file_format:
+    :return:
+    :rtype:
+    """
     filename_postfix = filename_postfix.strip('_')
     if file_format[0] != '.':
         file_format = '.' + file_format
@@ -509,9 +523,9 @@ def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
     ----------------------
     fftdat : np.array
     amp_max : float, in units of sigma_tail
-        limit amplitude of the fft maximum (above it the maximum is bad)
+        Limit amplitude of the fft maximum (above it the maximum is bad)
     dif_max : float, unitless
-        maximal difference between the value at point and the surrounding. Bigger is bad.
+        Maximal difference between the value at point and the surrounding. Bigger is bad.
     rfft : bool
         Whether to use rfft. The signals are real, so we just always use it.
     """

@@ -10,6 +10,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 from sys import getsizeof
 from astropy.io import fits
 import pickle
+from scipy.stats.qmc import Sobol
 import search_pipeline as spip
 import template_bank.template_module as tm
 from simulations import lightcurve_simulation as sim
@@ -22,20 +23,19 @@ from pipeline_parameters import *  # all the parameters, physical constants, occ
 # warnings.filterwarnings("ignore")
 np.set_printoptions(threshold=1000, linewidth=10000)
 
-# TODO: talk to Barak about saving one best thing per star. It can be for example that the best thing is wrong, but there is one a bit lower
-# which is good. It would make sense to save everything which is above a certain snr!
-# Or maybe we can say that for now, we want to find at least something. If we want that there is something in this star, then it is worth
-# looking at it closer in the future and save more points
+# TODO: write documentation
+# TODO: injections
+# TODO: look-elsewhere in the FAP
+# TODO
+
 """
 
 Future improvements:
-* make it possible to run multiprocessing from inside the functions
-* put indents in the docstring in the description
+* search more than one planet per star. It would make sense to save everything which is above a certain snr
+-> for now, we are only comparing hypotheses nothing vs one planet
 * learn to use json
 * reorganize methods, e.g. not to initialize templates
 * maybe put template generation to the init
-* figure out what is their utils.import_matplotlib()
-
 
 How to organize the project:
     * When saving new files and the old ones exist, make an option to rename the old one and keep it or to overwrite it
@@ -51,12 +51,49 @@ class P1:
         self.__dict__.update(kw)
 """
 
-if not os.path.isdir(Data_location):
-    os.mkdir(Data_location)
+"""
+How to read the documantation:
+consult the description
+if something is unclear, check the vocabulary
+check in many places
+"""
 
-if not os.path.isdir(Output_location):
-    os.mkdir(Output_location)
+"""
+VOCABULARY:
+KOI - Kepler Object of Interest, meaning something that is a potential planet according to Kepler
+TTV - Transit timing variation
+quarter - 90-day pieces to which Kepler light curve is split. Every quarter has different location on the detector, contamination, PSD.
+SES - 
+Raw SES - 
+SES SNR - 
+MES - 
+Main search (run) - 
+Condidioning - 
+SES search - 
+Periodicity search - 
+Time shuffling (Timeslides) - 
+Injections - 
+Background distribution - 
+Probability density units
 
+TIME CONVENTIONS
+Kepler time, rejected quarters
+Mission duration
+First transit time - convention
+Best-gaussianized sense
+
+Naming notations
+Saving formats
+"""
+
+"""
+SEARCH STRATEGY DESCRIPTION
+
+name postfix notation
+periodicity search - chunks
+per_phases_per_chunk
+duty_cycle
+"""
 
 ######################################################################################################################################
 
@@ -72,167 +109,360 @@ class KeplerTarget(object):
                  koi_dict_file=Koi_dict_file,
                  ttv_dict_file=Ttv_dict_file,
                  villanova_dict_file=Villanova_dict_file,
-                 overwrite_parameters_by_unpickle=False,
-                 allow_output_folder_creation=True):
+                 overwrite_location_parameters_by_unpickle=False,
+                 allow_output_folder_creation=True,
+                 allow_data_folder_creation=True):
+        """
+        Initializes the KeplerTarget object which is used to run the planet search, the statistical significance
+        evaluation and some estimations for Kepler stars.
+        :param target_id: Kepler ID of the target. A 9-digit number, where some first digits may be zero.
+            May be specified as integer or as string, should only contain digits.
+        :type target_id: str
+        :param data_location: Local path to the folder where data files are stored. The target_id will
+            be searched in there. If light curves are not found in the folder, they will be downloaded.
+            If folder is not found, it will be created.
+        :type data_location: str
+        :param output_location: Directory where the output is to be saved. The target ID named folder will be created.
+        :type output_location: str
+        :param load_pickled_attributes: Whether to load the class attributes which were saved in the `output_location`
+        :type load_pickled_attributes: bool
+        :param get_transit_and_binary_info: Whether to get the target info about existing planets and binary
+            companions from the Kepler catalogs.
+        :type get_transit_and_binary_info: bool
+        :param gaia_kepler_file_path: The local path to the Gaia-Kepler catalog file
+        :type gaia_kepler_file_path: str
+        :param koi_dict_file: The local path to the KOI info dictionary file
+        :type koi_dict_file: str
+        :param ttv_dict_file: The local path to the TTV info file
+        :type ttv_dict_file: str
+        :param villanova_dict_file: The local path to the Villanova Kepler eclipsing binary info file
+        :type villanova_dict_file: str
+        :param overwrite_location_parameters_by_unpickle: Whether to use the locations parameters saved in the
+            output directory from the previous runs
+        :type overwrite_location_parameters_by_unpickle: bool
+        :param allow_output_folder_creation: Whether to allow creation of the new output target-ID-named folder if
+            the existing one was not found
+        :type allow_output_folder_creation: bool
+        :param allow_data_folder_creation: Whether to allow creation of the new data target-ID-named folder if
+            the existing one was not found
+        :type allow_data_folder_creation: bool
+        """
         self.target_id = target_id.rjust(9, '0')
+        """Kepler target ID. Formatted to be a 9-digit string"""
 
-        data_location = af.get_correct_tid_folder(target_id, data_location)
+        # ############################################################################################################
+        # Obtaining the locations of the input and the output:
+        data_location = af.get_correct_tid_folder(target_id, data_location,
+                                                    allow_creation=allow_data_folder_creation)
         output_location = af.get_correct_tid_folder(target_id, output_location,
                                                     allow_creation=allow_output_folder_creation)
-
         self.data_location = data_location
+        """Where Kepler data is saved. If not there, it will be downloaded"""
         self.output_location = output_location
+        """Where the output will be saved. A target_id named folder will be made"""
+
+        # ############################################################################################################
+        # Locations of other files required for the processing:
         self.gaia_kepler_file = gaia_kepler_file_path
+        """Where the GAIA-Kepler fun file is saved"""
         self.koi_dict_file = koi_dict_file
+        """Where the dictionary of the known KOIs is saved"""
         self.ttv_dict_file = ttv_dict_file
+        """Where the known TTV info file is saved"""
         self.villanova_dict_file = villanova_dict_file
+        """Where the Villanova Kepler eclipsing binary catalog file is saved"""
 
+        # ############################################################################################################
+        # Target properties from the catalogs:
         self.stellar_radius = None
+        """Stellar radius in units of solar radii. Should be obtained from GAIA if exists"""
         self.stellar_mass = None
+        """Stellar mass in units of solar masses. Should be obtained from GAIA if exists"""
         self.kepmag = None
+        """Stellar Kepler magnitude. Should be obtained from GAIA if exists"""
         self.phot_g_mean_mag = None
+        """Stellar photometric G magnitude. Should be obtained from GAIA if exists"""
         self.parallax = None
-        self.phot_g_mean_mag = None
+        """Stellar parallax. Should be obtained from GAIA if exists"""
         self.gaia_abs_gmag = None
+        """Stellar absolute G magnitude. Will be calculated from the photometric, if defined"""
         self.gaia_b_r = None
+        """Stellar color. Should be obtained from GAIA if exists"""
         self.teff = None
+        """Stellar effective temperature in Kelvins. Should be obtained from GAIA if exists"""
         self.ra = None
+        """Stellar right ascention coordinate. Should be obtained from GAIA if exists"""
         self.dec = None
+        """Stellar declination coordinate. Should be obtained from GAIA if exists"""
         self.ruwe = None
+        """GAIA re-normalised unit weight error (RUWE). Should be obtained from GAIA if exists"""
         self.gaia_nconfp = None
-        # self_gaia_if_planet = None
+        """GAIA number of confirmed planets. Should be obtained from GAIA if exists"""
         self.gaia_non_single_star_flag = None
+        """GAIA flag of non-single star. Should be obtained from GAIA if exists"""
         self.gaia_variable_star_flag = None
+        """GAIA flag of variable star. Should be obtained from GAIA if exists"""
         self.m_1_3_r_s = None  # M**(1/3)*R[in M_sun and R_sun]
+        """Mass of the star in units of solar mass divided by the radius of the star to the power 1/3"""
 
+        # ############################################################################################################
+        # Data-processing-related facts:
         self.number_of_quarters = None
+        """Number of quarters in the Kepler data"""
         self.is_bad_fft = None
+        """Whether the Fourier-domain data looks bad, as checked by our function. E.g. contains very large peaks"""
         self.was_notched = None
+        """Whether our data conditioning had to apply the notch filter to frequency peaks of this data"""
         self.is_koi = None
+        """Whether this star is a Kepler Object of Interest"""
         self.is_koi_planet_masked = None
+        """Whether our data processing pipeline masked the KOI ephemeris"""
         self.koi_dict = None
+        """Dictionary with info about KOIs in this target star"""
         self.ttv_dict = None
+        """Dictionary with info about TTVs in this target star"""
         self.is_villanova_binary = None
+        """Whether the processed star appears in the Villanova Kepler eclipsing binary catalog"""
         self.villanova_dict = None
+        """Dictionary with info about eclipsing binary properties of this target star"""
 
+        # ############################################################################################################
+        # Parameters that will be created by our search pipeline:
         self.periods_in_chunks = None
-        self.per_phases_per_chunk = None  # per_phases_per_chunk
+        """Chunks of period grid used in the periodicity search - see Search Strategy Description"""
+        self.per_phases_per_chunk = None
+        """Number of period-phase grid in one periods chunk used in the periodicity search - see Search Strategy Description"""
         self.duty_cycle = None
-        self.p_min = None  # p_min_search
-        self.p_max = None  # p_max_search
+        """Duty cycle in the periodicity search, in days - see Search Strategy Description"""
+        self.p_min = None
+        """Minimal period used in the search"""
+        self.p_max = None
+        """Maximal period used in the search"""
         self.klc = None
-        self.conditioning_ses_time = None  # time of the main search conditioning and ses in seconds
-        self.periodicity_search_time = None  # time of the main run periodicity search (mes) in seconds
-
+        """KeplerLightCurve object used for the search - consult `search_pipeline.py`"""
+        self.conditioning_ses_time = None
+        """Time of the main search conditioning and ses in seconds"""
+        self.periodicity_search_time = None
+        """Time of the main run periodicity search (mes) in seconds"""
         self.templates_durations_hours = tm.Durations * 24.
 
+        # ############################################################################################################
+        # Best trigger results of our search pipeline:
         self.best_stat = None
+        """Best score in the search pipeline - see `search_pipeline.py`"""
         self.best_per = None
+        """Period in days corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_temp = None
+        """Template index corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_ftt = None
+        """First transit time corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_gauss_stat = None
+        """Gaussianized statistic corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_integral_score = None
+        """Integral coherent score corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_stat = None
+        """Staitstic corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_per = None
+        """Period in days corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_temp = None
+        """Template index corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_ftt = None
+        """First transit time corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_gauss_stat = None
+        """Best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_integral_score = None
-
+        """Integral coherent score corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.summed_transit_times = None  # times of values that were summed to produce the best trigger
+        """Approximate times when the individual transits of the best trigger happened"""
         self.summed_raw_stats = None  # statistics in units not of snr that were summed to produce the best trigger
-        self.summed_trends = None
+        """Single-event matched-filtering scores corresponding to the approximate transit times"""
         self.summed_vars = None
+        """Variance of the single-event matched-filtering scores corresponding to the approximate transit times"""
         self.summed_corrections = None
+        """Log single-event distribution corrections corresponding to the approximate transit times"""
         self.summed_gauss_stats = None
+        """Gaussianized single-event statistics corresponding to the approximate transit times"""
 
+        # ############################################################################################################
+        # After the best trigger:
         self.is_threshold_crossing = False
+        """Whether the best trigger crossed the pre-defined detection threshold"""
         self.per_wing_injection_and_slides = None
-        self.transit_prob_factor = None
-        self.search_prob_factor = None
-        self.transiting_planets_in_search = None
-        self.log10_best_period_edges = None
-        self.log2_rp_edges = None
-        self.planets_of_radii_in_per_range_one_star = None
-        self.injection_par_list = None
+        """Wing of the periods window that will be used to make injections and shuffle timeslides"""
+        self.transit_probability = None
+        """Geometric probability to transit. Given that there is a planet, what is the probability that it transits"""
+        self.transiting_planets_of_radii_in_per_range_one_star = None
+        """Number of planets in the injection period range per one star that exist and transit"""
+        self.transit_and_range_probability = None
+        """Probability to transit and to have a radius in the relevant range given that there is a planet"""
+        self.transiting_planets_in_relevant_range = None
+        """Number of planets in the injection period range in the radii range relevant for the trigger 
+            per one star that exist and transit"""
+        self.prior_planets_in_period_range_one_star = None
+        self.prior_radii_distribution = None
+        self.per_range_injections = None
+        self.planets_in_per_range_one_star = None
+        """"""
+        # self.transit_prob_factor = None
+        # # TODO fix these notations
+        # """Factor describing the probability of a planet around this star to transit assuming it exists"""  # TODO
+        # self.search_prob_factor = None
+        # """Factor describing the probability that the planet will be suitable for our search, assuming it exists.
+        #     Meaning it will be transit with a suitable period, the transit will not be too small and too large"""  # TODO
+        # self.transiting_planets_in_search = None
+        # """Number of transiting planets that are supposed to be in the search """  # TODO
+        # self.log10_best_period_edges = None
+        # """Edges of periods for the prior occurrence rate table that we use. In units of days, in scale of log10"""
+        # self.log2_rp_edges = None
+        # """Edges of planetary radii for the prior occurrence rate table that we use. In units of Earth radii, in scale of log2"""
+        # self.planets_of_radii_in_per_range_one_star = None
+        # """Prior occurrence rate in number of planets oer one star of radii bins in the corresponding period range"""  # TODO
+        # self.injection_par_list = None
+        # """List of planetary peremeters that were used as injections"""
 
+        # ############################################################################################################
         # Injections attributes
-
         self.per_inj_success = None
+        """List of injeccted periods of injections which were successfully detected"""
         self.a_inj_success = None
+        """List of injected semi-major axes in units of stellar radii of injections which were successfully detected"""
         self.inc_inj_success = None
+        """List of injected inclinations in degrees of injections which were successfully detected"""
         self.ecc_inj_success = None
+        """List of injected eccentricities of injections which were successfully detected"""
         self.w_inj_success = None
+        """List of injected periastron arguments in degrees of injections which were successfully detected"""
         self.rp_inj_success = None
+        """List of injected planetary radii in units of (?) of injections which were successfully detected"""  # TODO
         self.first_transit_time_inj_success = None
+        """List of injected first transit times of injections which were successfully detected"""
         self.retrieved_stat_success = None
+        """List of detected statistics of injections which were successfully detected"""
         self.retrieved_period_success = None
+        """List of detected periods in days of injections which were successfully detected"""
         self.retrieved_first_transit_time_success = None
+        """List of detected first transit times of injections which were successfully detected"""
         self.retrieved_gauss_stat_success = None
+        """List of detected gaussianized statistics of injections which were successfully detected"""
         self.retrieved_integral_score_success = None
+        """List of detected integral coherent scores of injections which were successfully detected"""
         self.retrieved_g_stat_success = None
+        """List of detected (in the best gaussianised sense) of ststistics of injections which were successfully detected"""
         self.retrieved_g_period_success = None
+        """List of detected (in the best gaussianised sense) of periods of injections which were successfully detected"""
         self.retrieved_g_first_transit_time_success = None
+        """List of detected (in the best gaussianised sense) of first transit times of injections which were successfully detected"""
         self.retrieved_g_gauss_stat_success = None
+        """List of detected (in the best gaussianised sense) of gaussianized statistics of injections which were successfully detected"""
         self.retrieved_g_integral_score_success = None
+        """List of detected (in the best gaussianised sense) on integral coherent scores of injections which were successfully detected"""
 
         self.per_inj_bad = None
+        """List of injeccted periods of injections which were missed by the search"""
         self.a_inj_bad = None
+        """List of injected semi-major axes in units of stellar radii of injections which were missed by the search"""
         self.inc_inj_bad = None
+        """List of injected inclinations in degrees of injections which were missed by the search"""
         self.ecc_inj_bad = None
+        """List of injected eccentricities of injections which were missed by the search"""
         self.w_inj_bad = None
+        """List of injected periastron arguments in degrees of injections which were missed by the search"""
         self.rp_inj_bad = None
+        """List of injected planetary radii in units of (?) of injections which were missed by the search"""  # TODO
         self.first_transit_time_inj_bad = None
+        """List of injected first transit times of injections which were missed by the search"""
         self.retrieved_stat_bad = None
+        """List of detected statistics of injections which were missed by the search"""
         self.retrieved_period_bad = None
+        """List of detected periods in days of injections which were missed by the search"""
         self.retrieved_first_transit_time_bad = None
+        """List of detected first transit times of injections which were missed by the search"""
         self.retrieved_gauss_stat_bad = None
+        """List of detected gaussianized statistics of injections which were missed by the search"""
         self.retrieved_integral_score_bad = None
+        """List of detected integral coherent scores of injections which were missed by the search"""
         self.retrieved_g_stat_bad = None
+        """List of detected (in the best gaussianised sense) of ststistics of injections which were missed by the search"""
         self.retrieved_g_period_bad = None
+        """List of detected (in the best gaussianised sense) of periods of injections which were missed by the search"""
         self.retrieved_g_first_transit_time_bad = None
+        """List of detected (in the best gaussianised sense) of first transit times of injections which were missed by the search"""
         self.retrieved_g_gauss_stat_bad = None
+        """List of detected (in the best gaussianised sense) of gaussianized statistics of injections which were missed by the search"""
         self.retrieved_g_integral_score_bad = None
+        """List of detected (in the best gaussianised sense) on integral coherent scores of injections which were missed by the search"""
 
         self.number_of_success_injections = None
+        """Total number of injections that were successfully detected"""
         self.number_of_injections = None
+        """Total number of injections that were made"""
 
+        # ############################################################################################################
+        # Time-scrambling attributes
         self.stats_slides = None
+        """List of best statistics that were found in the time-scrambling run"""
         self.pers_slides = None
+        """List of best periods in days that were found in the time-scrambling run"""
         self.first_times_slides = None
+        """List of best first transit times that were found in the time-scrambling run"""
         self.gauss_stats_slides = None
+        """List of best gaussianized statistics that were found in the time-scrambling run"""
         self.int_scores_slides = None
+        """List of best integral corerent scores that were found in the time-scrambling run"""
         self.stats_g_slides = None
+        """List of statistics (in the best-gaussianized sense) of that were found in the time-scrambling run"""
         self.pers_g_slides = None
+        """List of periods (in the best-gaussianized sense) that were found in the time-scrambling run"""
         self.first_times_g_slides = None
+        """List of first transit times (in the best-gaussianized sense) that were found in the time-scrambling run"""
         self.gauss_stats_g_slides = None
+        """List of gaussianized statistics (in the best-gaussianized sense) that were found in the time-scrambling run"""
         self.int_scores_g_slides = None
+        """List of integral corerent scores (in the best-gaussianized sense) that were found in the time-scrambling run"""
 
         self.n_slides = None
+        """Total number of time-scramblings made"""
         self.bins_stat_histogram = None
+        """Bins used to build the distribution of the statistics of the time-scrambling and injections"""
         self.bins_stat_histogram_inj = None
+        """Bins used to build the distribution of the statistics of the injections"""
         self.bins_stat_histogram_bg = None
+        """Bins used to build the distribution of the statistics of the time-scrambling"""
         self.distr_stat_h0 = None
+        """Histogram of distribution of the statistics of the time-scrambling"""
         self.distr_stat_inj_all = None
+        """Histogram of distribution of the statistics of the injections (successful and missed together)"""
         self.distr_stat_inj_success = None
-        self.extrapolation_coefs_stat_h0_hist = None
+        """Histogram of distribution of the statistics of the successful injections"""
+        # self.extrapolation_coefs_stat_h0_hist = None  # TODO
         self.prob_density_h0_trigger = None
+        """Probability density (see units in description) of the background at the location of the trigger"""
         self.false_alarm_prob_trigger = None
+        """False-alarm probability of the trigger estimated from the time-scrambling"""  # TODO look-elsewhere
         self.prob_density_h1_trigger = None
-        self.prob_density_planet_not_noise = None
+        """Probability density (see units in description) of the expected planets at the location of the trigger"""
+        self.prob_density_planet_not_noise = None  # TODO not good name density
+        """Probability of the trigger to originate from the planet and not from the noise"""
 
+        # Gaussianized statistic (still for the location of the best non-gaussianized score):
         self.bins_gauss_stat_histogram = None
+        """Bins of the gaussianized statistic used to build the distribution of the statistics of the time-scrambling and injections"""
         self.bins_gauss_stat_histogram_inj = None
+        """Bins of the gaussianized statistic used to build the distribution of the statistics of the injections"""
         self.bins_gauss_stat_histogram_bg = None
+        """Bins of the gaussianized statistic used to build the distribution of the statistics of the time-scrambling"""
         self.distr_gauss_stat_h0 = None
+        """Histogram of distribution of the gaussianized statistics of the time-scrambling"""
         self.distr_gauss_stat_inj_all = None
+        """Histogram of distribution of the gaussianized statistics of the all (success and bad) injections"""
         self.distr_gauss_stat_inj_success = None
+        """Histogram of distribution of the gaussianized statistics of the successful injections"""
 
-        # Elements of estimations:
+        # ############################################################################################################
+        # Elements of estimations:  # TODO
         # Non-score-corrected values:
         self.best_raw_stats_no_filt = None
         self.best_stat_vars_no_filt = None
-        self.best_trends_no_filt = None
         self.best_ampls_no_filt = None  # amplitudes of different transits
         self.best_ampls_stds_no_filt = None
         self.best_ampl_no_filt = None  # average depth of the transit in parts per million
@@ -249,20 +479,13 @@ class KeplerTarget(object):
         self.rp_to_r_earth_std = None
 
         self.failures = ''  # if something bad happens, we will write it here
+        """Records problems in data or processing which appeared during the run"""
         self.errors = ''
         # TODO: this field did not work in the catalog!!!
         self.is_good_for_processing = True
 
         if load_pickled_attributes:
-            self.unpickle_small_attributes()
-            if not overwrite_parameters_by_unpickle:
-                self.data_location = data_location
-                self.output_location = output_location
-                self.gaia_kepler_file = gaia_kepler_file_path
-                self.koi_dict_file = koi_dict_file
-                self.ttv_dict_file = ttv_dict_file
-                self.villanova_dict_file = villanova_dict_file
-
+            self.unpickle_small_attributes(overwrite_location_parameters=overwrite_location_parameters_by_unpickle)
         else:
             if self.gaia_kepler_file is not None:
                 self.get_fields_from_gaia(gaia_file_path=self.gaia_kepler_file)
@@ -282,9 +505,8 @@ class KeplerTarget(object):
         TODO: we should avoid pickling too long arrays
         :param pickle_small_attributes_filename_postfix:
         :type pickle_small_attributes_filename_postfix:
-        :param output_location:
-        :type output_location
-        :return:
+        :param output_location: The directory in which the output of this target is saved
+        :type output_location: str
         """
         if output_location is None:
             output_location = self.output_location
@@ -301,16 +523,48 @@ class KeplerTarget(object):
             pickle.dump(dict_to_pickle, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     def unpickle_small_attributes(self, output_location=None,
-                                  pickle_small_attributes_filename_postfix=Pickle_target_small_attributes_filename_postfix):
+                                  pickle_small_attributes_filename_postfix=Pickle_target_small_attributes_filename_postfix,
+                                  overwrite_location_parameters=False):
+        """
+        Load attributes of the class which were previously pickled by the method `self.pickle_small_attributes`.
+        :param output_location: The folder in which the output of this target is saved
+        :type output_location: str
+        :param pickle_small_attributes_filename_postfix:
+        :type pickle_small_attributes_filename_postfix:
+        :param overwrite_location_parameters:
+        :type overwrite_location_parameters:
+        """
         if output_location is None:
             output_location = self.output_location
         file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
                                             filename_postfix=pickle_small_attributes_filename_postfix, file_format='pickle')
+
+        if not overwrite_location_parameters:
+            output_location = self.output_location
+        data_location = self.data_location
+        gaia_kepler_file_path = self.gaia_kepler_file
+        koi_dict_file = self.koi_dict_file
+        ttv_dict_file = self.ttv_dict_file
+        villanova_dict_file = self.villanova_dict_file
+
         with open(file_path, 'rb') as pickle_file:
             dict1 = pickle.load(pickle_file)
             self.__dict__.update(dict1.items())
 
+        if not overwrite_location_parameters:
+            self.data_location = data_location
+            self.output_location = output_location
+            self.gaia_kepler_file = gaia_kepler_file_path
+            self.koi_dict_file = koi_dict_file
+            self.ttv_dict_file = ttv_dict_file
+            self.villanova_dict_file = villanova_dict_file
+
     def get_fields_from_gaia(self, gaia_file_path=None):
+        """
+        Opens the GAIA-Kepler crossmatch info file and gets some target parameters
+        :param gaia_file_path: Local path to the file
+        :type gaia_file_path: str
+        """
         if gaia_file_path is None:
             gaia_file_path = self.gaia_kepler_file
         gaia_file = fits.open(gaia_file_path)
@@ -360,27 +614,14 @@ class KeplerTarget(object):
             # todo: add fields with units and descriptions. astropy.table can be helpful with that
         gaia_file.close()
 
-    def get_fields_from_info_file(self, gaia_file_path=None):
-        """
-        WHAT IS THIS FUNCTION?
-        :param gaia_file_path:
-        :type gaia_file_path:
-        :return:
-        :rtype:
-        """
-        # if gaia_file_path is None:
-        #     gaia_file_path = self.gaia_kepler_file
-        pass
-
     def get_koi_and_ttv_fields(self, koi_dict_file=None, ttv_dict_file=None):
         """
-
-        :param koi_dict_file:
-        :type koi_dict_file:
-        :param ttv_dict_file:
-        :type ttv_dict_file:
-        :return:
-        :rtype:
+        Opens the corresponding files and reads info about possible KOI of this target and about TTV if there
+        is any. Writes the info as fields of the class
+        :param koi_dict_file: The local path to the KOI info dictionary file
+        :type koi_dict_file: str
+        :param ttv_dict_file: The local path to the TTV info file
+        :type ttv_dict_file: str
         """
         if koi_dict_file is None:
             koi_dict_file = self.koi_dict_file
@@ -421,6 +662,8 @@ class KeplerTarget(object):
 
     def get_villanova_fields(self, villanova_dict_file=None):
         """
+        Opens the Villanova Kepler eclipsing binary info file and loads the corresponding fields.
+        
         Keys are 'KIC', 'period', 'period_err', 'bjd0', 'bjd0_err', 'pwidth', 'swidth', 'sep', 'morph'.
 
         * 'period' - period of the eclipsing binary signal in days
@@ -437,10 +680,8 @@ class KeplerTarget(object):
 
         http://keplerebs.villanova.edu/about#FileFormats
 
-        :param villanova_dict_file:
+        :param villanova_dict_file: The local path to the Villanova Kepler eclipsing binary info file
         :type villanova_dict_file: str
-        :return:
-        :rtype:
         """
         if villanova_dict_file is None:
             villanova_dict_file = self.villanova_dict_file
@@ -460,13 +701,12 @@ class KeplerTarget(object):
     # noinspection DuplicatedCode
     def print_dict_file(self, output_location=None, dict_txt_filename_postfix=Dict_target_txt_filename_postfix):
         """
-        Prints only small attributes
-        :param output_location:
-        :type output_location:
-        :param dict_txt_filename_postfix:
-        :type dict_txt_filename_postfix:
-        :return:
-        :rtype:
+        Prints some fields from the class dictionary in a txt file to read easily. Prints only small attributes,
+        see the definition pf smallness inside the function.
+        :param output_location: The folder in which the output of this target is saved
+        :type output_location: str
+        :param dict_txt_filename_postfix: The postfix to add to the target ID in the filename. See postfix notation.
+        :type dict_txt_filename_postfix: str
         """
         if output_location is None:
             output_location = self.output_location
@@ -495,6 +735,16 @@ class KeplerTarget(object):
                 print(key, ":", dict_to_print[key], file=fil)
 
     def print_summary(self, to_file=True, file=None, summary_txt_filename_postfix=Summary_target_txt_filename_postfix):
+        """
+        Prints the summary file of the search summarizing what are the best trigger parameters
+        :param to_file: Whether to print the summary to the file (or to the system output)
+        :type to_file: bool
+        :param file: Path to the file in which to print the data. Overrides `summary_txt_filename_postfix`
+        :type file: str
+        :param summary_txt_filename_postfix: Name postfix (see postfix notation) added to the target ID
+            in the filename. The file will be saved in the `self.output_location`. Overriden by `file`.
+        :type summary_txt_filename_postfix: str
+        """
         if file is None:
             file = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                            filename_postfix=summary_txt_filename_postfix, file_format='txt')
@@ -535,11 +785,32 @@ class KeplerTarget(object):
             print('')
 
     def clean_output_directory(self):
+        """
+        Removes all the files from `self.output_location`
+        """
         for ff in os.listdir(self.output_location):
             os.remove(os.path.join(self.output_location, ff))
 
     def initialize_kepler_light_curve(self, data_location=None, output_location=None,
                                       remove_zeroth_quarter=True, remove_quarter_17=True):
+        """
+        Initializes an instance of `search_pipeline.KeplerLightCurve` class as an attribute of this class instance.
+        KeplerLightCurve is used for data conditioning and search.
+        See the description in the `search_pipeline.py'
+        :param data_location: Local path to the folder where data files are stored. The target_id will
+            be searched in there. If light curves are not found in the folder, they will be downloaded.
+            If folder is not found, it will be created.
+        :type data_location: str
+        :param output_location: The directory in which the output of this target is saved.
+             The target ID named folder will be created.
+        :type output_location: str
+        :param remove_zeroth_quarter: Whether to remove quarter 0. This quarter is small and often bad,
+            not intended for science.
+        :type remove_zeroth_quarter: bool
+        :param remove_quarter_17: Whether to remove quarter 17.
+            This quarter is small, there is a hole, and there might be glitch. We remove it
+        :type remove_quarter_17: bool
+        """
         if data_location is None:
             data_location = self.data_location
         if output_location is None:
@@ -549,17 +820,16 @@ class KeplerTarget(object):
                                          remove_zeroth_quarter=remove_zeroth_quarter, remove_quarter_17=remove_quarter_17)  # Q17 is removed
         self.number_of_quarters = len(self.klc.quarters)
 
-    def bad_fft_check(self, amp_max_bad_fft=300, dif_max_bad_fft=11):
+    def bad_fft_check(self, amp_max_bad_fft=Amp_max_bad_fft, dif_max_bad_fft=Dif_max_bad_fft):
         """
         Checks whether there are very high peaks in the fft of the original fluxes
-        :param amp_max_bad_fft:
-        :type amp_max_bad_fft:
-        :param dif_max_bad_fft:
-        :type dif_max_bad_fft:
+        :param amp_max_bad_fft: Limit amplitude of the fft maximum (above it the maximum is bad)
+        :type amp_max_bad_fft: float
+        :param dif_max_bad_fft: Maximal difference between the value at point and the surrounding. Bigger is bad.
+        :type dif_max_bad_fft: float
         :return:
         :rtype:
         """
-        # filtering bad_ffts WEXAC
         is_good = True
         for q in self.klc.quarters:
             lc = np.array(self.klc.orig_fluxes[q] - np.nanmean(self.klc.orig_fluxes[q]))
@@ -574,6 +844,23 @@ class KeplerTarget(object):
 
     def check_detectable_radius(self, stellar_radius, snr_thresh=Stat_candidate_search**0.5,
                                 rp_re_max=Rp_re_max, rp_rs_max=Rp_rs_max):
+        """
+        Finds approximately whether there can be detectable planets in a target with
+        the average noise properties of this target, assuming that the threshold SNR is `snr_thresh`.
+        Assuming that we search planets up to radius `rp_re_max` in units of Earth radii and
+        up to `rp_rs_max` in units of stellar radii. That is, we are not interested in brown dwarfs.
+        The function takes the average noise properties of the star, checks what is the radius
+        corresponding to the thrashold SNR and sees whether this radius is too large or not.
+        Writes the results in theattributes of the class.
+        :param stellar_radius: Radius of the star in units of solar radii.
+        :type stellar_radius: float
+        :param snr_thresh: Thre
+        :type snr_thresh:
+        :param rp_re_max:
+        :type rp_re_max:
+        :param rp_rs_max:
+        :type rp_rs_max:
+        """
         units_of_re_to_units_of_r_star_factor = 1 / (stellar_radius * R_sun_R_e)
         rp_rs = units_of_re_to_units_of_r_star_factor * rp_re_max
         rp_rs = min(rp_rs, rp_rs_max)
@@ -587,58 +874,119 @@ class KeplerTarget(object):
             self.failures = self.failures + ' too_large_noise; '
             self.is_bad_fft = True
 
-    def get_detectable_radius_flux(self, flux, period, depth_factor=1., snr_min=4.5, snr_max_1=8, snr_max_full=40, stellar_radius=None,
-                                   conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix,
-                                   units='star'):
+    def get_predicted_snr_flux(self, flux_model, period, depth_factor=1., rp_rs=0.02, wf_fd=None, n_quarters=16,
+                               conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
         """
-        TODO: remind myself what this function does
-        :param flux:
-        :type flux:
-        :param period:
-        :type period:
-        :param depth_factor:
-        :type depth_factor:
-        :param snr_min:
-        :type snr_min:
-        :param snr_max_1:
-        :type snr_max_1:
-        :param snr_max_full:
-        :type snr_max_full:
-        :param stellar_radius:
-        :type stellar_radius:
-        :param conditioned_data_filename_postfix:
-        :type conditioned_data_filename_postfix:
-        :param units:
-        :type units:
-        :return:
-        :rtype:
+        Tajes the mean flux model and the period, uploads the noise properties of the star. Checks what would be the signal to noise
+        for different planetary radii and selects the minimal and maximal radii accounting for the detection threshold and
+        the punishment of too strong signals in the pipeline. Other radii are supposed to be not interesting for the search
+        because they will never populate the range of the histogram which surrounds the potential triggers that we are aiming for.
+        TODO: check the correctness
+        :param flux_model: Model of the transit, mean flux as function of time.
+        :type flux_model: numpy.ndarray 1d of float
+        :param period: Period of the supposed planet, days. Defines the number of transits.
+        :type period: float
+        :param depth_factor: Ratio of the maximal dimming anf the (planet_radius / stellar_radius)**2. Shows how important is the
+            limb darkening and the inclination in the minimal attainable dimming. Often this can be significant.
+        :type depth_factor: float
+        :param rp_rs: Radius of the planet divided by the radius of the star
+        :type rp_rs: float
+        :param conditioned_data_filename_postfix: Text in the filename added to the target ID. See the naming notation
+        :type conditioned_data_filename_postfix: str
+        :return: The expected SNR for this planet
+        :rtype: tuple(float, float)
+        """
+        if wf_fd is None:
+            wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
+            # -> relative wf_fd, mean flux already taken into account
+            n_quarters = len(wf_fds)
+            wf_fd = np.mean(np.array(wf_fds)**2, axis=0) ** 0.5
+        support = 2 * (len(wf_fd) - 1)
+        n_transits_est = np.round(n_quarters * 90. / period)
+
+        flux_model = np.roll(flux_model, -np.argmax(flux_model))
+        flux_model = flux_model / np.nanmax(flux_model)
+        flux_model = np.concatenate((flux_model[:len(flux_model) // 2], np.zeros(support - len(flux_model)),
+                                     flux_model[len(flux_model) // 2:])) * depth_factor
+        flux_model = np.fft.irfft(np.fft.rfft(flux_model) * wf_fd)
+        snr_exp = np.linalg.norm(flux_model) * n_transits_est ** 0.5 * (rp_rs ** 2)
+        return snr_exp
+
+    def get_detectable_radius_flux(self, flux_model, period, depth_factor=1., snr_min=4.5, snr_max_1=8, snr_max_full=40,
+                                   stellar_radius=None, units='star', wf_fd=None, n_quarters=16,
+                                   conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
+        """
+        Takes the mean flux model and the period, uploads the noise properties of the star. Checks what would be the signal to noise
+        for different planetary radii and selects the minimal and maximal radii accounting for the detection threshold and
+        the punishment of too strong signals in the pipeline. Other radii are supposed to be not interesting for the search
+        because they will never populate the range of the histogram which surrounds the potential triggers that we are aiming for.
+        TODO: check the correctness
+        :param flux_model: Model of the transit, mean flux as function of time.
+        :type flux_model: numpy.ndarray 1d of float
+        :param period: Period of the supposed planet, days. Defines the number of transits.
+        :type period: float
+        :param depth_factor: Ratio of the maximal dimming anf the (planet_radius / stellar_radius)**2. Shows how important is the
+            limb darkening and the inclination in the minimal attainable dimming. Often this can be significant.
+        :type depth_factor: float
+        :param snr_min: Minimal SNR for the full many-transit data assumed to be detectable. We take extra safety assuming there
+            can be dispersion and error, and take this lower.
+        :type snr_min: float
+        :param snr_max_1: Maximal SNR which can be allocated to one transit. Higher will be cut as outlier or obtain a too big
+            punishment from the non-gaussianity.
+        :type snr_max_1: float
+        :param snr_max_full: Maximal SNR which can be allocated to one transit. Higher is assumed to be outside of our pieline
+            operation range, so that it will never influence any density in the range of our possible triggers.
+        :type snr_max_full: float
+        :param stellar_radius: Radius of the star in units of solar radii.
+        :type stellar_radius: float
+        :param conditioned_data_filename_postfix: Text in the filename added to the target ID. See the naming notation
+        :type conditioned_data_filename_postfix: str
+        :param units: 'star' or 'earth'. Whether to report the result in units of stellar radii or earch radii.
+        :type units: str
+        :return: rps_res, the resulting minimal and maximal considered radii in the specified units
+        :rtype: tuple(float, float)
         """
         if stellar_radius is None:
             stellar_radius = self.stellar_radius
-        wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
-        # -> relative wf_fd, mean flux already taken into account
-        n_quarters = len(wf_fds)
-        n_transits_max = np.ceil(n_quarters * 90. / period)
-        wf_fd = np.mean(np.array(wf_fds)**2, axis=0) ** 0.5
+        if wf_fd is None:
+            wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
+            # -> relative wf_fd, mean flux already taken into account
+            n_quarters = len(wf_fds)
+            wf_fd = np.mean(np.array(wf_fds)**2, axis=0) ** 0.5
         support = 2 * (len(wf_fd) - 1)
+        n_transits_max = np.ceil(n_quarters * 90. / period)
 
-        flux = np.roll(flux, -np.argmax(flux))
-        flux = flux / np.nanmax(flux)
-        flux = np.concatenate((flux[:len(flux)//2], np.zeros(support - len(flux)), flux[len(flux)//2:])) * depth_factor
-        flux = np.fft.irfft(np.fft.rfft(flux) * wf_fd)
+        flux_model = np.roll(flux_model, -np.argmax(flux_model))
+        flux_model = flux_model / np.nanmax(flux_model)
+        flux_model = np.concatenate((flux_model[:len(flux_model) // 2], np.zeros(support - len(flux_model)), flux_model[len(flux_model) // 2:])) * depth_factor
+        flux_model = np.fft.irfft(np.fft.rfft(flux_model) * wf_fd)
         # snr_max = np.linalg.norm(flux) * n_transits_max ** 0.5 * (rp_rs ** 2)
-        rp_rs_min = (snr_min / (np.linalg.norm(flux) * n_transits_max ** 0.5)) ** 0.5
-        rp_rs_max = min((snr_max_1 / np.linalg.norm(flux)) ** 0.5, (snr_max_full / (np.linalg.norm(flux) * n_transits_max ** 0.5)) ** 0.5)
-        res = rp_rs_min, rp_rs_max
+        rp_rs_min = (snr_min / (np.linalg.norm(flux_model) * n_transits_max ** 0.5)) ** 0.5
+        rp_rs_max = min((snr_max_1 / np.linalg.norm(flux_model)) ** 0.5, (snr_max_full / (np.linalg.norm(flux_model) * n_transits_max ** 0.5)) ** 0.5)
+        rps_res = rp_rs_min, rp_rs_max
         if units == 'earth':
             units_of_re_to_units_of_r_star_factor = 1 / (stellar_radius * R_sun_R_e)
             # rp_rs = units_of_re_to_units_of_r_star_factor * rp_re
             rp_re_min = rp_rs_min / units_of_re_to_units_of_r_star_factor
             rp_re_max = rp_rs_max / units_of_re_to_units_of_r_star_factor
-            res = rp_re_min, rp_re_max
-        return res
+            rps_res = rp_re_min, rp_re_max
+        return rps_res
 
     def mask_koi_planet(self, modify_self_klc=True, return_durations_transit_times=False, include_candidates=False):
+        """
+        Take the information of the KIO of this target that are saved in the class instance fields. Find the times and the
+        durations of transits of these planets. If `modify_self_klc` is True, then in the KeplerLightCurve attribute
+        `self.klc` modufy the masks to exclude the transits from the search.
+        :param modify_self_klc: Whether to modify the masks in `self.klc` to mask the KOI transits
+        :type modify_self_klc: bool
+        :param return_durations_transit_times: Whether to return the durations and the transit times of KOI planets.
+        :type return_durations_transit_times: bool
+        :param include_candidates: Whether to include in the process the Kepler planets with status 'Candidate',
+            as opposed to 'Confirmed'.
+        :type include_candidates: bool
+        :return: durations_and_times, durations and the transit times of KOI planets of this target
+        :rtype: list of list(numpy.ndarray 1d, numpy.ndarray 1d)
+        """
         # TODO why do we mask the planet, and not subtract? We could also subtract villanova ephemeris.
         # TODO: include occultation (secondary transit)
         assert self.is_koi, 'The target is not KOI, so the KOI planet cannot be masked!'
@@ -686,9 +1034,6 @@ class KeplerTarget(object):
         """
         Masking Villanova binaries is not implemented yet for reasons described in the comments.
         Keys are 'KIC', 'period', 'period_err', 'bjd0', 'bjd0_err', 'pwidth', 'swidth', 'sep', 'morph'.
-
-        :return:
-        :rtype:
         """
         raise AssertionError('Masking Villanova binaries is not implemented yet for reasons described in the documentation!')
         # We are not doing this for very short-period and not detached binaries, because there are too many times to mask.
@@ -705,41 +1050,46 @@ class KeplerTarget(object):
                        save_no_veto_no_score_cor_stats=True, stop_if_bad=True,
                        no_veto_no_score_cor_filename_postfix=No_veto_no_score_cor_stats_filename_postfix):
         """
+        Search for the single-event statistics. Is done throught the KeplerLightCurve instance, so see more detalis
+        in `search_pipeline.py`. Includes the following:
+        - Getting the data, checking whether it is good enough for the search, masking possible KOI
+        - Conditioning data and templates
+        - Checking the detectable radii in this noise, and stop the search if it is too bad
+        - Running the matched-filtering for single-transit templates
+        - Vetting statistics, assessing the distribution non-gaussianity
+        - Connecting the quarters into cintinuous data ready for the peruiodicity search
+        - Saving the processed data for future use
+        The next stage after this would be to run the periodicity search.
 
-        :param no_veto_no_score_cor_filename_postfix:
-        :type no_veto_no_score_cor_filename_postfix:
-        :param save_no_veto_no_score_cor_stats:
-        :type save_no_veto_no_score_cor_stats:
-        :param connected_stats_filename_postfix:
+        :param save_conditioned_data: Whether to save conditioned data
+        :type save_conditioned_data: bool
+        :param conditioned_data_filename_postfix: Text added to the target ID in the name of the file saving conditioned data.
+            See naming notations.
+        :type conditioned_data_filename_postfix: str
+        :param save_connected_stats: Whether to save statistics with connected quarters which can be used later
+            for periodicity search.
+        :type save_connected_stats: bool
+        :param connected_stats_filename_postfix: Text added to the target ID in the name of the file saving
+            statistics with connected quarters. See naming notations.
         :type connected_stats_filename_postfix:
-        :param conditioned_data_filename_postfix:
-        :type conditioned_data_filename_postfix:
-        :param mask_koi_planet:
-        :type mask_koi_planet:
-        :param save_conditioned_data:
-        :type save_conditioned_data:
-        :param stop_if_bad:
-        :type stop_if_bad:
-        :param save_connected_stats:
-        :type save_connected_stats:
-        :return:
-        :rtype:
+        :param save_no_veto_no_score_cor_stats: Whether to save statistics which did not undergo veto or score correction.
+        :type save_no_veto_no_score_cor_stats: bool
+        :param no_veto_no_score_cor_filename_postfix: Text added to the target ID in the name of the file saving
+            statistics which did not undergo veto or score correction. See naming notations.
+        :type no_veto_no_score_cor_filename_postfix: str
+        :param mask_koi_planet: Whether to mask Kepler planets
+        :type mask_koi_planet: bool
+        :param stop_if_bad: Whether to stop the search if the target was revealed to have a too bad PSD or if it was
+            understood that the radii of the planets that can be detected in this search are too big.
+        :type stop_if_bad: bool
         """
-
         t1 = time.time()
         self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                          output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s)  # Q17 is removed
         self.bad_fft_check()  # Made on orig_fluxes
         if self.is_koi and mask_koi_planet:
             self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False, include_candidates=False)
-            # TODO: think whom we mask
-            # # if there are only candidates, it will not mask
-            # # An alternative way:
-            # transit_durations_and_times = self.mask_koi_planet(modify_self_klc=False, return_durations_transit_times=True,
-            #                                                    include_candidates=False)
-            # if len(transit_durations_and_times) > 0:  # if there are only candidates, it will not mask
-            #     for transit_durations, transit_times in transit_durations_and_times:
-            #         self.klc.mask_ephemeris(durations=transit_durations, transit_times=transit_times)
+            # Attention: we do not mask candidates
         self.klc.condition_data()  # In outlier mask, positive and negative nsig_outliers are the same because we run inversion after.
         self.was_notched = self.klc.was_notched
         self.klc.condition_templates()
@@ -747,7 +1097,7 @@ class KeplerTarget(object):
         if (not self.is_bad_fft) or (not stop_if_bad):
             if save_conditioned_data:
                 self.klc.save_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
-            self.klc.detect_single_transits(gaussianize=True)
+            self.klc.detect_single_transits(gaussianize=True, save_no_veto_no_score_cor_stats_as_attr=True)
             if save_no_veto_no_score_cor_stats:
                 self.klc.save_no_veto_no_score_cor_stats(filename_postfix=no_veto_no_score_cor_filename_postfix)
             self.klc.connect_quarters()
@@ -763,21 +1113,27 @@ class KeplerTarget(object):
                           mask_koi_planet=True, save_connected_stats=True,
                           connected_stats_filename_postfix=Connected_statistic_data_filename_postfix):
         """
-
-        :param reinitialize:
-        :type reinitialize:
-        :param conditioned_data_filename_postfix:
-        :type conditioned_data_filename_postfix:
-        :param connected_statistic_data_filename_postfix:
-        :type connected_statistic_data_filename_postfix:
-        :param mask_koi_planet:
+        In the KeplerLightCurve instance attribute (`self.klc`) of this class, load the precomputed statistics
+        (or compute if there are no precomputed) with connected quarters which can be used in the periodicity
+        search. See more detalis about the statistics in `search_pipeline.py`. If this method is executed, you
+        will get `self.klc` with ready single-transit statistics at which the periodicity search can be run.
+        These statistics also can be time-scrambled.
+        :param reinitialize: Whether to reinstantiate `self.klc` even if it already existed before.
+        :type reinitialize: bool
+        :param conditioned_data_filename_postfix: Text added to the target ID in the name of the file saving conditioned data.
+            See naming notations. This is needed in the case that the connected statistics file does not exixt. Then
+            the conditioned data can be loaded and processed to make it all faster.
+        :type conditioned_data_filename_postfix: str
+        :param connected_statistic_data_filename_postfix: Text added to the target ID in the name of the file saving
+            conditioned data. See naming notations.
+        :type connected_statistic_data_filename_postfix: str
+        :param mask_koi_planet: Whether to mask Kepler planets in the case `self.klc` is created or reinstantiated.
         :type mask_koi_planet: bool or None
-        :param save_connected_stats:
-        :type save_connected_stats:
-        :param connected_stats_filename_postfix:
-        :type connected_stats_filename_postfix:
-        :return:
-        :rtype:
+        :param save_connected_stats: Whether to save connected statistics in the case they were calculated now.
+        :type save_connected_stats: bool
+        :param connected_stats_filename_postfix: Text added to the target ID in the name of the file saving connected data.
+            See naming notations.
+        :type connected_stats_filename_postfix: str
         """
         if (self.klc is None) or reinitialize:
             self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
@@ -831,6 +1187,22 @@ class KeplerTarget(object):
 
     def set_perodicity_search_parameters(self, p_min=P_min_search, p_max=P_max_search, per_phases_per_chunk=Per_phases_per_chunk,
                                          duty_cycle=spip.Duty_cycle, force_overwrite=False):
+        """
+        Sets the parameters for the periodicity search as attributes of the class for the future use.
+        :param p_min: Minimal period in the search.
+        :type p_min: float
+        :param p_max: Maximal period in the search.
+        :type p_max: float
+        :param per_phases_per_chunk: The total number of period-phase bins which should be in one chunk.
+            Is set by memory estimation. Number of phases is different for every period, therefore chunks will have
+            different number of periods in them.
+        :type per_phases_per_chunk: int
+        :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
+            In units of days.
+        :type duty_cycle: float
+        :param force_overwrite: Whether to overwrite the class fields if they already exist
+        :type force_overwrite: bool
+        """
         if self.p_min is None or force_overwrite:
             self.p_min = p_min
         if self.p_max is None or force_overwrite:
@@ -846,31 +1218,52 @@ class KeplerTarget(object):
                                best_periodic_scores_file_dir=None, overlap_period_bins=spip.P_bins_overlap):
 
         """
-        :param per_phases_per_chunk:
-        :type per_phases_per_chunk:
-        :param best_periodic_scores_filename_postfix:
-        :type best_periodic_scores_filename_postfix:
-        :param p_min:
-        :type p_min:
-        :param p_max:
-        :type p_max:
-        :param duty_cycle:
-        :type duty_cycle:
-        :param best_periodic_scores_file_dir:
-        :type best_periodic_scores_file_dir:
-        :param overlap_period_bins: when creating period chunks, extend each chunk from the two sides by
+        Runs the search for periodically repeating transits basing on the single-event statistic search done earlier
+        on the KeplerLightCurve instance attribute, `self.klc` (see in `search_pipeline.py`). Includes the following:
+        - Splitting the period range specified by the user into chunks which can be fit into the RAM limitations.
+            One star is supposed to occupy one core with limited memory and runtime. The period range is first
+            built automatically to cover uniformly the periods range. It makes sure that planet of any periodicity
+            inside this range can get a sufficient SNR to be detected. Then this period range is split automatically
+            into chunks which have the same number of period-phase cells. The memory requirement is set by the size
+            of the array with all the period and phase bins. Each period has different number of phases, therefore the
+            shapes of the chunks can be different, but they will have approximately the same total number of elements.
+            Every chunk also has approximately the same look-elsewhere weight.
+            Then every chunk is run separately in the periodicity search.
+        - Runs the periodicity folding of the statistics and other arrays for every chunk.
+        - Performs marginalization over the templates and corrects for the ses distribution non-gaussianity.
+        - From each of the chunks, selects the best trigger, applying the transit-consistency veto. Checks whether the
+            best trigger is consistent with having transits of the same depth, as opposed to being dominated by one
+            peak and having the rest to be zero.
+        - Compares the best triggers of all the chunks accounting for the priors. Selects the best trigger per star.
+        See details in the periodicity search description of `search_pipeline.py`.
+        :param p_min: Minimal period in the search.
+        :type p_min: float
+        :param p_max: Maximal period in the search.
+        :type p_max: float
+        :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
+            In units of days.
+        :type duty_cycle: float
+        :param per_phases_per_chunk: The total number of period-phase bins which should be in one chunk.
+            Is set by memory estimation. Number of phases is different for every period, therefore chunks will have
+            different number of periods in them.
+        :type per_phases_per_chunk: int
+        :param best_periodic_scores_filename_postfix: Text added to the target ID in the name of the file saving
+            the best periodic scores found for this target. See naming notations.
+        :type best_periodic_scores_filename_postfix: str
+        :param best_periodic_scores_file_dir: Local folder in which to put the file with saved data. if None,
+            `self.output_location` will be used.
+        :type best_periodic_scores_file_dir: str
+        :param overlap_period_bins: When creating period chunks, extend each chunk from the two sides by
             this number of bins for them to overlap. is needed for coherent score integral in order for
             the maximum not to be on the edge
         :type overlap_period_bins: int
-        :return:
-        :rtype:
         """
         self.set_perodicity_search_parameters(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk,
                                          duty_cycle=duty_cycle, force_overwrite=True)
 
         if self.klc is None or not hasattr(self.klc, 'statistics_full') or self.klc.statistics_full is None:
             self.get_connected_klc(reinitialize=False, mask_koi_planet=None)
-        self.klc.delete_irrelevant()  # ATTENTION: we introduced this because of unclear memory issues
+        self.klc.delete_irrelevant()  # For memory
 
         self.periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max,
                                                               per_phases_per_chunk=self.per_phases_per_chunk,
@@ -899,6 +1292,11 @@ class KeplerTarget(object):
         self.periodicity_search_time = t2 - t1
 
     def _find_best_trigger_from_per_chunks(self, best_candidates_concat=None):
+        """
+        Compares the scores of several chunks and sets the best results as class attributes
+        :param best_candidates_concat: The properly formatted list of the best cancicates from every chunk
+        :type best_candidates_concat: list of lists of length 2
+        """
         self.best_integral_score = -np.inf
         for best_candidates in best_candidates_concat:  # if there is a big MES score, further processing
             scormax = best_candidates[spip.Best_per_results_index_best_integral][0]
@@ -939,46 +1337,65 @@ class KeplerTarget(object):
                         clean_dir_if_not_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap):
 
         """
-        :param p_min:
-        :type p_min:
-        :param p_max:
-        :type p_max:
-        :param per_phases_per_chunk:
-        :type per_phases_per_chunk:
-        :param mask_koi_planet:
-        :type mask_koi_planet:
-        :param candidate_threshold:
-        :type candidate_threshold:
-        :param save_to_threshold_crossing_list:
-        :type save_to_threshold_crossing_list:
-        :param save_conditioned_data:
-        :type save_conditioned_data:
-        :param save_no_veto_no_score_cor_stats:
-        :type save_no_veto_no_score_cor_stats:
-        :param save_connected_stats:
-        :type save_connected_stats:
-        :param best_periodic_scores_filename_postfix:
-        :type best_periodic_scores_filename_postfix:
-        :param conditioned_data_filename_postfix:
-        :type conditioned_data_filename_postfix:
-        :param no_veto_no_score_cor_stats_filename_postfix:
-        :type no_veto_no_score_cor_stats_filename_postfix:
-        :param connected_stats_data_filename_postfix:
-        :type connected_stats_data_filename_postfix:
-        :param threshold_crossing_list_file:
-        :type threshold_crossing_list_file:
-        :param threshold_crossing_list_location:
+        Runs the ses-search and the periodicity search. See `self.run_ses_search` and `run_periodicity_search`.
+        Saves the trigger to the all stars triggers file.
+        :param p_min: Minimal period in the search.
+        :type p_min: float
+        :param p_max: Maximal period in the search.
+        :type p_max: float
+        :param per_phases_per_chunk: The total number of period-phase bins which should be in one chunk.
+            Is set by memory estimation. Number of phases is different for every period, therefore chunks will have
+            different number of periods in them.
+        :type per_phases_per_chunk: int
+        :param best_periodic_scores_filename_postfix: Text added to the target ID in the name of the file saving
+            the best periodic scores found for this target. See naming notations.
+        :type best_periodic_scores_filename_postfix: str
+        :param overlap_period_bins: When creating period chunks, extend each chunk from the two sides by
+            this number of bins for them to overlap. is needed for coherent score integral in order for
+            the maximum not to be on the edge
+        :type overlap_period_bins: int
+        :param mask_koi_planet: Whether to mask Kepler planets
+        :type mask_koi_planet: bool
+        :param candidate_threshold: Threshold in units of prior-aware SNR squared of the threshold above which trigger
+            is considered for time-slides and injections.
+        :type candidate_threshold: float
+        :param save_to_threshold_crossing_list: Whether to append the result to the list of all triggers for all stars.
+        :type save_to_threshold_crossing_list: bool
+        :param threshold_crossing_list_file: Full path to the file saving the list of all triggers for all stars.
+            Overrides `threshold_crossing_list_location` and `threshold_crossing_list_filename`.
+        :type threshold_crossing_list_file: str
+        :param threshold_crossing_list_location: Path to the folder wn which file with `threshold_crossing_list_filename`
+            is to be found or created. Overriden by `threshold_crossing_list_file`.
         :type threshold_crossing_list_location:
-        :param threshold_crossing_list_filename:
-        :type threshold_crossing_list_filename:
-        :param clean_dir_if_not_threshold_crossing:
-        :type clean_dir_if_not_threshold_crossing:
+        :param threshold_crossing_list_filename: Name (no path) of the file with the list of all triggers for all stars.
+            Overriden by `threshold_crossing_list_file`.
+        :type threshold_crossing_list_filename: str
+        :param save_conditioned_data: Whether to save conditioned date for future use
+        :type save_conditioned_data: bool
+        :param save_no_veto_no_score_cor_stats: Whether to save statistics which did not undergo veto or score correction.
+        :type save_no_veto_no_score_cor_stats: bool
+        :param save_connected_stats:  Whether to save statistics with connected quarters which can be used later
+            for timeslides periodicity search.
+        :type save_connected_stats: bool
+        :param best_periodic_scores_filename_postfix: Text added to the target ID in the name of the file saving
+            the best scores from the periodicity search. See naming notations.
+        :type best_periodic_scores_filename_postfix: str
+        :param conditioned_data_filename_postfix: Text added to the target ID in the name of the file saving conditioned data.
+            See naming notations.
+        :type conditioned_data_filename_postfix: str
+        :param no_veto_no_score_cor_stats_filename_postfix: Text added to the target ID in the name of the file saving
+            statistics which did not undergo veto or score correction. See naming notations.
+        :type no_veto_no_score_cor_stats_filename_postfix: str
+        :param connected_stats_data_filename_postfix: Text added to the target ID in the name of the file saving
+            statistics with connected quarters. See naming notations.
+        :type connected_stats_data_filename_postfix: str
+        :param clean_dir_if_not_threshold_crossing: Whether to delete all non-summary data from the output folder if the
+            best trigger is not threshold-crossing. Is done for storage memory purposes.
+        :type clean_dir_if_not_threshold_crossing: bool
         :param overlap_period_bins: when creating period chunks, extend each chunk from the two sides by
             this number of bins for them to overlap. is needed for coherent score integral in order for
             the maximum not to be on the edge
         :type overlap_period_bins: int
-        :return:
-        :rtype:
         """
         if (threshold_crossing_list_file is None) and (threshold_crossing_list_location is not None):
             threshold_crossing_list_file = os.path.join(threshold_crossing_list_location, threshold_crossing_list_filename)
@@ -1012,45 +1429,62 @@ class KeplerTarget(object):
         self.print_dict_file()
 
     def run_timeslides(self, n_slides=N_slides_chunk, central_period=None, mask_koi_planet=True,
-                       n_chunks_around_best=1, per_wind_slides=None,
+                       n_chunks_around_best=1, per_wing_slides=None,
                        per_wing_slides_relative=Per_wing_injection_and_slides_relative, use_period_chunks=False,
                        use_shuffling_pieces=True, only_if_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap,
                        slides_res_filename_postfix=Slides_res_filename_postfix):
         """
+        Shuffles the full statistics (see inside the methods how it is done), running the periodicity search
+        on the shuffled SES in the specified pariod range, and saving the best scores.
+        The timeslides are usually run to estimate the background density in the location of the trigger from
+        the main search, therefore the periods of the timeslides search are close to the best period from the
+        main search. This method selects the adjacent periods and runs the shuffled search for them.
+        There are three ways to organize the period grid:
+        - Just run on one grid
+        - Split the grid into chunks
+        - Select the corresponding chunks from the chunked grid of the main search
 
-        :param n_slides:
+        :param n_slides: Number of times to shuffle and run the perodicity search
         :type n_slides: int
-        :param central_period:
-        :type central_period:
-        :param mask_koi_planet: whether to mask the KOI ephemeris if the object is a KOI
+        :param central_period: The period in days around which the timeslides will run. If None, `self.best_per` will be used.
+        :type central_period: float
+        :param mask_koi_planet: Whether to mask the KOI ephemeris if the object is a KOI
         :type mask_koi_planet: bool
-        :param n_chunks_around_best:
-        :type n_chunks_around_best:
-        :param per_wind_slides:
-        :type per_wind_slides:
-        :param per_wing_slides_relative:
-        :type per_wing_slides_relative:
-        :param use_period_chunks: whether to slice periods to chunks to reduce the RAM consumed
+        :param n_chunks_around_best: How many period chunks from the main search around the best period to use for
+            the periodicity search in the shuffled data. Overrides `per_wing_slides` and `per_wing_slides_relative`.
+        :type n_chunks_around_best: int
+        :param per_wing_slides: Wing in days to take to the left and to the right from the central period to build
+            the period grid. Overrides `per_wing_slides_relative`. Overriden by `n_chunks_around_best`.
+        :type per_wing_slides: float
+        :param per_wing_slides_relative: Relative wing to take to the left and to the right from the central period
+            to build the period grid. Meaning that the central period will be multiplitd by this number to get the
+            value in days. Thet is, the size of the wing will be proportional to the central period.
+            Overriden by `n_chunks_around_best` and `per_wing_slides`.
+        :type per_wing_slides_relative: float
+        :param use_period_chunks: Whether to slice periods to chunks to reduce the RAM consumed. Used if
+            `n_chunks_around_best` is None. Otherwise, the chunks from the main search are used.
         :type use_period_chunks: bool
-        :param use_shuffling_pieces: whether to cut quarters into pieces and reshuffle them while preserving the total duration of the data
+        :param use_shuffling_pieces: Whether to cut quarters into pieces and reshuffle them while preserving the
+            total duration of the data. Alternative is time-slides, where every quarter just gets a random positive shift
+            of the time axis, so that the total duration of the data is not preserved. This can create scores with too
+            large number of transits which is not representative of the main search.
         :type use_shuffling_pieces: bool
-        :param only_if_threshold_crossing:
-        :type only_if_threshold_crossing:
-        :param overlap_period_bins: when creating period chunks, extend each chunk from the two sides by
+        :param only_if_threshold_crossing: Only run the time-shuffling if the main search provided a threshold-crossing
+            best trigger.
+        :type only_if_threshold_crossing: bool
+        :param overlap_period_bins: When creating period chunks, extend each chunk from the two sides by
             this number of bins for them to overlap. is needed for coherent score integral in order for
-            the maximum not to be on the edge
+            the maximum not to be on the edge.
         :type overlap_period_bins: int
-        :param slides_res_filename_postfix:
-        :type slides_res_filename_postfix:
-        :return:
-        :rtype:
+        :param slides_res_filename_postfix: Text added to the target ID in the name of the file saving the results.
+            See naming notations.
+        :type slides_res_filename_postfix: str
         """
         if self.is_threshold_crossing or not only_if_threshold_crossing:
             self.get_connected_klc(reinitialize=True, mask_koi_planet=mask_koi_planet)
-            # ATTENTION: we introduced this because of unclear memory issues
-            self.klc.delete_irrelevant()
+            self.klc.delete_irrelevant()  # For memory
             # In case some parameters were not set, replace them with the defaults:
-            self.set_perodicity_search_parameters(self, force_overwrite=False)
+            self.set_perodicity_search_parameters(force_overwrite=False)
 
             if central_period is None:
                 period = self.best_per
@@ -1073,10 +1507,9 @@ class KeplerTarget(object):
                     chunk_inds_choose = (closest_chunk_index + np.arange(-(n_chunks_around_best - 1) // 2,
                                                                         (n_chunks_around_best + 2) // 2)).astype(int)
                 period_chunks = [periods_in_chunks[i] for i in chunk_inds_choose]
-
             else:
-                if per_wind_slides is not None:
-                    self.per_wing_injection_and_slides = per_wind_slides
+                if per_wing_slides is not None:
+                    self.per_wing_injection_and_slides = per_wing_slides
                 if self.per_wing_injection_and_slides is None:
                     self.per_wing_injection_and_slides = per_wing_slides_relative * period
                     # days to the left and the same to the right #limited by memory
@@ -1110,10 +1543,10 @@ class KeplerTarget(object):
                     self.klc.interleave_shifts(delete_fulls=True)
                 else:
                     self.klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
-                                                 min_piece=spip.Min_piece_scrambling, random_seed=new_seed)
+                                                 min_piece=spip.Min_piece_scrambling, random_seed=new_seed,
+                                                 regenerate_pieces=False)  # we run many jobs, they will have different pieces
                     self.klc.interleave_shifts(delete_fulls=False)  # do not delete fulls to then make re-scrambling
 
-                # best_candidates_concat = []
                 stats_chunk = []
                 pers_chunk = []
                 first_times_chunk = []
@@ -1169,33 +1602,13 @@ class KeplerTarget(object):
             np.save(os.path.join(self.output_location, self.target_id + '_' + slides_res_filename_postfix + '_' + str(n_slides)),
                     new_res_array, allow_pickle=True)
 
-            # fls = os.listdir(self.output_location)
-            # for filename_postfix, data_list in [[slides_stats_filename_postfix, stats],
-            #                                     [slides_pers_filename_postfix, pers],
-            #                                     [slides_first_times_filename_postfix, first_times],
-            #                                     [slides_gauss_stats_filename_postfix, gauss_stats],
-            #                                     [slides_gauss_stats_filename_postfix, gauss_stats]]:
-            #     for fl in fls:
-            #         if self.target_id + '_' + filename_postfix + '_' in fl:
-            #             if filename_postfix == slides_stats_filename_postfix:
-            #                 n_slides_0 = int(fl[len(self.target_id + '_' + filename_postfix + '_'): fl.index('.')])
-            #                 n_slides += n_slides_0
-            #             hist0 = list(np.load(os.path.join(self.output_location, fl), allow_pickle=True))
-            #             data_list += hist0
-            #             # very important that += is here and not data_list = data_list + hist0 !!!
-            #             # the second option would not append to the old object but create a new object, so that wouldn't work!
-            #             os.remove(os.path.join(self.output_location, fl))
-            #     np.save(os.path.join(self.output_location, self.target_id + '_' + filename_postfix + '_' + str(n_slides)),
-            #             np.array(data_list), allow_pickle=True)
-
     def load_rel_wf_fds(self, conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
         """
         Load quarters-mean whitening filter in Fourier domain in units relative to the mean flux level.
         In other words, part of flux in time-domain that is taken by this or that component of noise.
-        :param conditioned_data_filename_postfix:
-        :type conditioned_data_filename_postfix:
-        :return:
-        :rtype:
+        :param conditioned_data_filename_postfix: ext added to the target ID in the name of the file saving conditioned data.
+            See naming notations.
+        :type conditioned_data_filename_postfix: str
         """
         path = self.output_location
         file = af.get_saving_file_path(output_location=path, target_id=self.target_id,
@@ -1204,20 +1617,184 @@ class KeplerTarget(object):
         support = int(conditioned_data[0][10])
         n_quarters = int(np.round(len(conditioned_data[0]) / support))
         quarters = np.arange(n_quarters)
-        # len_whitened_templates_td = int(conditioned_data[0][11])
         mean_total = float(conditioned_data[0][13])
-        # wf_tds = []
         wf_fds = []
         ind_last = 0
         for _ in quarters:
             wftd1 = np.array(conditioned_data[4][ind_last: ind_last + support]).astype(float)
-            # wf_tds.append(wftd1)
             wf_fds.append(np.abs(np.fft.rfft(wftd1)))  # np.fft.ifftshift(wftd1)
             ind_last += support
         return np.array(wf_fds) * mean_total
 
     def generate_injection_parameters(
             self, n_injections=N_injections_total, add_to_existing_file=False,
+            central_period=None, use_special_per_wing=False,
+            per_wing_injection_relative=Per_wing_injection_and_slides_relative,
+            injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
+            mean_psd_filename_postfix=spip.Default_psd_for_injections_filename_postfix,
+            all_injection_parameters_filename_postfix=All_injection_parameters_filename_postfix,
+            n_per=20,
+            n_ecc=60,  # Probability to transit at a fixed eccentricity depends strongly on eccentricity
+            n_w=20,
+            n_cos_incl=1000,  # This divides the full circle  # should be at least few semi-major axes
+            n_rp=30,
+            u=(0.47, 0.23),
+            snr_min_injected=5.,
+            snr_max_1_injected=8,
+            snr_max_full_injected=40,
+            rp_generation=0.02):  # Planetary radius used to generate the flux (we neglect shape dependence on radius)
+        if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
+            self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
+
+        if central_period is None:
+            period = self.best_per
+        else:
+            period = central_period
+
+        self.set_perodicity_search_parameters(force_overwrite=False)
+        if not use_special_per_wing:
+            if self.periods_in_chunks is None:
+                if not hasattr(self, 'klc') or self.klc is None:
+                    self.initialize_kepler_light_curve()
+                periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
+                                                                 per_phases_per_chunk=self.per_phases_per_chunk,
+                                                                 dt=self.klc.dt_days, t_mission=self.klc.T_mission)
+            else:
+                periods_in_chunks = self.periods_in_chunks
+            closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, period, overlap_bins=0)
+            p_min_inj, p_max_inj = closest_chunk[0], closest_chunk[-1]
+        else:
+            p_max_inj = period * (1 + per_wing_injection_relative)
+            p_min_inj = period * (1 - per_wing_injection_relative)
+
+        # ################################################################################################
+        # OCCURRENCE RATES
+        # All the things with the occurrence rates and densities:
+        log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
+        units_of_re_to_units_of_r_star_factor = 1 / (self.stellar_radius * R_sun_R_e)
+        log10_best_per_low = np.log10(p_min_inj)
+        log10_best_per_up = np.log10(p_max_inj)
+        # self.log10_best_period_edges = (log10_best_per_low, log10_best_per_up)
+        log2_rp_edges = np.log2(units_of_re_to_units_of_r_star_factor * 2. ** log2_rp_re_edges)
+
+        # FINDING ROWS IN THE OCCURRENCE TABLE THAT SPAN OUR PERIOD RANGE:
+        # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
+        # Number of planets of all radii in log day (per 100 stars):
+        # For other periods, it will be checked right now:
+        row_upper = len(occurrences_table) - 1
+        for i in range(len(log10_period_edges) - 1):
+            if (log10_best_per_up > log10_period_edges[i]) and (log10_best_per_up <= log10_period_edges[i + 1]):
+                row_upper = i
+                break
+        row_lower = len(occurrences_table) - 1
+        for i in range(len(log10_period_edges) - 1):
+            if (log10_best_per_low > log10_period_edges[i]) and (log10_best_per_low <= log10_period_edges[i + 1]):
+                row_lower = i
+                break
+        # CALCULATING EXPECTED NUMBER OF PLANETS IN OUR PERIOD RANGE:
+        # planets per one star in this period range for different radii bins:
+        # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
+        # to be uniform (they are log bins)
+        planets_of_radii_in_per_range_one_star = np.zeros(len(occurrences_table[-1]))
+        for i in range(row_lower, row_upper + 1):
+            row_density = occurrences_table[i] / (log10_period_edges[i + 1] - log10_period_edges[i])
+            if i == len(occurrences_table) - 1 and log10_best_per_up > log10_period_edges[len(log10_period_edges) - 1]:
+                up_edge = log10_best_per_up
+            else:
+                up_edge = min(log10_best_per_up, log10_period_edges[i + 1])
+            if i == len(occurrences_table) - 1 and log10_best_per_low > log10_period_edges[len(log10_period_edges) - 1]:
+                low_edge = log10_best_per_low
+            else:
+                low_edge = max(log10_best_per_low, log10_period_edges[i])
+            planets_of_radii_in_per_range_one_star += row_density * (up_edge - low_edge)
+
+        self.prior_planets_in_period_range_one_star = np.sum(planets_of_radii_in_per_range_one_star)
+        self.prior_radii_distribution = planets_of_radii_in_per_range_one_star / np.sum(planets_of_radii_in_per_range_one_star)
+        self.injections_period_range = (10. ** log10_best_per_low, 10. ** log10_best_per_up)
+
+        rp_numbers = (np.ceil(planets_of_radii_in_per_range_one_star /
+                              np.sum(planets_of_radii_in_per_range_one_star) * n_rp)).astype(int)
+        rp_numbers_total = np.sum(rp_numbers)  # how many of each radius to generate
+
+        t = tm.time(t_tot=(256 + 1) * tm.dt_lc, parity='odd')[1:]  # Making an even points number but odd parity
+
+        # ################################################################################################
+        # GENERATING PLANET PARAMETERS, SEE WHO TRANSITS AND WHO HAS REASONABLE RADII
+        wf_fds = self.load_rel_wf_fds()  # conditioned_data_filename_postfix=conditioned_data_filename_postfix)
+        # -> relative wf_fd, mean flux already taken into account
+        n_quarters = len(wf_fds)
+        wf_fd = np.mean(np.array(wf_fds) ** 2, axis=0) ** 0.5
+
+        # Calculating the geometric probability to transit.
+        # It is sort of Monte-Carlo integration where every random point comes with its measure.
+        # The total sum of the points with the measure will give the part of the parameter space
+        # in which the planet transits (the sphere surface part and the eccentricity range).
+        ecc_measure = 1. / n_ecc
+        w_measure = 1. / n_w
+        cos_i_measure = 1. / n_cos_incl
+        transit_prob_measure = ecc_measure * w_measure * cos_i_measure
+
+        injection_parameter_sets = []
+        count_orbit_simulations = 0
+        count_orbit_transiting = 0
+        count_orbit_transiting_relevant_radii = 0
+        for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
+            a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (M_sun ** (1 / 3) / R_sun)
+            e_max = min(1 - 2 / a, 0.97)
+            assert e_max > 0, 'Semi-major axis is too small or stellar radius is too large!'
+            power_2 = int(np.ceil(np.log2(n_ecc)))
+            e_range = Sobol(d=1, scramble=True).random_base2(power_2).T[0][:n_ecc]
+            e_range = e_range[e_range <= e_max]
+            for ecc in e_range:
+                power_2 = int(np.ceil(np.log2(n_w)))
+                w_range = 360 * Sobol(d=1, scramble=True).random_base2(power_2).T[0][:n_w]
+                for w in w_range:
+                    cos_i_max = 1 / a * (1 + ecc * np.cos((w - 90) / 180 * np.pi)) / (1 - ecc ** 2)  # ) * 180 / np.pi
+                    power_2 = int(np.ceil(np.log2(n_cos_incl)))
+                    cos_i_range = Sobol(d=1, scramble=True).random_base2(power_2).T[0][:n_cos_incl]
+                    cos_i_range = cos_i_range[cos_i_range <= cos_i_max]
+                    incls = np.arccos(cos_i_range) * 180 / np.pi
+                    for inc in incls:
+                        flux_obs = 1. - tm.flux_par(t=t, params=None, per=period, rp=rp_generation, a=a, inc=inc, ecc=ecc, w=w, u1=u[0],
+                                                    u2=u[1], t0=0, supersample_factor=20, exp_time=tm.dt_lc)
+                        dur = tm.templ_dur_hmax_fun(flux_obs) * tm.dt_lc
+                        count_orbit_simulations += 1
+                        if np.linalg.norm(flux_obs) > 0:
+                            count_orbit_transiting += 1
+                            depth_factor = np.max(flux_obs) / rp_generation ** 2
+                            rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period,
+                                                                                   depth_factor=depth_factor, snr_min=snr_min_injected,
+                                                                                   n_quarters=n_quarters, wf_fd=wf_fd,
+                                                                                   snr_max_1=snr_max_1_injected,
+                                                                                   snr_max_full=snr_max_full_injected,
+                                                                                   stellar_radius=self.stellar_radius, units='star')
+                            rps = []
+                            for i in range(len(log2_rp_edges) - 1):
+                                power_2 = int(np.ceil(np.log2(rp_numbers[i])))
+                                log2_rp_range = (log2_rp_edges[i] + (log2_rp_edges[i + 1] - log2_rp_edges[i])
+                                                 * Sobol(d=1, scramble=True).random_base2(power_2).T[0][:rp_numbers[i]])
+                                rps = rps + list(2. ** log2_rp_range)
+                            np.random.shuffle(rps)
+                            rps = np.array(rps)
+                            rps = rps[rps >= rp_rs_min]
+                            rps = rps[rps <= rp_rs_max]
+                            count_orbit_transiting_relevant_radii += len(rps)  # will be divided by rp_numbers_total
+                            for rp in rps:
+                                injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
+                count_orbit_transiting = count_orbit_transiting / n_per
+                count_orbit_transiting_relevant_radii = count_orbit_transiting_relevant_radii / rp_numbers_total / n_per
+
+        self.transit_probability = transit_prob_measure * count_orbit_transiting
+        self.transiting_planets_of_radii_in_per_range_one_star = self.prior_planets_in_period_range_one_star * self.transit_probability
+        self.transit_and_range_probability = transit_prob_measure * count_orbit_transiting_relevant_radii
+        self.transiting_planets_in_relevant_range = (self.prior_planets_in_period_range_one_star
+                                                     * transit_prob_measure * count_orbit_transiting_relevant_radii)
+        selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
+                                             replace=True if len(injection_parameter_sets) < n_injections else False)
+
+    def generate_injection_parameters(
+            self, n_injections=N_injections_total, add_to_existing_file=False,
+            use_special_per_wing=False,
             per_wing_injection_relative=Per_wing_injection_and_slides_relative,
             injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
             # mean_psd_filename_postfix=spip.Default_psd_for_injections_filename_postfix,
@@ -1227,6 +1804,8 @@ class KeplerTarget(object):
             d_inc=0.5,  # this is in degrees! and often until 85 is fine
             u=(0.47, 0.23),
             snr_min_injected=5.,
+            snr_max_1_injected=8,
+            snr_max_full_injected=40,
             n_per=50,
             n_rp=30):
         """
@@ -1307,18 +1886,26 @@ class KeplerTarget(object):
         # cosine_coeffs = cosine_coeffs / template_support
         # templs_prepared_for_cos_fd = templs_prepared_for_cos_fd * cosine_coeffs
 
-        # ##########################################################################################
-        # INCORRECT ###############################################################################
-        # ##########################################################################################
-        if self.per_wing_injection_and_slides is None:
-            self.per_wing_injection_and_slides = per_wing_injection_relative * self.best_per
-
-        # ####################################################################
+        self.set_perodicity_search_parameters(force_overwrite=False)
+        if not use_special_per_wing:
+            if self.periods_in_chunks is None:
+                periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
+                                                                 per_phases_per_chunk=self.per_phases_per_chunk,
+                                                                 dt=self.klc.dt_days, t_mission=self.klc.T_mission)
+            else:
+                periods_in_chunks = self.periods_in_chunks
+            closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, self.best_per, overlap_bins=0)
+            p_min_inj, p_max_inj = closest_chunk[0], closest_chunk[-1]
+        else:
+            p_max_inj = self.best_per * (1 + per_wing_injection_relative)
+            p_min_inj = self.best_per * (1 - per_wing_injection_relative)
+        # ################################################################################################
+        # OCCURRENCE RATES
         # All the things with the occurrence rates and densities:
         log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
         units_of_re_to_units_of_r_star_factor = 1 / (self.stellar_radius * R_sun_R_e)
-        log10_best_per_low = np.log10(self.best_per - self.per_wing_injection_and_slides)
-        log10_best_per_up = np.log10(self.best_per + self.per_wing_injection_and_slides)
+        log10_best_per_low = np.log10(p_min_inj)
+        log10_best_per_up = np.log10(p_max_inj)
         # log10_period_edges = np.log10(period_edges)
         self.log10_best_period_edges = (log10_best_per_low, log10_best_per_up)
         log2_rp_edges = np.log2(units_of_re_to_units_of_r_star_factor * 2. ** log2_rp_re_edges)
@@ -1356,7 +1943,8 @@ class KeplerTarget(object):
                               np.sum(planets_of_radii_in_per_range_one_star) * n_rp)).astype(int)
         rp_numbers_total = np.sum(rp_numbers)
 
-        # ####################################################################
+        # ################################################################################################
+        # PROBABILITY TO TRANSIT FACTOR
 
         # Taking into account the probability to transit.
         # for example, d_ecc means that every simulation accounts for the parameter space of the size d_ecc, and this will
@@ -1376,11 +1964,7 @@ class KeplerTarget(object):
         # injection_durations = []
         n_star_simulations = 0
         n_star_transiting = 0
-        # ##########################################################################################
-        # INCORRECT PERIODS########################################################################
-        # ##########################################################################################
-        for period in np.random.uniform(self.best_per - self.per_wing_injection_and_slides,
-                                        self.best_per + self.per_wing_injection_and_slides, n_per):
+        for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
             # Attention, this is a linear uniform distribution, although we are using logarithmic occurrences.
             a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (
                     M_sun ** (1 / 3) / R_sun)  # 3rd Kepler law #in units of R
@@ -1388,6 +1972,7 @@ class KeplerTarget(object):
             # r_min = a*(1-e) -> 2*r_star=a*(1-e_max)
             n_star_simulations += rp_numbers_total
             e_max = min(1 - 2 / a, 0.97)  # for some reason, 0.98 gets computationally stuck in barman sometimes, not clear why
+            # SO WE JUST NEGLECT THESE 0.03!!!!
             if e_max < 0:
                 e_range = [0.]
             else:
@@ -1417,12 +2002,17 @@ class KeplerTarget(object):
                         len_zeros = len(np.where(np.isclose(flux_obs, 0))[0])  # to make sure transit is not wider than the time
                         dur = tm.templ_dur_hmax_fun(flux_obs) * tm.dt_lc
                         if np.linalg.norm(flux_obs) > 0:
-                            n_star_transiting += rp_numbers_total
-                        if (np.linalg.norm(flux_obs) > 0) and (tm.dt_lc * 2.1 <= dur) and (dur <= 1.5) and len_zeros >= 4:
-                            # # -> these were the requirements for the bank on the duration
+                            n_star_transiting += rp_numbers_total  # if this planet can transit, add all radii (neglect radius impact)
+                            # -> this will be multiplied later by the factor of the parameter space part
+                            # We now do not select suitable for the search because we want it to be blind, so we do not take into
+                            # account the duration of the transit and that it is not covered by our bank. We run everything.
                             depth_factor = np.max(flux_obs) / rp ** 2
-                            rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux=flux_obs, period=period, depth_factor=depth_factor,
-                                                                                   snr_min=snr_min_injected,
+                            # The following just saves us from running redundant simulations which will not contribute to density
+                            # around the trigger:
+                            rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period,
+                                                                                   depth_factor=depth_factor, snr_min=snr_min_injected,
+                                                                                   snr_max_1=snr_max_1_injected,
+                                                                                   snr_max_full=snr_max_full_injected,
                                                                                    stellar_radius=self.stellar_radius, units='star')
                             # min_rp_re.append(rp_re_min)
                             rps = []
@@ -1442,9 +2032,11 @@ class KeplerTarget(object):
         file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                             filename_postfix=all_injection_parameters_filename_postfix, file_format='npy')
         np.save(file_path, np.array(injection_parameter_sets, dtype=float), allow_pickle=True)
-        search_prob_factor = transit_prob_factor * len(injection_parameter_sets) / n_star_simulations
-        self.transit_prob_factor = n_star_transiting / n_star_simulations
-        self.search_prob_factor = search_prob_factor
+        # TODO fix these notations
+        # Part of planets that can transit geometrically and were checked so by the simulation:
+        self.transit_prob_factor = transit_prob_factor * n_star_transiting / n_star_simulations  # TODO this is a weird notation
+        # Part of planets that can transit and fall into our search criteria:
+        self.search_prob_factor = transit_prob_factor * len(injection_parameter_sets) / n_star_simulations
         self.transiting_planets_in_search = np.sum(self.planets_of_radii_in_per_range_one_star) * self.search_prob_factor
         # planets in universe for these periods per star
         # from them transiting
@@ -1459,10 +2051,10 @@ class KeplerTarget(object):
 
     def save_injection_parameters(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
         """
-        :param injection_parameters_filename_postfix:
-        :type injection_parameters_filename_postfix:
-        :return:
-        :rtype:
+        Saves the generated injection parameters to the specified file to then load them and use the injection-recovery.
+        :param injection_parameters_filename_postfix: Text added to the target ID in the name of the file saving
+            the injection parameters. See naming notations.
+        :type injection_parameters_filename_postfix: str
         """
         # We wanted to just save parameters inside the generate_injection_parameters function because anyway we do not create attribute
         # of injection parameters sets because we will probably not use it simultaneously. But we decided that maybe we will.
@@ -1474,6 +2066,12 @@ class KeplerTarget(object):
                 print(*self.injection_par_list[i], file=fil1)
 
     def delete_injection_parameters_file(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
+        """
+        Removes the file with the generated injection parameters.
+        :param injection_parameters_filename_postfix: Text added to the target ID in the name of the file saving
+            the injection parameters. See naming notations.
+        :type injection_parameters_filename_postfix: str
+        """
         file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                             filename_postfix=injection_parameters_filename_postfix, file_format='txt')
         if os.path.exists(file_path):
@@ -1481,9 +2079,21 @@ class KeplerTarget(object):
 
     def load_injection_parameters(self, injection_parameters_index=0,
                                   injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
+        """
+        Loads a specific line of the list of the injection parameters previously generated with
+        `self.generate_injection_parameters()` and saved with `self.save_injection_parameters()`.
+        :param injection_parameters_index: Index of the line from the list to load
+        :type injection_parameters_index: int
+        :param injection_parameters_filename_postfix: Text added to the target ID in the name of the file saving
+            the injection parameters. See naming notations.
+        :type injection_parameters_filename_postfix: str
+        """
         file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                             filename_postfix=injection_parameters_filename_postfix, file_format='txt')
 
+        # This complicated thing is just opening the file. It was added because something went wrong, and I suspected
+        # that it was many cores trying to read the same file at the same time. So this thing tries to read the file
+        # several times before giving up:
         try:
             with open(file_path, 'r') as fil:
                 lines = fil.readlines()
@@ -1505,8 +2115,6 @@ class KeplerTarget(object):
             if not success:
                 raise IOError(str(type(rep_err)) + " " + str(rep_err))
 
-        # with open(file_path, 'r') as fil:
-        #     lines = fil.readlines()
         lines = [line for line in lines if (line.strip()[0] != '#' and len(line.strip()) > 3)]
 
         injection_params = lines[injection_parameters_index].split()
@@ -1522,25 +2130,34 @@ class KeplerTarget(object):
         # ' a/R, inc[deg from 90 down], ecc, w[deg], u_0, u_1, rp/R, dur_hmax_days'
         return per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj
 
-    def run_injection_search(self, injection_load_parameters_index=0, per_wing_detection=Per_wing_injection_detection,
+    def run_injection_search(self, injection_load_parameters_index=0,
                              injections_filename_postfix=Injections_filename_postfix,
-                             overlap_period_bins=spip.P_bins_overlap):  # , n_best_saving=N_best_saving_slides):
+                             one_chunk_around_injection=True,
+                             per_wing_detection=Per_wing_injection_detection,
+                             overlap_period_bins=spip.P_bins_overlap):
         """
-        :param injections_filename_postfix:
-        :type injections_filename_postfix:
-        :param injection_load_parameters_index:
-        :type injection_load_parameters_index:
-        :param per_wing_detection: days to the left and the same to the right in search
+        Loads a specific line of the list of the injection parameters previously generated with
+        `self.generate_injection_parameters()` and saved with `self.save_injection_parameters()`.
+        Masks the trigger found in the main search, as well as possible KOIs if there are any for this target.
+        Injects the corresponding planet of the specified parameterts to data and runs the entire search from scratch.
+        In the periodicity search, uses the period grid piece around the trigger.
+        The goal is just to check whether the phase is recovered and what is the SNR. The look-elsewhere effect
+        etc are not relevant.
+        :param injections_filename_postfix: Text added to the target ID in the name of the file saving
+            the injection-recovery results. See naming notations.
+        :type injections_filename_postfix: str
+        :param injection_load_parameters_index: Index of the line from the list to load
+        :type injection_load_parameters_index: int
+        :param one_chunk_around_injection: In the periodicity search, take only one period chunk from the
+            main search around the central period used for the injection.
+        :type one_chunk_around_injection: bool
+        :param per_wing_detection: Days to the left and the same to the right in search
         :type per_wing_detection: float
         :param overlap_period_bins: when creating period chunks, extend each chunk from the two sides by
             this number of bins for them to overlap. is needed for coherent score integral in order for
             the maximum not to be on the edge
         :type overlap_period_bins: int
-        :return:
-        :rtype:
         """
-        # sim_per_job = 20  # with this, 10000 injections in 500 jobs should finish during roughly an hour
-        # templates_durations_days = self.templates_durations_hours / 24
 
         per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj = self.load_injection_parameters(
             injection_parameters_index=injection_load_parameters_index)
@@ -1553,24 +2170,36 @@ class KeplerTarget(object):
         flxs_inj = sim.inject_planet_to_data(times=tms, fluxes=flxs, period=per_inj, first_transit_center=first_transit_time_inj,
                                              rp=rp_inj, a=a_inj, inc=inc_inj, ecc=ecc_inj, w=w_inj, u1=u1_inj, u2=u2_inj,
                                              supersample_factor=20, return_template=False)
-        p_max = per_inj + per_wing_detection
-        p_min = per_inj - per_wing_detection
+
+        if one_chunk_around_injection:
+            if self.periods_in_chunks is None:
+                periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
+                                                                 per_phases_per_chunk=self.per_phases_per_chunk,
+                                                                 dt=self.klc.dt_days, t_mission=self.klc.T_mission)
+            else:
+                periods_in_chunks = self.periods_in_chunks
+            closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, per_inj, overlap_bins=0)
+            periods_to_search = closest_chunk
+        else:
+            p_max = per_inj + per_wing_detection
+            p_min = per_inj - per_wing_detection
+            periods_to_search = self.klc.make_periods_array(p_min=p_min, p_max=p_max, dp=None, duty_cycle=spip.Duty_cycle, t_mission=None)
 
         self.klc = spip.KeplerLightCurve(target_id=self.target_id, times=tms, fluxes=flxs_inj, get_data=False,
                                          data_location=self.data_location, m_1_3_r_s=self.m_1_3_r_s)
-        if self.is_koi:  # masking koi planets
+        if self.is_koi:  # Masking koi planets
             self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False, include_candidates=False)
-        # TODO SPECIFY AROUND WHICH PERIOD TO RUN!
-        self.klc.mask_ephemeris(period=self.best_per, durations=2*dur_inj, transit_times=self.best_ftt)
+        masked_dur = 1.5 * tm.Durations[self.best_temp]
+        self.klc.mask_ephemeris(period=self.best_per, durations=masked_dur, transit_times=self.best_ftt)
         # Mask the suspected real transit. Warning, can kill some of injected signal
         self.klc.condition_data()
         self.klc.condition_templates()
-
         self.klc.detect_single_transits(apply_veto=True, gaussianize=True)
         self.klc.connect_quarters()
+        self.klc.delete_irrelevant()  # For memory
         self.klc.interleave_shifts(delete_fulls=True)
-        self.klc.periodicity_search(pmin=p_min, pmax=p_max, overlap_period_bins=overlap_period_bins, force_interleave_shifts=False)
-        # self.klc.save_best_candidates(n_best=n_best_saving, save_to_file=False)
+        self.klc.periodicity_search(p_min=None, p_max=None, overlap_period_bins=overlap_period_bins,
+                                    force_interleave_shifts=False, periods=periods_to_search)
         self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False)
         self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True)
         retrieved_stat = self.klc.best_stat
@@ -1617,15 +2246,22 @@ class KeplerTarget(object):
             if not success:
                 raise IOError(str(type(rep_err)) + " " + str(rep_err))
 
-        # with open(file_path, 'a') as fil1:
-        #     print(per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj,  first_transit_time_inj,
-        #           retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat, retrieved_integral_score,
-        #           retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time,
-        #           retrieved_g_gauss_stat, retrieved_g_integral_score,
-        #           sep=' ', end='\n', file=fil1)
-
     def retrieve_injections(self, max_phase_mismatch_to_dur=Max_phase_mismatch_to_dur, file_path=None,
                             injections_filename_postfix=Injections_filename_postfix):
+        """
+        Open the file in which the injection-recovery results are saved and save the statistics of these results
+        as attributes in the class.
+        :param max_phase_mismatch_to_dur: Maximal phase (first transit time) mismatch between the injected ephemeris
+             and the recovered best trigger for it to be considered recovered. Defined with respect to the duration
+             of the injected transit.
+        :type max_phase_mismatch_to_dur: float
+        :param file_path: Local path to the file where the injection-recovery info is stored. Should be file
+            created by `run_injection_search`.
+        :type file_path: str
+        :param injections_filename_postfix: Text added to the target ID in the name of the file saving
+            the injection-recovery results. See naming notations.
+        :type injections_filename_postfix: str
+        """
 
         for status in ['success', 'bad']:
             self.__dict__['per_inj_' + status] = []
@@ -1656,7 +2292,7 @@ class KeplerTarget(object):
             inj_line = inj_line0.strip()
             inj_line = inj_line.strip('\x00')
             if (len(inj_line) > 5) and (inj_line[0] != '#'):
-                per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, first_transit_time_inj, \
+                per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, ftt_inj, \
                     retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat, retrieved_integral_score, \
                     retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time, retrieved_g_gauss_stat, \
                     retrieved_g_integral_score = inj_line.split()
@@ -1665,11 +2301,9 @@ class KeplerTarget(object):
                 inc_inj = float(inc_inj)
                 ecc_inj = float(ecc_inj)
                 w_inj = float(w_inj)
-                # u1_inj = float(u1_inj)
-                # u2_inj = float(u2_inj)
                 rp_inj = float(rp_inj)
                 dur_inj = float(dur_inj)
-                first_transit_time_inj = float(first_transit_time_inj)
+                ftt_inj = float(ftt_inj)  # first transit time
                 retrieved_stat = float(retrieved_stat)
                 retrieved_period = float(retrieved_period)
                 retrieved_first_transit_time = float(retrieved_first_transit_time)
@@ -1681,9 +2315,9 @@ class KeplerTarget(object):
                 retrieved_g_gauss_stat = float(retrieved_g_gauss_stat)
                 retrieved_g_integral_score = float(retrieved_g_integral_score)
 
-                max_phase_mismatch = 2 * dur_inj * max_phase_mismatch_to_dur
-                if np.abs(first_transit_time_inj % per_inj
-                          - float(retrieved_first_transit_time) % per_inj) > max_phase_mismatch:  # _rel * per_inj:
+                max_phase_mismatch = dur_inj * max_phase_mismatch_to_dur
+                if min(np.abs(ftt_inj - retrieved_first_transit_time) % per_inj,
+                       (per_inj - np.abs(ftt_inj - retrieved_first_transit_time)) % per_inj) > max_phase_mismatch:
                     status = 'bad'
                 else:
                     status = 'success'
@@ -1695,7 +2329,7 @@ class KeplerTarget(object):
                 self.__dict__['w_inj_' + status].append(w_inj)
                 self.__dict__['rp_inj_' + status].append(rp_inj)
                 self.__dict__['dur_inj_' + status].append(dur_inj)
-                self.__dict__['first_transit_time_inj_' + status].append(first_transit_time_inj)
+                self.__dict__['first_transit_time_inj_' + status].append(ftt_inj)
                 self.__dict__['retrieved_stat_' + status].append(retrieved_stat)
                 self.__dict__['retrieved_period_' + status].append(retrieved_period)
                 self.__dict__['retrieved_first_transit_time_' + status].append(retrieved_first_transit_time)
@@ -1710,8 +2344,40 @@ class KeplerTarget(object):
         self.number_of_success_injections = len(self.per_inj_success)
         self.number_of_injections = len(self.per_inj_bad) + len(self.per_inj_success)
 
-    def _get_bin_min_bin_max(self, gaussianized=False):
-        if gaussianized:
+    def retrieve_background(self, slides_res_filename_postfix=Slides_res_filename_postfix):
+        """
+        Opens the file where the time-shuffling runs results were saved, retrieves these data
+        and stores as sttributes.
+        :param slides_res_filename_postfix: Text added to the target ID in the name of the file saving
+            the time-shuffled search results. See naming notations.
+        :type slides_res_filename_postfix: str
+        """
+        fil_slides = [ff for ff in os.listdir(self.output_location) if
+                      ((str(self.target_id) in ff) and (slides_res_filename_postfix in ff))][0]
+        res_slides = np.load(os.path.join(self.output_location, fil_slides), allow_pickle=True)
+        self.stats_slides = res_slides[:, 0]
+        self.pers_slides = res_slides[:, 1]
+        self.first_times_slides = res_slides[:, 2]
+        self.gauss_stats_slides = res_slides[:, 3]
+        self.int_scores_slides = res_slides[:, 4]
+        self.stats_g_slides = res_slides[:, 5]
+        self.pers_g_slides = res_slides[:, 6]
+        self.first_times_g_slides = res_slides[:, 7]
+        self.gauss_stats_g_slides = res_slides[:, 8]
+        self.int_scores_g_slides = res_slides[:, 9]
+
+        self.n_slides = len(res_slides)  # we now save one per star, so it is len!
+
+    def _get_bin_min_bin_max(self, in_gaussianized=False):
+        """
+        Gets the boundaties for the histograms of the time shuffling and the injection-recovery runs
+        from the obtained statistics.
+        :param in_gaussianized: Whether to look at the gaussianized statistics or not.
+        :type in_gaussianized: bool
+        :return:
+        :rtype:
+        """
+        if in_gaussianized:
             retrieved_stat_success = self.retrieved_gauss_stat_success
             retrieved_stat_bad = self.retrieved_gauss_stat_bad
             stats_slides = self.gauss_stats_slides
@@ -1746,36 +2412,36 @@ class KeplerTarget(object):
         bin_min = np.nanmin([inj_min, slides_min, trig_val])
         return bin_min, bin_max
 
-    def retrieve_background(self):
-        fil_slides = [ff for ff in os.listdir(self.output_location) if
-                      ((str(self.target_id) in ff) and (Slides_res_filename_postfix in ff))][0]
-        res_slides = np.load(os.path.join(self.output_location, fil_slides), allow_pickle=True)
-        self.stats_slides = res_slides[:, 0]
-        self.pers_slides = res_slides[:, 1]
-        self.first_times_slides = res_slides[:, 2]
-        self.gauss_stats_slides = res_slides[:, 3]
-        self.int_scores_slides = res_slides[:, 4]
-        self.stats_g_slides = res_slides[:, 5]
-        self.pers_g_slides = res_slides[:, 6]
-        self.first_times_g_slides = res_slides[:, 7]
-        self.gauss_stats_g_slides = res_slides[:, 8]
-        self.int_scores_g_slides = res_slides[:, 9]
-
-        self.n_slides = len(res_slides)  # we now save one per star, so it is len!
-        # self.n_slides = int(
-        #     fil_slides[len(self.target_id + '_' + Slides_stats_filename_postfix + '_'): fil_slides.index('.')])
-
-    def make_histogram_bins(self):
+    def make_histogram_bins(self, bin_width=Histogram_stats_binwid, bin_min=None, bin_max=None):
+        """
+        Create the bins array over which the distributions of the background and the injection-recovery
+        statistics (snr squared) will be plotted.
+        :param bin_width: The width of the bin in snr squared that should be used
+        :type bin_width: float
+        """
         if self.stats_slides is None:
             self.retrieve_background()
         if self.retrieved_stat_success is None:
             self.retrieve_injections()
-        bin_min, bin_max = self._get_bin_min_bin_max()
-        self.bins_stat_histogram = np.arange(bin_min, bin_max, Histogram_stats_binwid)
-        bin_min, bin_max = self._get_bin_min_bin_max(gaussianized=True)
-        self.bins_gauss_stat_histogram = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+        if bin_min is None or  bin_max is None:
+            bin_min, bin_max = self._get_bin_min_bin_max()
+        self.bins_stat_histogram = np.arange(bin_min, bin_max, bin_width)
+        bin_min, bin_max = self._get_bin_min_bin_max(in_gaussianized=True)
+        self.bins_gauss_stat_histogram = np.arange(bin_min, bin_max, bin_width)
 
-    def make_background_histogram(self, bins=None, bin_min=None, bin_max=None):
+    def make_background_histogram(self, bins=None, bin_min=None, bin_max=None, bin_width=Histogram_stats_binwid):
+        """
+        Create a histogram of the background (from time-shuffled runs) distribution of the statistic scores.
+        Saves bins and counts as attributes.
+        :param bins: Bin edges to use in the histogram. If None, will create from `bin_min', `bin_max', `bin_width`.
+        :type bins: None or numpy.ndarray of float
+        :param bin_min: Minimal snr squared in the bins array. if None, will be determined from the distribution.
+        :type bin_min: None or float
+        :param bin_max: Maximal snr squared in the bins array. if None, will be determined from the distribution.
+        :type bin_max: None or float
+        :param bin_width: The width of the bin in snr squared that should be used
+        :type bin_width: float
+        """
         if self.stats_slides is None:
             self.retrieve_background()
 
@@ -1791,16 +2457,16 @@ class KeplerTarget(object):
                     bin_min = bin_mi
                 if bin_max is None:
                     bin_max = bin_ma
-                self.bins_stat_histogram_bg = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+                self.bins_stat_histogram_bg = np.arange(bin_min, bin_max, bin_width)
             if self.bins_gauss_stat_histogram is not None:
                 self.bins_gauss_stat_histogram_bg = self.bins_gauss_stat_histogram
             else:
-                bin_mi, bin_ma = self._get_bin_min_bin_max(gaussianized=True)
+                bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
                 if bin_min is None:
                     bin_min = bin_mi
                 if bin_max is None:
                     bin_max = bin_ma
-                self.bins_gauss_stat_histogram_bg = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+                self.bins_gauss_stat_histogram_bg = np.arange(bin_min, bin_max, bin_width)
 
         self.distr_stat_h0 = np.histogram(self.stats_slides, bins=self.bins_stat_histogram_bg)[0]
         self.distr_stat_h0 = self.distr_stat_h0 / self.n_slides
@@ -1829,7 +2495,7 @@ class KeplerTarget(object):
             if self.bins_gauss_stat_histogram is not None:
                 self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
             else:
-                bin_mi, bin_ma = self._get_bin_min_bin_max(gaussianized=True)
+                bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
                 if bin_min is None:
                     bin_min = bin_mi
                 if bin_max is None:
@@ -1872,16 +2538,34 @@ class KeplerTarget(object):
         self.prob_density_h1_trigger = self.distr_stat_inj_all[bin_inds_close_trigger[0]]  # use the left edge index to access the bin
         self.prob_density_planet_not_noise = self.prob_density_h1_trigger / (self.prob_density_h1_trigger + self.prob_density_h0_trigger)
 
-    def analyze_injections_and_background(self, max_phase_mismatch_to_dur=Max_phase_mismatch_to_dur):
+    def analyze_injections_and_background(self, max_phase_mismatch_to_dur=Max_phase_mismatch_to_dur,
+                                          bins=None, bin_min=None, bin_max=None, bin_width=Histogram_stats_binwid):
         """
-        :param max_phase_mismatch_to_dur:
-        :type max_phase_mismatch_to_dur:
-        :return:
-        :rtype:
+        Retrieves the results of the time-shuffled and injection-recovery runs in the corresponding files,
+        makes histograms of them, finds the distribution density and estimates the statistical significance
+        of the trigger basing on that.
+        :param max_phase_mismatch_to_dur: Maximal phase (first transit time) mismatch between the injected ephemeris
+             and the recovered best trigger for it to be considered recovered. Defined with respect to the duration
+             of the injected transit.
+        :type max_phase_mismatch_to_dur: float
+        :param bins: Bin edges to use in the histogram. If None, will create from `bin_min', `bin_max', `bin_width`.
+        :type bins: None or numpy.ndarray of float
+        :param bin_min: Minimal snr squared in the bins array. if None, will be determined from the distribution.
+        :type bin_min: None or float
+        :param bin_max: Maximal snr squared in the bins array. if None, will be determined from the distribution.
+        :type bin_max: None or float
+        :param bin_width: The width of the bin in snr squared that should be used
+        :type bin_width: float
+        :param bin_width: The width of the bin in snr squared that should be used
+        :type bin_width: float
         """
         self.retrieve_background()
         self.retrieve_injections(max_phase_mismatch_to_dur=max_phase_mismatch_to_dur)
-        self.make_histogram_bins()
+        if bins is None:
+            self.make_histogram_bins(bin_min=bin_min, bin_max=bin_max, bin_width=bin_width)
+        else:
+            self.bins_stat_histogram = bins
+            self.bins_gauss_stat_histogram = bins
         self.make_injections_histogram(bins=self.bins_stat_histogram)
         self.make_background_histogram(bins=self.bins_stat_histogram)
         self.calculate_significance(remake_histograms=False)
@@ -1943,12 +2627,10 @@ class KeplerTarget(object):
             self.get_summed_values_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos,
                                               nsig_outliers_0_neg=nsig_outliers_0_neg)
         # ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds = \
-        #     estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_vars, templ_max, trends_stds=None)
+        #     estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max, trends_stds=None)
         #
         self.rp_to_rs = (self.best_ppm_no_filt / 1e6) ** 0.5  # the radius estimation is subjected to big error and bias!
         self.rp_to_rs_std = (np.nanvar(np.abs(self.best_ppms_no_filt) ** 0.5)
                              + np.nanmean(self.best_ppms_stds_no_filt) / np.abs(self.best_ppm_no_filt)) ** 0.5 / 1e3
         self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
         self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
-
-

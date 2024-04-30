@@ -14,6 +14,7 @@ G = 6.67430e-8  # dyn⋅cm2/g2 #gravitational constant
 R_sun_R_e = 109.076  # sun radii to Earth radii
 
 Pipeline_folder = os.path.dirname(__file__)
+force_data_output_locations_creation = False
 Working_place = None  # On which machine it is running: my office Mac ('Home'), Marvin or WEXAC
 # Working_place = 'Home' # 'Marvin'  # 'WEXAC'
 if Working_place is None:
@@ -146,6 +147,11 @@ def get_occurrence_table_enlarged():
 
 
 # TARGET CLASS PARAMETERS
+# Bad fft check:
+Amp_max_bad_fft = 300.  # Limit amplitude of the fft maximum (above it the maximum is bad)
+Dif_max_bad_fft = 11.  # Maximal difference between the value at point and the surrounding. Bigger is bad.
+
+
 P_min_search = 30  # days
 P_max_search = 500  # days
 Rp_re_max = 11  # this number of earth radii we search for now. 11 is Jupiter
@@ -190,20 +196,15 @@ Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
 Run_name = 'run_9'
 
+Kepler_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/KeplerFiles'
+
 if Working_place == 'Home':
-    Gaia_kepler_file = '/Users/orynaivashtenko/Work/Kepler_Project/kepler_dr3_good.fits'
-    Koi_dict_file = '/Users/orynaivashtenko/Work/Kepler_Project/KOI_catalog_dict.pickle'
-    Ttv_dict_file = '/Users/orynaivashtenko/Work/Kepler_Project/TTV_catalog_dict.pickle'
-    Villanova_dict_file = '/Users/orynaivashtenko/Work/Kepler_Project/villanova_catalog_dict.pickle'
+    Kepler_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/KeplerFiles'
 
 if Working_place == 'Marvin':
-    Data_location = '/SMALLDATA/KeplerData/Kepler'  # TODO : this does not work properly, not entering the prefix directory
+    Data_location = '/SMALLDATA/KeplerData/Kepler'
     Output_location = '/SMALLDATA/orynai/' + str(Run_name) + '_output'
     Kepler_files_folder = '/Collaboration-Kepler/KeplerFiles'
-    Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
-    Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
-    Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
-    Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
     Threshold_crossing_lists_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Run_root_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
@@ -212,13 +213,14 @@ if Working_place == 'WEXAC':
     Data_location = '/home/labs/barakz/Collaboration-Kepler/KeplerData'
     Output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/output_' + str(Run_name)
     Kepler_files_folder = '/home/labs/barakz/Collaboration-Kepler/KeplerFiles'
-    Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
-    Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
-    Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
-    Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
     Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
+
+Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
+Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
+Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
+Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
 
 # Gaia_kepler_file = '/home/orynai/Kepler_Notebooks/kepler_dr3_good.fits'
 # Default_koi_file = '/home/orynai/Kepler_Notebooks/cumulative_2022.05.30_11.44.28.csv'
@@ -228,9 +230,11 @@ if Working_place == 'WEXAC':
 # containing koi names and many fields
 # Default_ttv_catalog_file = '/Users/orynaivashtenko/Work/Kepler_Project/TTV_Catalog_Table3_O-C.txt'
 
-
-Home_output_storage_folder = 'orynai@marvin.weizmann.ac.il:/SMALLDATA/orynai/' + str(Run_name) + '_output'
-
+if force_data_output_locations_creation:
+    if not os.path.isdir(Data_location):
+        os.mkdir(Data_location)
+    if not os.path.isdir(Output_location):
+        os.mkdir(Output_location)
 
 Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'
 
