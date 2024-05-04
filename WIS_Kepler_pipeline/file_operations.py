@@ -73,10 +73,10 @@ def is_boolable(string):
         return False
 
 
-def variables_from_file(file):
+def variables_from_file(filename):
     """
     Opens the file with a list of variable names and values. Recognizes the data
-    types of the values. Creates variables with corresponding names and assigns
+    types of the values. Creates GLOBAL variables with corresponding names and assigns
     them the values. Format of the file (example):
         dummy_coefficient = 1.
         curse='hann'
@@ -84,21 +84,14 @@ def variables_from_file(file):
         best_number=13
         is_life_great = True
 
-    Parameters
-    ----------
-    file : str
-        Name (full path) of the file from which the variables should be read.
-    Returns
-    -------
-    None.
-
-    Creates
-    -------
-    The variables and assigns values
+    :param filename: Full path to the file from which the variables should be read.
+    :type filename:
+    :return: None
+    :rtype: None
     """
-    f = open(file, 'r')
-    lines = f.readlines()
-    f.close()
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+
     for line in lines:
         if '=' in line:
             text = line.split('#')[0]  # remove comments
@@ -106,7 +99,7 @@ def variables_from_file(file):
             name, val = text.split('=')[0:2]
             name = name.strip()
             val = val.strip()
-            if name != '' and val != '':
+            if (name != '') and (val != ''):
                 if val == 'None':
                     val = None
                 elif val == 'True':
@@ -118,17 +111,16 @@ def variables_from_file(file):
                 elif is_float(val):
                     val = float(val)
                 else:
-                    assert (((val[0] == '"') and (val[-1] == '"'))
-                            or ((val[0] == "'") and (
-                                        val[-1] == "'"))), 'Undefined type of value: not int, bool, float, str or None! ( line "' + str(
-                        line) + '" )'
+                    assert (((val[0] == '"') and (val[-1] == '"')) or ((val[0] == "'") and (val[-1] == "'"))), \
+                        'Undefined type of value: not int, bool, float, str or None! ( line "' + str(line) + '" )'
                     val = val[1:-1]
 
-                assert ((65 <= ord(name[0]) <= 90) or (97 <= ord(name[0]) <= 122) or name[0] == '_'), 'Incorrect variable name specified!'
+                assert ((65 <= ord(name[0]) <= 90) or (97 <= ord(name[0]) <= 122) or name[
+                    0] == '_'), 'Incorrect variable name specified!'
                 if len(name) > 1:
                     for e in name[1:]:
                         assert ((48 <= ord(e) <= 57) or (65 <= ord(e) <= 90) or (
-                                    97 <= ord(e) <= 122) or e == '_'), 'Incorrect variable name specified!'
+                                97 <= ord(e) <= 122) or e == '_'), 'Incorrect variable name specified!'
                 globals()[name] = val
 
 
@@ -136,24 +128,17 @@ def read_lists_from_file(file, location=None, dimension=2, to_array=True):
     """
     Reads an array (numpy.array or list of float, maximum 2d) printed to the txt file
     named name and returns the output in form of list.
-
-    Parameters
-    ----------
-     file : str
-        Name of the file ('.txt' is not needed).
-    location : str
-        Location where to create the file. If None, the current local directory
+    :param file: Name of the file ('.txt' is not needed).
+    :type file: str
+    :param location: Location where to create the file. If None, the current local directory
         will be used
-    dimension : int
-        3, 2, maybe 1. Dimensionality of the array to be read
-    to_array : bool
-        whether to convert to numpy array or stay with list
-
-    Returns
-    -------
-    res : list
-        List (possibly with nested lists) of data read from the file.
-
+    :type location: str
+    :param dimension: 3, 2, maybe 1. Dimensionality of the array to be read
+    :type dimension: int
+    :param to_array: whether to convert to numpy array or stay with list
+    :type to_array: bool
+    :return: List (possibly with nested lists) of data read from the file.
+    :rtype: list
     """
     if location is not None:
         file = os.path.join(location, file)
@@ -182,7 +167,7 @@ def read_lists_from_file(file, location=None, dimension=2, to_array=True):
         res = res.replace(',', ' ')
         res = res.replace('  ', ' ')  # important to do in because
         # otherwise ']  [' with two spaces can appear (which we can't see)
-        res = (res.split(']] [['))
+        res = res.split(']] [[')
         for j in range(len(res)):
             res[j] = (res[j].split('] ['))
             for i in range(len(res[j])):
@@ -394,7 +379,7 @@ def make_villanova_dict(villanova_catalog_path=os.path.join(Default_files_folder
 
 
 def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobname='job_noname',
-                   job_file=None, job_filename='job_test.bsub', job_file_dir=None,
+                   job_file=None, job_filename='job_test.bsub', job_file_dir=None, env_name='',
                    queue='physics-short', mem_per_job_gb='3.9', array_indices=None,
                    output_file=None, output_filename=None, output_file_dir=None,
                    error_file=None, error_filename=None, error_file_dir=None,
@@ -483,6 +468,7 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
         array_indices = ''
 
     text_to_write = '#!/usr/bin/bash\n'
+    text_to_write += '#\n'
     text_to_write += '#BSUB -q ' + queue + '\n'
     text_to_write += '#BSUB -R "rusage[mem=' + str(mem_per_job_gb) + 'GB]"\n'
     text_to_write += '#BSUB -J ' + str(jobname) + array_indices + '\n'
@@ -493,18 +479,22 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
             text_to_write += '#BSUB -o ' + str(output_file) + '\n'
     if error_file is not None:
         if output_error_overwrite:
-            text_to_write += '#BSUB -oe ' + str(error_file) + '\n'
+            text_to_write += '#BSUB -eo ' + str(error_file) + '\n'
         else:
             text_to_write += '#BSUB -e ' + str(error_file) + '\n'
 
+    # text_to_write += "'conda init; conda activate " + str(env_name) + "; "
+    text_to_write += "source ~/.bashrc\n"
+    text_to_write += "conda activate\n"
+    # text_to_write += "conda activate " + str(env_name) + "\n"
     text_to_write += str(code_file)
     if arg_jobind:
-        text_to_write += ' $LSB_JOBINDEX'
+        text_to_write += " $LSB_JOBINDEX"
     if other_args is not None:
         assert isinstance(other_args, list), 'Parameter other_args should be list of strings!'
         for arg in other_args:
-            text_to_write += ' --' + str(arg[0]) + ' ' + str(arg[1])
-
+            text_to_write += " --" + str(arg[0]) + " " + str(arg[1])
+    # text_to_write += "'"
     with open(job_file, 'w') as fil1:
         print(text_to_write, file=fil1)
 
@@ -588,3 +578,73 @@ def report_exception(exception, file_to_append, title='', info=''):
         print(str(exception), file=err_list_fil)
         print('END', file=err_list_fil)
         print('', file=err_list_fil)
+
+
+# ################################################################################################
+# FILE LOCKING
+Dt_wait_locker = 0.1  # s
+Waiting_time_limit_locker = 120  # s
+
+
+class Locker:
+    def __init__(self, file, dt_wait=Dt_wait_locker, max_waiting_time=Waiting_time_limit_locker):
+        self.file = file
+        self.locker_file = get_locker_file(self.file)
+        self.dt_wait = dt_wait
+        self.max_waiting_time = max_waiting_time
+
+    def __enter__(self):
+        # self.open_lock = open(self.locker_file, 'w')
+        self.wait_unlock()
+        lock_file(self.file)
+        return self
+
+    def wait_unlock(self):
+        dt = self.dt_wait
+        max_time = self.max_waiting_time
+        t0 = time.time()
+        waiting_time = 0.
+        # while is_locked(self.locker_file):
+        while os.path.exists(self.locker_file) and waiting_time < max_time:
+            time.sleep(dt + np.random.rand() * dt)
+            waiting_time = time.time() - t0
+        if waiting_time >= max_time:
+            raise ValueError('File is locked, maximal waiting time exceeded!')
+
+    def __exit__(self, exception_type, exception_value, exception_traceback):
+        unlock_file(self.file)
+
+
+def get_locker_file(file):
+    no_ext_file, ext = os.path.splitext(file)
+    if ext == '.locker':
+        raise ValueError(file+' is a locker file!')
+    locker_file = no_ext_file + '.locker'
+    return locker_file
+
+
+def is_locked(file):
+    locker_file = get_locker_file(file)
+    if os.path.exists(locker_file):
+        return True
+    else:
+        return False
+
+
+def lock_file(file):
+    locker_file = get_locker_file(file)
+    if os.path.exists(locker_file):
+        raise ValueError(file+' is locked!')
+    else:
+        with open(locker_file, 'w') as _:
+            pass
+
+
+def unlock_file(file):
+    locker_file = get_locker_file(file)
+    if not os.path.exists(locker_file):
+        raise ValueError(file+' is not locked!')
+    else:
+        os.remove(locker_file)
+
+# ################################################################################################

@@ -2281,21 +2281,16 @@ class KeplerLightCurve(object):
                 stat_snr = stat / movvar_meas ** 0.5  # now should be N(0,1) for sure
                 correction = movvar_meas / var_calc
                 statrawcor = stat / correction
-                statrawcor[~statmask] = 0.
+                statrawcor[~statmask] = 0.  # Very important, because inf would destroy periodicity search
                 stat_var_cor = np.array(movvar_meas)
                 stat_var_cor[statmask] = movvar_meas[statmask] / (correction[statmask]) ** 2
-                stat_var_cor[~statmask] = 0.  # because this inf will destroy periodicity search
+                stat_var_cor[~statmask] = 0.  # Very important, because inf would destroy periodicity search
 
                 self.stat_tot_vars[k][q] = Dtype_r(ut.unb_var(statrawcor[statmask]))
                 self.stat_moving_vars[k][q] = stat_var_cor
                 self.statistics_snr[k][q] = stat_snr
                 self.statistics_raw[k][q] = statrawcor
                 self.stat_masks[k][q] = statmask
-
-    def remove_end_nans(self):
-        for q in self.quarters:
-            non_nans = np.where(~np.isnan(self.fluxes[q]))[0]
-            self.fluxes[q] = self.fluxes[q][non_nans[0]: non_nans[-1] + 1]
 
     def cut_zero_padding_ends(self):
         """
@@ -2611,7 +2606,7 @@ class KeplerLightCurve(object):
             for q in self.quarters:
                 self.statistics_snr[k][q][~self.stat_masks[k][q]] = 0.
                 self.statistics_raw[k][q][~self.stat_masks[k][q]] = 0.
-                self.stat_moving_vars[k][q][~self.stat_masks[k][q]] = 0.
+                self.stat_moving_vars[k][q][~self.stat_masks[k][q]] = 0.  # This is very important for the periodicity search
 
                 # RE-NORMALIZING THE VARIANCE
                 # The vetted triggers could have changed the true variance, now we want the cleaned stat to have

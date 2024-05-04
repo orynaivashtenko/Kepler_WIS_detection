@@ -291,6 +291,13 @@ def get_average_mean(fluxes):
     return mean_total
 
 
+def remove_end_nans(fluxes):
+    for q in range(len(fluxes)):
+        non_nans = np.where(~np.isnan(fluxes[q]))[0]
+        fluxes[q] = fluxes[q][non_nans[0]: non_nans[-1] + 1]
+    return fluxes
+
+
 def window_data(data, alpha=0.1):
     """
     Apply Tukey window that smoothly zeroes the ends of the arrays.
@@ -511,6 +518,15 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
         wf_fds = wf_fds[0]
 
     return wf_tds, wf_fds
+
+
+def whiten_vector(vector, wf_fd):
+    support = 2 * (len(wf_fd) - 1)
+    vector = np.roll(vector, -np.argmax(vector))
+    vector = np.concatenate((vector[:len(vector) // 2], np.zeros(support - len(vector)),
+                             vector[len(vector) // 2:]))
+    vector = np.fft.irfft(np.fft.rfft(vector) * wf_fd)
+    return vector
 
 
 def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):

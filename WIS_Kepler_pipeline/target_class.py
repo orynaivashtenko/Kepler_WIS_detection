@@ -18,7 +18,7 @@ import auxiliary_functions as af
 import utils as ut
 import time
 from pipeline_parameters import *  # all the parameters, physical constants, occurrence table
-# from file_operations import report_exception
+from file_operations import report_exception
 # import warnings
 # warnings.filterwarnings("ignore")
 np.set_printoptions(threshold=1000, linewidth=10000)
@@ -26,7 +26,7 @@ np.set_printoptions(threshold=1000, linewidth=10000)
 # TODO: write documentation
 # TODO: injections
 # TODO: look-elsewhere in the FAP
-# TODO
+# TODO: think about a project for bad ffts
 
 """
 
@@ -111,7 +111,9 @@ class KeplerTarget(object):
                  villanova_dict_file=Villanova_dict_file,
                  overwrite_location_parameters_by_unpickle=False,
                  allow_output_folder_creation=True,
-                 allow_data_folder_creation=True):
+                 allow_data_folder_creation=True,
+                 problems_folder=Problems_folder,
+                 clean_problems_file=False):
         """
         Initializes the KeplerTarget object which is used to run the planet search, the statistical significance
         evaluation and some estimations for Kepler stars.
@@ -153,13 +155,19 @@ class KeplerTarget(object):
         # ############################################################################################################
         # Obtaining the locations of the input and the output:
         data_location = af.get_correct_tid_folder(target_id, data_location,
-                                                    allow_creation=allow_data_folder_creation)
+                                                  allow_creation=allow_data_folder_creation)
         output_location = af.get_correct_tid_folder(target_id, output_location,
                                                     allow_creation=allow_output_folder_creation)
         self.data_location = data_location
         """Where Kepler data is saved. If not there, it will be downloaded"""
         self.output_location = output_location
         """Where the output will be saved. A target_id named folder will be made"""
+        if problems_folder is None:
+            problems_folder = self.output_location
+        self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_target_txt_filename_postfix)
+        if clean_problems_file:
+            self.clean_problems_file()
+        """File where issues in the processing will be written"""
 
         # ############################################################################################################
         # Locations of other files required for the processing:
@@ -287,38 +295,31 @@ class KeplerTarget(object):
         # After the best trigger:
         self.is_threshold_crossing = False
         """Whether the best trigger crossed the pre-defined detection threshold"""
+
+        # ############################################################################################################
+        # Injection parameters:
         self.per_wing_injection_and_slides = None
-        """Wing of the periods window that will be used to make injections and shuffle timeslides"""
+        """Wing of the periods window that will be used to make injections and shuffle timeslides. 
+           Is used when the range is specifically required."""
+        self.injections_period_range = None
+        """Minimal and maximal period of the range that will be injected."""
         self.transit_probability = None
         """Geometric probability to transit. Given that there is a planet, what is the probability that it transits"""
+        self.prior_planets_in_period_range_one_star = None
+        """Number of planets in the injection period range per one star"""
         self.transiting_planets_of_radii_in_per_range_one_star = None
         """Number of planets in the injection period range per one star that exist and transit"""
         self.transit_and_range_probability = None
-        """Probability to transit and to have a radius in the relevant range given that there is a planet"""
+        """Probability to transit and to have a radius in the relevant range given that there is a planet of this period"""
         self.transiting_planets_in_relevant_range = None
-        """Number of planets in the injection period range in the radii range relevant for the trigger 
+        """Number of planets in the injection period range in the radii range relevant (snr-wise) for the trigger 
             per one star that exist and transit"""
-        self.prior_planets_in_period_range_one_star = None
+        self.injection_par_list = None
+        """List of parameters that will be injected. List of [period, a, inc, ecc, w, u[0], u[1], rp, dur]"""
         self.prior_radii_distribution = None
-        self.per_range_injections = None
-        self.planets_in_per_range_one_star = None
-        """"""
-        # self.transit_prob_factor = None
-        # # TODO fix these notations
-        # """Factor describing the probability of a planet around this star to transit assuming it exists"""  # TODO
-        # self.search_prob_factor = None
-        # """Factor describing the probability that the planet will be suitable for our search, assuming it exists.
-        #     Meaning it will be transit with a suitable period, the transit will not be too small and too large"""  # TODO
-        # self.transiting_planets_in_search = None
-        # """Number of transiting planets that are supposed to be in the search """  # TODO
-        # self.log10_best_period_edges = None
-        # """Edges of periods for the prior occurrence rate table that we use. In units of days, in scale of log10"""
-        # self.log2_rp_edges = None
-        # """Edges of planetary radii for the prior occurrence rate table that we use. In units of Earth radii, in scale of log2"""
-        # self.planets_of_radii_in_per_range_one_star = None
-        # """Prior occurrence rate in number of planets oer one star of radii bins in the corresponding period range"""  # TODO
-        # self.injection_par_list = None
-        # """List of planetary peremeters that were used as injections"""
+        """Probability distribution of the planetary radii in this period range"""
+        self.log2_rp_edges = None
+        """Edges of bins for probability distribution of the planetary radii"""
 
         # ############################################################################################################
         # Injections attributes
@@ -497,6 +498,10 @@ class KeplerTarget(object):
             self.is_good_for_processing = False
             self.failures += 'villanova; '
 
+    def clean_problems_file(self):
+        if os.path.exists(self.problems_file_location):
+            os.remove(self.problems_file_location)
+
     # noinspection DuplicatedCode
     def pickle_small_attributes(self, output_location=None,
                                 pickle_small_attributes_filename_postfix=Pickle_target_small_attributes_filename_postfix):
@@ -609,6 +614,7 @@ class KeplerTarget(object):
                 try:
                     self.__dict__[key] = float(self.__dict__[key])
                 except Exception as e:
+                    report_exception(exception=e, file_to_append=self.problems_file_location, title='', info='')
                     self.failures += key + ' error ' + str(e) + '; '
                     self.__dict__[key] = None
             # todo: add fields with units and descriptions. astropy.table can be helpful with that
@@ -784,6 +790,13 @@ class KeplerTarget(object):
             print('best_g_int_score', ':', self.best_g_integral_score)
             print('')
 
+    def print_problem(self, text, file=None):
+        if file is None:
+            file = self.problems_file_location
+        with open(file, 'w') as fil1:
+            print(text, file=fil1)
+            print('\n\n', file=fil1)
+
     def clean_output_directory(self):
         """
         Removes all the files from `self.output_location`
@@ -796,7 +809,7 @@ class KeplerTarget(object):
         """
         Initializes an instance of `search_pipeline.KeplerLightCurve` class as an attribute of this class instance.
         KeplerLightCurve is used for data conditioning and search.
-        See the description in the `search_pipeline.py'
+        See the description in the `search_pipeline.py`
         :param data_location: Local path to the folder where data files are stored. The target_id will
             be searched in there. If light curves are not found in the folder, they will be downloaded.
             If folder is not found, it will be created.
@@ -842,10 +855,10 @@ class KeplerTarget(object):
         else:
             self.is_bad_fft = True
 
-    def check_detectable_radius(self, stellar_radius, snr_thresh=Stat_candidate_search**0.5,
+    def check_detectable_radius(self, stellar_radius=None, snr_thresh=Stat_candidate_search**0.5-1,
                                 rp_re_max=Rp_re_max, rp_rs_max=Rp_rs_max):
         """
-        Finds approximately whether there can be detectable planets in a target with
+        Finds (very approximately) whether there can be detectable planets in a target with
         the average noise properties of this target, assuming that the threshold SNR is `snr_thresh`.
         Assuming that we search planets up to radius `rp_re_max` in units of Earth radii and
         up to `rp_rs_max` in units of stellar radii. That is, we are not interested in brown dwarfs.
@@ -861,6 +874,8 @@ class KeplerTarget(object):
         :param rp_rs_max:
         :type rp_rs_max:
         """
+        if stellar_radius is None:
+            stellar_radius = self.stellar_radius
         units_of_re_to_units_of_r_star_factor = 1 / (stellar_radius * R_sun_R_e)
         rp_rs = units_of_re_to_units_of_r_star_factor * rp_re_max
         rp_rs = min(rp_rs, rp_rs_max)
@@ -870,14 +885,16 @@ class KeplerTarget(object):
                                    for q in self.klc.quarters], axis=0) / np.max(self.klc.tb.templates_shifts[kk])
                           for kk in range(len(self.klc.whitened_templates_td))])
                    * self.klc.mean_total * n_transits_max ** 0.5 * (rp_rs ** 2))
+        # -> for an exact conversion between the snr and the radius, look dedicated functions
         if snr_max < snr_thresh:
             self.failures = self.failures + ' too_large_noise; '
             self.is_bad_fft = True
 
     def get_predicted_snr_flux(self, flux_model, period, depth_factor=1., rp_rs=0.02, wf_fd=None, n_quarters=16,
+                               include_detrending=True, nperseg_psd=128,
                                conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
         """
-        Tajes the mean flux model and the period, uploads the noise properties of the star. Checks what would be the signal to noise
+        Takes the mean flux model and the period, uploads the noise properties of the star. Checks what would be the signal to noise
         for different planetary radii and selects the minimal and maximal radii accounting for the detection threshold and
         the punishment of too strong signals in the pipeline. Other radii are supposed to be not interesting for the search
         because they will never populate the range of the histogram which surrounds the potential triggers that we are aiming for.
@@ -901,20 +918,39 @@ class KeplerTarget(object):
             # -> relative wf_fd, mean flux already taken into account
             n_quarters = len(wf_fds)
             wf_fd = np.mean(np.array(wf_fds)**2, axis=0) ** 0.5
-        support = 2 * (len(wf_fd) - 1)
+        if include_detrending:
+            support = 2 * (len(wf_fd) - 1)
+            freqs_wf_fd = np.fft.rfftfreq(support, d=tm.dt_lc)
+            freq_psd_resolution = 1 / (nperseg_psd * tm.dt_lc)
+            wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
         n_transits_est = np.round(n_quarters * 90. / period)
-
-        flux_model = np.roll(flux_model, -np.argmax(flux_model))
-        flux_model = flux_model / np.nanmax(flux_model)
-        flux_model = np.concatenate((flux_model[:len(flux_model) // 2], np.zeros(support - len(flux_model)),
-                                     flux_model[len(flux_model) // 2:])) * depth_factor
-        flux_model = np.fft.irfft(np.fft.rfft(flux_model) * wf_fd)
+        flux_model = flux_model / np.nanmax(flux_model) * depth_factor
+        flux_model = ut.whiten_vector(flux_model, wf_fd=wf_fd)
         snr_exp = np.linalg.norm(flux_model) * n_transits_est ** 0.5 * (rp_rs ** 2)
         return snr_exp
 
+    def get_rp_inj_from_snr(self, snr_req, per_inj=300., m_1_3_r_s=None, inc_inj=90., ecc_inj=0, w_inj=90., u1_inj=0.47, u2_inj=0.23,
+                            nperseg_psd=128, include_detrending=True,
+                            conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
+        if m_1_3_r_s is None:
+            m_1_3_r_s = self.m_1_3_r_s
+        wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
+        n_quarters = len(wf_fds)
+        wf_fd = np.mean(np.array(wf_fds) ** 2, axis=0) ** 0.5
+        if include_detrending:
+            support = 2 * (len(wf_fd) - 1)
+            freqs_wf_fd = np.fft.rfftfreq(support, d=tm.dt_lc)
+            freq_psd_resolution = 1 / (nperseg_psd * tm.dt_lc)
+            wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
+        n_transits = np.round(n_quarters * 90. / per_inj)
+        rp_inj = tm.get_rp_inj(snr_req=snr_req, wf_fd=wf_fd, n_transits=n_transits, per_inj=per_inj, m_1_3_r_s=m_1_3_r_s, inc_inj=inc_inj,
+                               ecc_inj=ecc_inj, w_inj=w_inj, u1_inj=u1_inj, u2_inj=u2_inj, nperseg_psd=nperseg_psd,
+                               include_detrending=include_detrending, dt=tm.dt_lc)
+        return rp_inj
+
     def get_detectable_radius_flux(self, flux_model, period, depth_factor=1., snr_min=4.5, snr_max_1=8, snr_max_full=40,
-                                   stellar_radius=None, units='star', wf_fd=None, n_quarters=16,
-                                   conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
+                                   stellar_radius=None, units='star', wf_fd=None, include_detrending=True, nperseg_psd=spip.Nperseg_psd,
+                                   n_quarters=16, conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
         """
         Takes the mean flux model and the period, uploads the noise properties of the star. Checks what would be the signal to noise
         for different planetary radii and selects the minimal and maximal radii accounting for the detection threshold and
@@ -954,15 +990,21 @@ class KeplerTarget(object):
             n_quarters = len(wf_fds)
             wf_fd = np.mean(np.array(wf_fds)**2, axis=0) ** 0.5
         support = 2 * (len(wf_fd) - 1)
-        n_transits_max = np.ceil(n_quarters * 90. / period)
+        if include_detrending:
+            freqs_wf_fd = np.fft.rfftfreq(support, d=tm.dt_lc)
+            freq_psd_resolution = 1 / (nperseg_psd * tm.dt_lc)
+            wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
 
-        flux_model = np.roll(flux_model, -np.argmax(flux_model))
-        flux_model = flux_model / np.nanmax(flux_model)
-        flux_model = np.concatenate((flux_model[:len(flux_model) // 2], np.zeros(support - len(flux_model)), flux_model[len(flux_model) // 2:])) * depth_factor
-        flux_model = np.fft.irfft(np.fft.rfft(flux_model) * wf_fd)
+        n_transits_max = np.ceil(n_quarters * 90. / period)
+        n_transits_min = max(3, np.floor(n_quarters * 90. / period))
+
+        flux_model = flux_model / np.nanmax(flux_model) * depth_factor
+        flux_model = ut.whiten_vector(flux_model, wf_fd=wf_fd)
+
         # snr_max = np.linalg.norm(flux) * n_transits_max ** 0.5 * (rp_rs ** 2)
         rp_rs_min = (snr_min / (np.linalg.norm(flux_model) * n_transits_max ** 0.5)) ** 0.5
-        rp_rs_max = min((snr_max_1 / np.linalg.norm(flux_model)) ** 0.5, (snr_max_full / (np.linalg.norm(flux_model) * n_transits_max ** 0.5)) ** 0.5)
+        rp_rs_max = min((snr_max_1 / np.linalg.norm(flux_model)) ** 0.5,
+                        (snr_max_full / (np.linalg.norm(flux_model) * n_transits_min ** 0.5)) ** 0.5)
         rps_res = rp_rs_min, rp_rs_max
         if units == 'earth':
             units_of_re_to_units_of_r_star_factor = 1 / (stellar_radius * R_sun_R_e)
@@ -1094,6 +1136,12 @@ class KeplerTarget(object):
         self.was_notched = self.klc.was_notched
         self.klc.condition_templates()
         self.check_detectable_radius(stellar_radius=self.stellar_radius)
+        if self.is_bad_fft:
+            self.print_problem('is bad fft')
+        if self.is_koi:
+            self.print_problem('is koi')
+        if self.was_notched:
+            self.print_problem('was notched')
         if (not self.is_bad_fft) or (not stop_if_bad):
             if save_conditioned_data:
                 self.klc.save_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
@@ -1185,8 +1233,8 @@ class KeplerTarget(object):
                 if save_connected_stats:
                     self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix)
 
-    def set_perodicity_search_parameters(self, p_min=P_min_search, p_max=P_max_search, per_phases_per_chunk=Per_phases_per_chunk,
-                                         duty_cycle=spip.Duty_cycle, force_overwrite=False):
+    def set_periodicity_search_parameters(self, p_min=P_min_search, p_max=P_max_search, per_phases_per_chunk=Per_phases_per_chunk,
+                                          duty_cycle=spip.Duty_cycle, force_overwrite=False):
         """
         Sets the parameters for the periodicity search as attributes of the class for the future use.
         :param p_min: Minimal period in the search.
@@ -1258,8 +1306,8 @@ class KeplerTarget(object):
             the maximum not to be on the edge
         :type overlap_period_bins: int
         """
-        self.set_perodicity_search_parameters(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk,
-                                         duty_cycle=duty_cycle, force_overwrite=True)
+        self.set_periodicity_search_parameters(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk, duty_cycle=duty_cycle,
+                                               force_overwrite=True)
 
         if self.klc is None or not hasattr(self.klc, 'statistics_full') or self.klc.statistics_full is None:
             self.get_connected_klc(reinitialize=False, mask_koi_planet=None)
@@ -1271,14 +1319,18 @@ class KeplerTarget(object):
         t1 = time.time()
         best_candidates_concat = []
         for pers in self.periods_in_chunks:
-            self.klc.periodicity_search(pmin=None, pmax=None, duty_cycle=None, periods=pers,
+            self.klc.periodicity_search(p_min=None, p_max=None, duty_cycle=None, periods=pers,
                                         delete_full_stats=True, force_interleave_shifts=False, delete_periodic_interleaved=True,
                                         save_uncorrected_periodic=False, delete_non_marginalized=False,  # delete_non_maximized=False,
                                         overlap_period_bins=overlap_period_bins)
-            self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False)
-            self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True)
-            self.klc.make_best_periodic_scores()
-            best_candidates_concat.append(np.array(self.klc.best_periodic_scores_data, dtype=object))
+            try:
+                self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False)
+                self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True)
+                self.klc.make_best_periodic_scores()
+                best_candidates_concat.append(np.array(self.klc.best_periodic_scores_data, dtype=object))
+            except Exception as exc:
+                report_exception(exception=exc, file_to_append=self.problems_file_location,
+                                 title='pers=' + str(pers[0]) + '-' + str(pers[1]), info='')
             self.klc.delete_mes()
         if best_periodic_scores_file_dir is not None:
             np.save(best_periodic_scores_file_dir, np.array(best_candidates_concat, dtype=object), allow_pickle=True)
@@ -1334,7 +1386,8 @@ class KeplerTarget(object):
                         threshold_crossing_list_file=None,
                         threshold_crossing_list_location=Threshold_crossing_lists_folder,
                         threshold_crossing_list_filename=Threshold_crossing_list_filename,
-                        clean_dir_if_not_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap):
+                        clean_dir_if_not_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap,
+                        clean_problems_file=True):
 
         """
         Runs the ses-search and the periodicity search. See `self.run_ses_search` and `run_periodicity_search`.
@@ -1399,6 +1452,9 @@ class KeplerTarget(object):
         """
         if (threshold_crossing_list_file is None) and (threshold_crossing_list_location is not None):
             threshold_crossing_list_file = os.path.join(threshold_crossing_list_location, threshold_crossing_list_filename)
+
+        if clean_problems_file:
+            self.clean_problems_file()
 
         self.run_ses_search(save_conditioned_data=save_conditioned_data,
                             conditioned_data_filename_postfix=conditioned_data_filename_postfix,
@@ -1484,7 +1540,7 @@ class KeplerTarget(object):
             self.get_connected_klc(reinitialize=True, mask_koi_planet=mask_koi_planet)
             self.klc.delete_irrelevant()  # For memory
             # In case some parameters were not set, replace them with the defaults:
-            self.set_perodicity_search_parameters(force_overwrite=False)
+            self.set_periodicity_search_parameters(force_overwrite=False)
 
             if central_period is None:
                 period = self.best_per
@@ -1559,33 +1615,33 @@ class KeplerTarget(object):
                 int_scores_g_chunk = []
                 for pers_summing in period_chunks:
                     try:
-                        self.klc.periodicity_search(pmin=None, pmax=None, periods=pers_summing, delete_full_stats=False,
+                        self.klc.periodicity_search(p_min=None, p_max=None, periods=pers_summing, delete_full_stats=False,
                                                     force_interleave_shifts=True,  # very important: new slides!
                                                     delete_periodic_interleaved=True, save_uncorrected_periodic=False,
                                                     delete_non_marginalized=False, overlap_period_bins=overlap_period_bins)
                         self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False)
                         self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True)
                         self.klc.make_best_periodic_scores()
+                        for list_ch, list_g_ch, s_ind in [[stats_chunk, stats_g_chunk, spip.Best_per_results_index_stats],
+                                                          [pers_chunk, pers_g_chunk, spip.Best_per_results_index_per],
+                                                          [first_times_chunk, first_times_g_chunk, spip.Best_per_results_index_ftt],
+                                                          [gauss_stats_chunk, gauss_stats_g_chunk, spip.Best_per_results_index_stats_gauss],
+                                                          [int_scores_chunk, int_scores_g_chunk, spip.Best_per_results_index_best_integral]]:
+                            list_ch.append(self.klc.best_periodic_scores_data[s_ind][0])
+                            list_g_ch.append(self.klc.best_periodic_scores_data[s_ind][1])
                     except Exception as exc:
-                        raise exc
-                        # report_exception(exception=exc, file_to_append='/home/labs/barakz/orynai/run_9/weird_errors',
-                        #                  title=self.target_id, info='seed '+str(new_seed))
-                    for list_ch, list_g_ch, s_ind in [[stats_chunk, stats_g_chunk, spip.Best_per_results_index_stats],
-                                                      [pers_chunk, pers_g_chunk, spip.Best_per_results_index_per],
-                                                      [first_times_chunk, first_times_g_chunk, spip.Best_per_results_index_ftt],
-                                                      [gauss_stats_chunk, gauss_stats_g_chunk, spip.Best_per_results_index_stats_gauss],
-                                                      [int_scores_chunk, int_scores_g_chunk, spip.Best_per_results_index_best_integral]]:
-                        list_ch.append(self.klc.best_periodic_scores_data[s_ind][0])
-                        list_g_ch.append(self.klc.best_periodic_scores_data[s_ind][1])
-                best_ind_chunk = np.argmax(int_scores_chunk)  # (np.argsort(stats_chunk)[::-1])[:n_best_saving]
-                best_g_ind_chunk = np.argmax(int_scores_g_chunk)  # (np.argsort(gauss_stats_g_chunk)[::-1])[:n_best_saving]
-                for list_full, list_full_g, list_ch, list_ch_g in [[stats, stats_g, stats_chunk, stats_g_chunk],
-                                                                   [pers, pers_g, pers_chunk, pers_g_chunk],
-                                                                   [first_times, first_times_g, first_times_chunk, first_times_g_chunk],
-                                                                   [gauss_stats, gauss_stats_g, gauss_stats_chunk, gauss_stats_g_chunk],
-                                                                   [int_scores, int_scores_g, int_scores_chunk, int_scores_g_chunk]]:
-                    list_full.append(list_ch[best_ind_chunk])  # += list(np.array(list_ch)[best_indices_chunk])
-                    list_full_g.append(list_ch_g[best_g_ind_chunk])
+                        report_exception(exception=exc, file_to_append=self.problems_file_location,
+                                         title='slides pers='+str(pers_summing[0])+'-'+str(pers_summing[1]), info='seed='+str(new_seed))
+                if len(int_scores_chunk) > 0:  # If everything failed, there will be no result
+                    best_ind_chunk = np.argmax(int_scores_chunk)  # (np.argsort(stats_chunk)[::-1])[:n_best_saving]
+                    best_g_ind_chunk = np.argmax(int_scores_g_chunk)  # (np.argsort(gauss_stats_g_chunk)[::-1])[:n_best_saving]
+                    for list_full, list_full_g, list_ch, list_ch_g in [[stats, stats_g, stats_chunk, stats_g_chunk],
+                                                                       [pers, pers_g, pers_chunk, pers_g_chunk],
+                                                                       [first_times, first_times_g, first_times_chunk, first_times_g_chunk],
+                                                                       [gauss_stats, gauss_stats_g, gauss_stats_chunk, gauss_stats_g_chunk],
+                                                                       [int_scores, int_scores_g, int_scores_chunk, int_scores_g_chunk]]:
+                        list_full.append(list_ch[best_ind_chunk])  # += list(np.array(list_ch)[best_indices_chunk])
+                        list_full_g.append(list_ch_g[best_g_ind_chunk])
 
             new_res_array = np.vstack((stats, pers, first_times, gauss_stats, int_scores,
                                        stats_g, pers_g, first_times_g, gauss_stats_g, int_scores_g)).transpose()
@@ -1631,12 +1687,11 @@ class KeplerTarget(object):
             central_period=None, use_special_per_wing=False,
             per_wing_injection_relative=Per_wing_injection_and_slides_relative,
             injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
-            mean_psd_filename_postfix=spip.Default_psd_for_injections_filename_postfix,
-            all_injection_parameters_filename_postfix=All_injection_parameters_filename_postfix,
+            conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix,
             n_per=20,
             n_ecc=60,  # Probability to transit at a fixed eccentricity depends strongly on eccentricity
             n_w=20,
-            n_cos_incl=1000,  # This divides the full circle  # should be at least few semi-major axes
+            n_cos_incl=2000,  # This divides the full circle  # should be at least few semi-major axes
             n_rp=30,
             u=(0.47, 0.23),
             snr_min_injected=5.,
@@ -1646,12 +1701,18 @@ class KeplerTarget(object):
         if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
             self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
 
+        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                            filename_postfix=injection_parameters_filename_postfix, file_format='txt')
+        if os.path.exists(file_path) and not add_to_existing_file:
+            with open(file_path, 'w'):
+                pass  # will delete the contents of the file
+
         if central_period is None:
             period = self.best_per
         else:
             period = central_period
 
-        self.set_perodicity_search_parameters(force_overwrite=False)
+        self.set_periodicity_search_parameters(force_overwrite=False)
         if not use_special_per_wing:
             if self.periods_in_chunks is None:
                 if not hasattr(self, 'klc') or self.klc is None:
@@ -1720,7 +1781,7 @@ class KeplerTarget(object):
 
         # ################################################################################################
         # GENERATING PLANET PARAMETERS, SEE WHO TRANSITS AND WHO HAS REASONABLE RADII
-        wf_fds = self.load_rel_wf_fds()  # conditioned_data_filename_postfix=conditioned_data_filename_postfix)
+        wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
         # -> relative wf_fd, mean flux already taken into account
         n_quarters = len(wf_fds)
         wf_fd = np.mean(np.array(wf_fds) ** 2, axis=0) ** 0.5
@@ -1767,7 +1828,8 @@ class KeplerTarget(object):
                                                                                    n_quarters=n_quarters, wf_fd=wf_fd,
                                                                                    snr_max_1=snr_max_1_injected,
                                                                                    snr_max_full=snr_max_full_injected,
-                                                                                   stellar_radius=self.stellar_radius, units='star')
+                                                                                   stellar_radius=self.stellar_radius, units='star',
+                                                                                   include_detrending=True, nperseg_psd=spip.Nperseg_psd)
                             rps = []
                             for i in range(len(log2_rp_edges) - 1):
                                 power_2 = int(np.ceil(np.log2(rp_numbers[i])))
@@ -1781,273 +1843,282 @@ class KeplerTarget(object):
                             count_orbit_transiting_relevant_radii += len(rps)  # will be divided by rp_numbers_total
                             for rp in rps:
                                 injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
+                # How many injections transit per period:
                 count_orbit_transiting = count_orbit_transiting / n_per
+                # How many injections transit per period and fall in the interesting snr regime:
                 count_orbit_transiting_relevant_radii = count_orbit_transiting_relevant_radii / rp_numbers_total / n_per
 
+        # Probability to transit given a planet of a given period:
         self.transit_probability = transit_prob_measure * count_orbit_transiting
         self.transiting_planets_of_radii_in_per_range_one_star = self.prior_planets_in_period_range_one_star * self.transit_probability
+        # Probability to transit and be in the relevant snr range given a planet of a given period:
         self.transit_and_range_probability = transit_prob_measure * count_orbit_transiting_relevant_radii
         self.transiting_planets_in_relevant_range = (self.prior_planets_in_period_range_one_star
                                                      * transit_prob_measure * count_orbit_transiting_relevant_radii)
-        selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
-                                             replace=True if len(injection_parameter_sets) < n_injections else False)
-
-    def generate_injection_parameters(
-            self, n_injections=N_injections_total, add_to_existing_file=False,
-            use_special_per_wing=False,
-            per_wing_injection_relative=Per_wing_injection_and_slides_relative,
-            injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
-            # mean_psd_filename_postfix=spip.Default_psd_for_injections_filename_postfix,
-            all_injection_parameters_filename_postfix=All_injection_parameters_filename_postfix,
-            d_ecc=0.3,
-            n_w=5,  #
-            d_inc=0.5,  # this is in degrees! and often until 85 is fine
-            u=(0.47, 0.23),
-            snr_min_injected=5.,
-            snr_max_1_injected=8,
-            snr_max_full_injected=40,
-            n_per=50,
-            n_rp=30):
-        """
-        TODO REWRITE THIS!
-        TODO # make sure we really obtain the correct rate, meaning that when we exclude some duration from the bank,
-        TODO # it should decrease the overall rate. The full rate of Zhu and Dong include all the planetary parameters,
-        TODO # therefore when we use only part of them, our rate should not sum up to the rate of Zhu and Dong.
-
-
-        without a good reason for that, and then the template factor will heavily suppress the result. Maybe I need to account for
-        the specific expected snr of this transit to smear the templates much more. Or I need to also inject other shit, but this
-        is even more complicated.
-
-        :param n_injections: Number of injections to generate in the end. The inner number of generations will be defined by the
-        ranges of parameters. `n_injections` is just how many will be returned in the end for the best template
-        :type n_injections:
-        :param per_wing_injection_relative: days to the left and the same to the right used in the time slides in units of period
-        :type per_wing_injection_relative: float
-        :param n_per: Number of periods within the period wings to generate. Not evenly, they will be sampled randomly.
-        :type n_per: int
-        :param n_rp: How many radii is tried per one parameter set
-        :type n_rp: int
-        :param d_ecc: Eccentricity step when calculating how many eccentricities to generate. Needed for uniformity of eccentricity
-        density generation to make sure that when the range of possible orbital is smaller, we generate fewer of them.
-        :type d_ecc: float
-        :param n_w: Number of periastron angles to generate in each loop. Since this is uniform and with no bounds,
-        it does not really matter how many of them we produce
-        :type n_w: int
-        :param d_inc: Inclination step when calculating how many inclinations to generate. Needed for uniformity of inclination
-        density generation to make sure that when the range of possible transit inclinations is smaller, we generate fewer of them.
-        This is in degrees! and often until 85 is fine
-        :type d_inc: float, this is in degrees! and often until 85 is fine
-        :param u: Limb darkening coefficients. nothing is too sensitive to them, so they are just fixed
-        :type u: [float, float]
-        :param snr_min_injected: full snr, not single-transit
-        :type snr_min_injected: float
-        :param add_to_existing_file:
-        :type add_to_existing_file:
-        :param injection_parameters_filename_postfix:
-        :type injection_parameters_filename_postfix:
-        :param all_injection_parameters_filename_postfix:
-        :type all_injection_parameters_filename_postfix:
-        :return:
-        :rtype:
-
-        (DONE): DO NOT FORGET THE BUG AND LOOK AT THE TRANSIT TIME AND NOT THE BADLY DEFINED PHASE!
-        (DONE): THINK ABOUT THE REPETITIONS: WHEN YOU GENERATE ONE P_INJ, YOU USE IT FOR ALL THE OTHER PARAMETERS,
-        WHICH IS NOT REALLY FAIR. HOWEVER , IF YOU CHANGE THE THING EVERY TIME, THEN YOU WILL GIVE NOT PROPORTIONAL
-        WEIGHTS TO SMALL INCLINATIONS AND BIG INCLINATIONS, LET'S SAY. SO EITHER YOU NEED TO GENERATE MANY OF THEM AND REJECT
-        THE NON-TRANSITING ONES, OR SOMETHING ELSE.............OR IT IS OKAY THAT THEY ARE DISCRETE
-        :return:
-        """
-        if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
-            self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
-
-        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                            filename_postfix=injection_parameters_filename_postfix, file_format='txt')
-        if os.path.exists(file_path) and not add_to_existing_file:
-            with open(file_path, 'w'):
-                pass  # will delete the contents of the file
-
-        # templs_prepared_for_cos_fd = np.conj(np.load(os.path.join(Default_template_bank_folder,
-        #                                                           Default_templates_fd_for_injections_filename), allow_pickle=True))
-        # template_support = 2 * (len(templs_prepared_for_cos_fd[0]) - 1)
-        # dt = tm.dt_lc
-        # freqs = np.fft.rfftfreq(template_support, d=dt)
-        # effective_wf_fd = sim.get_saved_wf_fd(freqs=freqs, dt=tm.dt_lc)
-        # # whitened, normalized, fourier domain, conjugated
-
-        # The parity of the bank is odd, but the length 256 is even, so some tricks with time
-        # t = tm.time(t_tot=(template_support + 1) * tm.dt_lc, parity='odd')[1:]
-        t = tm.time(t_tot=(256 + 1) * tm.dt_lc, parity='odd')[1:]
-        # # -> make it conj for the ease of cosine
-        # # The following is needed to calculate the correct cosines from the vectors in the Fourier domain. Only works for even length
-        # cosine_coeffs = np.ones(len(templs_prepared_for_cos_fd[0])) * 2
-        # cosine_coeffs[0] = 1.
-        # cosine_coeffs[-1] = 1.
-        # cosine_coeffs = cosine_coeffs / template_support
-        # templs_prepared_for_cos_fd = templs_prepared_for_cos_fd * cosine_coeffs
-
-        self.set_perodicity_search_parameters(force_overwrite=False)
-        if not use_special_per_wing:
-            if self.periods_in_chunks is None:
-                periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
-                                                                 per_phases_per_chunk=self.per_phases_per_chunk,
-                                                                 dt=self.klc.dt_days, t_mission=self.klc.T_mission)
-            else:
-                periods_in_chunks = self.periods_in_chunks
-            closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, self.best_per, overlap_bins=0)
-            p_min_inj, p_max_inj = closest_chunk[0], closest_chunk[-1]
-        else:
-            p_max_inj = self.best_per * (1 + per_wing_injection_relative)
-            p_min_inj = self.best_per * (1 - per_wing_injection_relative)
-        # ################################################################################################
-        # OCCURRENCE RATES
-        # All the things with the occurrence rates and densities:
-        log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
-        units_of_re_to_units_of_r_star_factor = 1 / (self.stellar_radius * R_sun_R_e)
-        log10_best_per_low = np.log10(p_min_inj)
-        log10_best_per_up = np.log10(p_max_inj)
-        # log10_period_edges = np.log10(period_edges)
-        self.log10_best_period_edges = (log10_best_per_low, log10_best_per_up)
-        log2_rp_edges = np.log2(units_of_re_to_units_of_r_star_factor * 2. ** log2_rp_re_edges)
-
-        # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
-        # Number of planets of all radii in log day (per 100 stars):
-        # For other periods, it will be checked right now:
-        row_upper = len(occurrences_table) - 1
-        for i in range(len(log10_period_edges) - 1):
-            if (log10_best_per_up > log10_period_edges[i]) and (log10_best_per_up <= log10_period_edges[i + 1]):
-                row_upper = i
-                break
-        row_lower = len(occurrences_table) - 1
-        for i in range(len(log10_period_edges) - 1):
-            if (log10_best_per_low > log10_period_edges[i]) and (log10_best_per_low <= log10_period_edges[i + 1]):
-                row_lower = i
-                break
-        # planets per one star in this period range for different radii bins:
-        # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
-        # to be uniform (they are log bins)
-        planets_of_radii_in_per_range_one_star = np.zeros(len(occurrences_table[-1]))
-        for i in range(row_lower, row_upper + 1):
-            row_density = occurrences_table[i] / (log10_period_edges[i + 1] - log10_period_edges[i])
-            if i == len(occurrences_table) - 1 and log10_best_per_up > log10_period_edges[len(log10_period_edges) - 1]:
-                up_edge = log10_best_per_up
-            else:
-                up_edge = min(log10_best_per_up, log10_period_edges[i + 1])
-            if i == len(occurrences_table) - 1 and log10_best_per_low > log10_period_edges[len(log10_period_edges) - 1]:
-                low_edge = log10_best_per_low
-            else:
-                low_edge = max(log10_best_per_low, log10_period_edges[i])
-            planets_of_radii_in_per_range_one_star += row_density * (up_edge - low_edge)
-        self.planets_of_radii_in_per_range_one_star = planets_of_radii_in_per_range_one_star
-        rp_numbers = (np.ceil(planets_of_radii_in_per_range_one_star /
-                              np.sum(planets_of_radii_in_per_range_one_star) * n_rp)).astype(int)
-        rp_numbers_total = np.sum(rp_numbers)
-
-        # ################################################################################################
-        # PROBABILITY TO TRANSIT FACTOR
-
-        # Taking into account the probability to transit.
-        # for example, d_ecc means that every simulation accounts for the parameter space of the size d_ecc, and this will
-        # only be made once. The allowed parameter space e_allowed will be covered by the proper number of d_ecc.
-        # Applying the factor to every planet makes sure we count not one planet but e_allowed/e_possible planets per
-        # simulated star. In the end, this will be multiplied by the number of planets existing around stars. With the
-        # factor, we get the number of planets existing, transiting and observed. The distinction between transiting
-        # and observed exists because we observe not all the durations etc.
-        ecc_factor = d_ecc / 1.
-        w_factor = 1. / n_w
-        i_factor = d_inc / 90.
-        transit_prob_factor = ecc_factor * w_factor * i_factor
-
-        # effective_planet_count = [0. for _ in range(tm.N_templates)]
-        # templates_parameter_sets = [[] for _ in range(tm.N_templates)]
-        injection_parameter_sets = []
-        # injection_durations = []
-        n_star_simulations = 0
-        n_star_transiting = 0
-        for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
-            # Attention, this is a linear uniform distribution, although we are using logarithmic occurrences.
-            a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (
-                    M_sun ** (1 / 3) / R_sun)  # 3rd Kepler law #in units of R
-            # a = (G * M /(4*np.pi**2) * (per*24*60*60)**2)**(1/3) / R #3rd Kepler law #in units of R
-            # r_min = a*(1-e) -> 2*r_star=a*(1-e_max)
-            n_star_simulations += rp_numbers_total
-            e_max = min(1 - 2 / a, 0.97)  # for some reason, 0.98 gets computationally stuck in barman sometimes, not clear why
-            # SO WE JUST NEGLECT THESE 0.03!!!!
-            if e_max < 0:
-                e_range = [0.]
-            else:
-                # n_eccs = max(1, int(np.round(e_max / d_ecc)))
-                # e_range = np.linspace(0, e_max, n_eccs, endpoint=False)
-                e_range = np.arange(0, e_max, d_ecc)
-                if len(e_range) == 0:
-                    e_range = [0.]
-                else:
-                    e_range += np.random.uniform(0, d_ecc, len(e_range))
-                    e_range = e_range[e_range < e_max]
-            for ecc in e_range:
-                ws = np.linspace(0, 360, n_w, endpoint=False)
-                ws += np.random.uniform(0, (ws[1] - ws[0]), len(ws))
-                for w in ws:
-                    # i_max = np.arccos(1/a)*180/np.pi
-                    i_max = np.arccos(1 / a * (1 + ecc * np.cos((w-90) / 180 * np.pi)) / (1 - ecc ** 2)) * 180 / np.pi
-                    incls = np.arange(90, i_max, -d_inc)  # there will be added a random, so it is ok that the final point is not included
-                    if len(incls) > 1:
-                        incls -= np.random.uniform(0, d_inc, len(incls))
-                        incls = incls[incls >= i_max]
-                    for inc in incls:
-                        rp = 0.02  # assume the shape does not depend on the planet radius, although it is not exactly correct
-                        flux_obs = 1. - tm.flux_par(t=t, params=None, per=period, rp=rp, a=a, inc=inc, ecc=ecc, w=w, u1=u[0], u2=u[1], t0=0,
-                                                    supersample_factor=20, exp_time=tm.dt_lc)
-                        # we built the bank to find only certain durations
-                        len_zeros = len(np.where(np.isclose(flux_obs, 0))[0])  # to make sure transit is not wider than the time
-                        dur = tm.templ_dur_hmax_fun(flux_obs) * tm.dt_lc
-                        if np.linalg.norm(flux_obs) > 0:
-                            n_star_transiting += rp_numbers_total  # if this planet can transit, add all radii (neglect radius impact)
-                            # -> this will be multiplied later by the factor of the parameter space part
-                            # We now do not select suitable for the search because we want it to be blind, so we do not take into
-                            # account the duration of the transit and that it is not covered by our bank. We run everything.
-                            depth_factor = np.max(flux_obs) / rp ** 2
-                            # The following just saves us from running redundant simulations which will not contribute to density
-                            # around the trigger:
-                            rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period,
-                                                                                   depth_factor=depth_factor, snr_min=snr_min_injected,
-                                                                                   snr_max_1=snr_max_1_injected,
-                                                                                   snr_max_full=snr_max_full_injected,
-                                                                                   stellar_radius=self.stellar_radius, units='star')
-                            # min_rp_re.append(rp_re_min)
-                            rps = []
-                            for i in range(len(log2_rp_edges) - 1):
-                                rps = rps + list(2. ** (np.random.uniform(log2_rp_edges[i], log2_rp_edges[i + 1], rp_numbers[i])))
-                            np.random.shuffle(rps)
-                            rps = np.array(rps)
-                            rps = rps[rps >= rp_rs_min]
-                            rps = rps[rps <= rp_rs_max]
-                            # -> smaller radii will just give very small statistics, so it will not be important for the density at trigger
-                            for rp in rps:
-                                injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
-
-        # Saving the injection parameters for all the templates, although we will only need for one template.
-        # Note that the number of injections is different for different templates, and this reflects the template prior.
-        # The number of injections in the run will be then renormalized to match the required number.
-        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                            filename_postfix=all_injection_parameters_filename_postfix, file_format='npy')
-        np.save(file_path, np.array(injection_parameter_sets, dtype=float), allow_pickle=True)
-        # TODO fix these notations
-        # Part of planets that can transit geometrically and were checked so by the simulation:
-        self.transit_prob_factor = transit_prob_factor * n_star_transiting / n_star_simulations  # TODO this is a weird notation
-        # Part of planets that can transit and fall into our search criteria:
-        self.search_prob_factor = transit_prob_factor * len(injection_parameter_sets) / n_star_simulations
-        self.transiting_planets_in_search = np.sum(self.planets_of_radii_in_per_range_one_star) * self.search_prob_factor
-        # planets in universe for these periods per star
-        # from them transiting
-        # from them participating in the search
-        # effective number of planets in search (for histogram normalization)
         selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
                                              replace=True if len(injection_parameter_sets) < n_injections else False)
         self.injection_par_list = list(np.array(injection_parameter_sets, dtype=object)[selection_indices])
 
         self.save_injection_parameters()
         self.pickle_small_attributes()
+
+    # def generate_injection_parameters_old(
+    #         self, n_injections=N_injections_total, add_to_existing_file=False,
+    #         use_special_per_wing=False,
+    #         per_wing_injection_relative=Per_wing_injection_and_slides_relative,
+    #         injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
+    #         # mean_psd_filename_postfix=spip.Default_psd_for_injections_filename_postfix,
+    #         all_injection_parameters_filename_postfix=All_injection_parameters_filename_postfix,
+    #         d_ecc=0.3,
+    #         n_w=5,  #
+    #         d_inc=0.5,  # this is in degrees! and often until 85 is fine
+    #         u=(0.47, 0.23),
+    #         snr_min_injected=5.,
+    #         snr_max_1_injected=8,
+    #         snr_max_full_injected=40,
+    #         n_per=50,
+    #         n_rp=30):
+    #     """
+    #     TODO REWRITE THIS!
+    #     TODO # make sure we really obtain the correct rate, meaning that when we exclude some duration from the bank,
+    #     TODO # it should decrease the overall rate. The full rate of Zhu and Dong include all the planetary parameters,
+    #     TODO # therefore when we use only part of them, our rate should not sum up to the rate of Zhu and Dong.
+    #
+    #
+    #     without a good reason for that, and then the template factor will heavily suppress the result. Maybe I need to account for
+    #     the specific expected snr of this transit to smear the templates much more. Or I need to also inject other shit, but this
+    #     is even more complicated.
+    #
+    #     :param n_injections: Number of injections to generate in the end. The inner number of generations will be defined by the
+    #     ranges of parameters. `n_injections` is just how many will be returned in the end for the best template
+    #     :type n_injections:
+    #     :param per_wing_injection_relative: days to the left and the same to the right used in the time slides in units of period
+    #     :type per_wing_injection_relative: float
+    #     :param n_per: Number of periods within the period wings to generate. Not evenly, they will be sampled randomly.
+    #     :type n_per: int
+    #     :param n_rp: How many radii is tried per one parameter set
+    #     :type n_rp: int
+    #     :param d_ecc: Eccentricity step when calculating how many eccentricities to generate. Needed for uniformity of eccentricity
+    #     density generation to make sure that when the range of possible orbital is smaller, we generate fewer of them.
+    #     :type d_ecc: float
+    #     :param n_w: Number of periastron angles to generate in each loop. Since this is uniform and with no bounds,
+    #     it does not really matter how many of them we produce
+    #     :type n_w: int
+    #     :param d_inc: Inclination step when calculating how many inclinations to generate. Needed for uniformity of inclination
+    #     density generation to make sure that when the range of possible transit inclinations is smaller, we generate fewer of them.
+    #     This is in degrees! and often until 85 is fine
+    #     :type d_inc: float, this is in degrees! and often until 85 is fine
+    #     :param u: Limb darkening coefficients. nothing is too sensitive to them, so they are just fixed
+    #     :type u: [float, float]
+    #     :param snr_min_injected: full snr, not single-transit
+    #     :type snr_min_injected: float
+    #     :param add_to_existing_file:
+    #     :type add_to_existing_file:
+    #     :param injection_parameters_filename_postfix:
+    #     :type injection_parameters_filename_postfix:
+    #     :param all_injection_parameters_filename_postfix:
+    #     :type all_injection_parameters_filename_postfix:
+    #     :return:
+    #     :rtype:
+    #
+    #     (DONE): DO NOT FORGET THE BUG AND LOOK AT THE TRANSIT TIME AND NOT THE BADLY DEFINED PHASE!
+    #     (DONE): THINK ABOUT THE REPETITIONS: WHEN YOU GENERATE ONE P_INJ, YOU USE IT FOR ALL THE OTHER PARAMETERS,
+    #     WHICH IS NOT REALLY FAIR. HOWEVER , IF YOU CHANGE THE THING EVERY TIME, THEN YOU WILL GIVE NOT PROPORTIONAL
+    #     WEIGHTS TO SMALL INCLINATIONS AND BIG INCLINATIONS, LET'S SAY. SO EITHER YOU NEED TO GENERATE MANY OF THEM AND REJECT
+    #     THE NON-TRANSITING ONES, OR SOMETHING ELSE.............OR IT IS OKAY THAT THEY ARE DISCRETE
+    #     :return:
+    #     """
+    #     if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
+    #         self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
+    #
+    #     file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+    #                                         filename_postfix=injection_parameters_filename_postfix, file_format='txt')
+    #     if os.path.exists(file_path) and not add_to_existing_file:
+    #         with open(file_path, 'w'):
+    #             pass  # will delete the contents of the file
+    #
+    #     # templs_prepared_for_cos_fd = np.conj(np.load(os.path.join(Default_template_bank_folder,
+    #     #                                                           Default_templates_fd_for_injections_filename), allow_pickle=True))
+    #     # template_support = 2 * (len(templs_prepared_for_cos_fd[0]) - 1)
+    #     # dt = tm.dt_lc
+    #     # freqs = np.fft.rfftfreq(template_support, d=dt)
+    #     # effective_wf_fd = sim.get_saved_wf_fd(freqs=freqs, dt=tm.dt_lc)
+    #     # # whitened, normalized, fourier domain, conjugated
+    #
+    #     # The parity of the bank is odd, but the length 256 is even, so some tricks with time
+    #     # t = tm.time(t_tot=(template_support + 1) * tm.dt_lc, parity='odd')[1:]
+    #     t = tm.time(t_tot=(256 + 1) * tm.dt_lc, parity='odd')[1:]
+    #     # # -> make it conj for the ease of cosine
+    #     # # The following is needed to calculate the correct cosines from the vectors in the Fourier domain. Only works for even length
+    #     # cosine_coeffs = np.ones(len(templs_prepared_for_cos_fd[0])) * 2
+    #     # cosine_coeffs[0] = 1.
+    #     # cosine_coeffs[-1] = 1.
+    #     # cosine_coeffs = cosine_coeffs / template_support
+    #     # templs_prepared_for_cos_fd = templs_prepared_for_cos_fd * cosine_coeffs
+    #
+    #     self.set_periodicity_search_parameters(force_overwrite=False)
+    #     if not use_special_per_wing:
+    #         if self.periods_in_chunks is None:
+    #             periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
+    #                                                              per_phases_per_chunk=self.per_phases_per_chunk,
+    #                                                              dt=self.klc.dt_days, t_mission=self.klc.T_mission)
+    #         else:
+    #             periods_in_chunks = self.periods_in_chunks
+    #         closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, self.best_per, overlap_bins=0)
+    #         p_min_inj, p_max_inj = closest_chunk[0], closest_chunk[-1]
+    #     else:
+    #         p_max_inj = self.best_per * (1 + per_wing_injection_relative)
+    #         p_min_inj = self.best_per * (1 - per_wing_injection_relative)
+    #     # ################################################################################################
+    #     # OCCURRENCE RATES
+    #     # All the things with the occurrence rates and densities:
+    #     log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
+    #     units_of_re_to_units_of_r_star_factor = 1 / (self.stellar_radius * R_sun_R_e)
+    #     log10_best_per_low = np.log10(p_min_inj)
+    #     log10_best_per_up = np.log10(p_max_inj)
+    #     # log10_period_edges = np.log10(period_edges)
+    #     self.log10_best_period_edges = (log10_best_per_low, log10_best_per_up)
+    #     log2_rp_edges = np.log2(units_of_re_to_units_of_r_star_factor * 2. ** log2_rp_re_edges)
+    #
+    #     # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
+    #     # Number of planets of all radii in log day (per 100 stars):
+    #     # For other periods, it will be checked right now:
+    #     row_upper = len(occurrences_table) - 1
+    #     for i in range(len(log10_period_edges) - 1):
+    #         if (log10_best_per_up > log10_period_edges[i]) and (log10_best_per_up <= log10_period_edges[i + 1]):
+    #             row_upper = i
+    #             break
+    #     row_lower = len(occurrences_table) - 1
+    #     for i in range(len(log10_period_edges) - 1):
+    #         if (log10_best_per_low > log10_period_edges[i]) and (log10_best_per_low <= log10_period_edges[i + 1]):
+    #             row_lower = i
+    #             break
+    #     # planets per one star in this period range for different radii bins:
+    #     # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
+    #     # to be uniform (they are log bins)
+    #     planets_of_radii_in_per_range_one_star = np.zeros(len(occurrences_table[-1]))
+    #     for i in range(row_lower, row_upper + 1):
+    #         row_density = occurrences_table[i] / (log10_period_edges[i + 1] - log10_period_edges[i])
+    #         if i == len(occurrences_table) - 1 and log10_best_per_up > log10_period_edges[len(log10_period_edges) - 1]:
+    #             up_edge = log10_best_per_up
+    #         else:
+    #             up_edge = min(log10_best_per_up, log10_period_edges[i + 1])
+    #         if i == len(occurrences_table) - 1 and log10_best_per_low > log10_period_edges[len(log10_period_edges) - 1]:
+    #             low_edge = log10_best_per_low
+    #         else:
+    #             low_edge = max(log10_best_per_low, log10_period_edges[i])
+    #         planets_of_radii_in_per_range_one_star += row_density * (up_edge - low_edge)
+    #     self.planets_of_radii_in_per_range_one_star = planets_of_radii_in_per_range_one_star
+    #     rp_numbers = (np.ceil(planets_of_radii_in_per_range_one_star /
+    #                           np.sum(planets_of_radii_in_per_range_one_star) * n_rp)).astype(int)
+    #     rp_numbers_total = np.sum(rp_numbers)
+    #
+    #     # ################################################################################################
+    #     # PROBABILITY TO TRANSIT FACTOR
+    #
+    #     # Taking into account the probability to transit.
+    #     # for example, d_ecc means that every simulation accounts for the parameter space of the size d_ecc, and this will
+    #     # only be made once. The allowed parameter space e_allowed will be covered by the proper number of d_ecc.
+    #     # Applying the factor to every planet makes sure we count not one planet but e_allowed/e_possible planets per
+    #     # simulated star. In the end, this will be multiplied by the number of planets existing around stars. With the
+    #     # factor, we get the number of planets existing, transiting and observed. The distinction between transiting
+    #     # and observed exists because we observe not all the durations etc.
+    #     ecc_factor = d_ecc / 1.
+    #     w_factor = 1. / n_w
+    #     i_factor = d_inc / 90.
+    #     transit_prob_factor = ecc_factor * w_factor * i_factor
+    #
+    #     # effective_planet_count = [0. for _ in range(tm.N_templates)]
+    #     # templates_parameter_sets = [[] for _ in range(tm.N_templates)]
+    #     injection_parameter_sets = []
+    #     # injection_durations = []
+    #     n_star_simulations = 0
+    #     n_star_transiting = 0
+    #     for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
+    #         # Attention, this is a linear uniform distribution, although we are using logarithmic occurrences.
+    #         a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (
+    #                 M_sun ** (1 / 3) / R_sun)  # 3rd Kepler law #in units of R
+    #         # a = (G * M /(4*np.pi**2) * (per*24*60*60)**2)**(1/3) / R #3rd Kepler law #in units of R
+    #         # r_min = a*(1-e) -> 2*r_star=a*(1-e_max)
+    #         n_star_simulations += rp_numbers_total
+    #         e_max = min(1 - 2 / a, 0.97)  # for some reason, 0.98 gets computationally stuck in barman sometimes, not clear why
+    #         # SO WE JUST NEGLECT THESE 0.03!!!!
+    #         if e_max < 0:
+    #             e_range = [0.]
+    #         else:
+    #             # n_eccs = max(1, int(np.round(e_max / d_ecc)))
+    #             # e_range = np.linspace(0, e_max, n_eccs, endpoint=False)
+    #             e_range = np.arange(0, e_max, d_ecc)
+    #             if len(e_range) == 0:
+    #                 e_range = [0.]
+    #             else:
+    #                 e_range += np.random.uniform(0, d_ecc, len(e_range))
+    #                 e_range = e_range[e_range < e_max]
+    #         for ecc in e_range:
+    #             ws = np.linspace(0, 360, n_w, endpoint=False)
+    #             ws += np.random.uniform(0, (ws[1] - ws[0]), len(ws))
+    #             for w in ws:
+    #                 # i_max = np.arccos(1/a)*180/np.pi
+    #                 i_max = np.arccos(1 / a * (1 + ecc * np.cos((w-90) / 180 * np.pi)) / (1 - ecc ** 2)) * 180 / np.pi
+    #                 incls = np.arange(90, i_max, -d_inc)  # there will be added a random, so it is ok that the final point is not included
+    #                 if len(incls) > 1:
+    #                     incls -= np.random.uniform(0, d_inc, len(incls))
+    #                     incls = incls[incls >= i_max]
+    #                 for inc in incls:
+    #                     rp = 0.02  # assume the shape does not depend on the planet radius, although it is not exactly correct
+    #                     flux_obs = 1. - tm.flux_par(t=t, params=None, per=period, rp=rp, a=a, inc=inc, ecc=ecc, w=w, u1=u[0], u2=u[1],
+    #                                                 t0=0, supersample_factor=20, exp_time=tm.dt_lc)
+    #                     # we built the bank to find only certain durations
+    #                     len_zeros = len(np.where(np.isclose(flux_obs, 0))[0])  # to make sure transit is not wider than the time
+    #                     dur = tm.templ_dur_hmax_fun(flux_obs) * tm.dt_lc
+    #                     if np.linalg.norm(flux_obs) > 0:
+    #                         n_star_transiting += rp_numbers_total  # if this planet can transit, add all radii (neglect radius impact)
+    #                         # -> this will be multiplied later by the factor of the parameter space part
+    #                         # We now do not select suitable for the search because we want it to be blind, so we do not take into
+    #                         # account the duration of the transit and that it is not covered by our bank. We run everything.
+    #                         depth_factor = np.max(flux_obs) / rp ** 2
+    #                         # The following just saves us from running redundant simulations which will not contribute to density
+    #                         # around the trigger:
+    #                         rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period,
+    #                                                                                depth_factor=depth_factor, snr_min=snr_min_injected,
+    #                                                                                snr_max_1=snr_max_1_injected,
+    #                                                                                snr_max_full=snr_max_full_injected,
+    #                                                                                stellar_radius=self.stellar_radius, units='star')
+    #                         # min_rp_re.append(rp_re_min)
+    #                         rps = []
+    #                         for i in range(len(log2_rp_edges) - 1):
+    #                             rps = rps + list(2. ** (np.random.uniform(log2_rp_edges[i], log2_rp_edges[i + 1], rp_numbers[i])))
+    #                         np.random.shuffle(rps)
+    #                         rps = np.array(rps)
+    #                         rps = rps[rps >= rp_rs_min]
+    #                         rps = rps[rps <= rp_rs_max]
+    #                         # -> smaller radii will just give very small statistics, so it will not be important
+    #                         # for the density at trigger
+    #                         for rp in rps:
+    #                             injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
+    #
+    #     # Saving the injection parameters for all the templates, although we will only need for one template.
+    #     # Note that the number of injections is different for different templates, and this reflects the template prior.
+    #     # The number of injections in the run will be then renormalized to match the required number.
+    #     file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+    #                                         filename_postfix=all_injection_parameters_filename_postfix, file_format='npy')
+    #     np.save(file_path, np.array(injection_parameter_sets, dtype=float), allow_pickle=True)
+    #     # TODO fix these notations
+    #     # Part of planets that can transit geometrically and were checked so by the simulation:
+    #     self.transit_prob_factor = transit_prob_factor * n_star_transiting / n_star_simulations  # TODO this is a weird notation
+    #     # Part of planets that can transit and fall into our search criteria:
+    #     self.search_prob_factor = transit_prob_factor * len(injection_parameter_sets) / n_star_simulations
+    #     self.transiting_planets_in_search = np.sum(self.planets_of_radii_in_per_range_one_star) * self.search_prob_factor
+    #     # planets in universe for these periods per star
+    #     # from them transiting
+    #     # from them participating in the search
+    #     # effective number of planets in search (for histogram normalization)
+    #     selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
+    #                                          replace=True if len(injection_parameter_sets) < n_injections else False)
+    #     self.injection_par_list = list(np.array(injection_parameter_sets, dtype=object)[selection_indices])
+    #
+    #     self.save_injection_parameters()
+    #     self.pickle_small_attributes()
 
     def save_injection_parameters(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
         """
@@ -2200,8 +2271,12 @@ class KeplerTarget(object):
         self.klc.interleave_shifts(delete_fulls=True)
         self.klc.periodicity_search(p_min=None, p_max=None, overlap_period_bins=overlap_period_bins,
                                     force_interleave_shifts=False, periods=periods_to_search)
-        self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False)
-        self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True)
+        try:
+            self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False)
+            self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True)
+        except Exception as exc:
+            report_exception(exception=exc, file_to_append=self.problems_file_location,
+                             title='injections, index='+str(injection_load_parameters_index), info='phase_inj='+str(phase_inj))
         retrieved_stat = self.klc.best_stat
         retrieved_period = self.klc.best_period
         retrieved_first_transit_time = self.klc.best_ftt
@@ -2255,7 +2330,7 @@ class KeplerTarget(object):
              and the recovered best trigger for it to be considered recovered. Defined with respect to the duration
              of the injected transit.
         :type max_phase_mismatch_to_dur: float
-        :param file_path: Local path to the file where the injection-recovery info is stored. Should be file
+        :param file_path: Local path to the file where the injection-recovery info is stored. Should be a file
             created by `run_injection_search`.
         :type file_path: str
         :param injections_filename_postfix: Text added to the target ID in the name of the file saving
@@ -2423,7 +2498,7 @@ class KeplerTarget(object):
             self.retrieve_background()
         if self.retrieved_stat_success is None:
             self.retrieve_injections()
-        if bin_min is None or  bin_max is None:
+        if bin_min is None or bin_max is None:
             bin_min, bin_max = self._get_bin_min_bin_max()
         self.bins_stat_histogram = np.arange(bin_min, bin_max, bin_width)
         bin_min, bin_max = self._get_bin_min_bin_max(in_gaussianized=True)
@@ -2474,47 +2549,48 @@ class KeplerTarget(object):
         self.distr_gauss_stat_h0 = self.distr_gauss_stat_h0 / self.n_slides
 
     def make_injections_histogram(self, bins=None, bin_min=None, bin_max=None):
+        pass
         # TODO!
-        if self.retrieved_stat_success is None:
-            self.retrieve_injections()
-
-        if bins is not None:
-            self.bins_stat_histogram_inj = bins
-            self.bins_gauss_stat_histogram_inj = bins
-        else:
-            if self.bins_stat_histogram is not None:
-                self.bins_stat_histogram_inj = self.bins_stat_histogram
-            else:
-                bin_mi, bin_ma = self._get_bin_min_bin_max()
-                if bin_min is None:
-                    bin_min = bin_mi
-                if bin_max is None:
-                    bin_max = bin_ma
-                self.bins_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
-
-            if self.bins_gauss_stat_histogram is not None:
-                self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
-            else:
-                bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
-                if bin_min is None:
-                    bin_min = bin_mi
-                if bin_max is None:
-                    bin_max = bin_ma
-                self.bins_gauss_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
-
-        self.distr_stat_inj_all = np.histogram(np.array(self.retrieved_stat_bad + self.retrieved_stat_success),
-                                               bins=self.bins_stat_histogram_inj)[0]
-        self.distr_stat_inj_all = (self.distr_stat_inj_all / self.number_of_injections * self.search_prob_factor)
-        self.distr_stat_inj_success = np.histogram(np.array(self.retrieved_stat_success), bins=self.bins_stat_histogram_inj)[0]
-        self.distr_stat_inj_success = (self.distr_stat_inj_success / self.number_of_injections * self.search_prob_factor)
-
-        # same for gaussianized
-        self.distr_gauss_stat_inj_all = np.histogram(np.array(self.retrieved_gauss_stat_bad + self.retrieved_gauss_stat_success),
-                                               bins=self.bins_gauss_stat_histogram_inj)[0]
-        self.distr_gauss_stat_inj_all = (self.distr_gauss_stat_inj_all / self.number_of_injections * self.search_prob_factor)
-        self.distr_gauss_stat_inj_success = np.histogram(np.array(self.retrieved_gauss_stat_success),
-                                                         bins=self.bins_gauss_stat_histogram_inj)[0]
-        self.distr_gauss_stat_inj_success = (self.distr_gauss_stat_inj_success / self.number_of_injections * self.search_prob_factor)
+        # if self.retrieved_stat_success is None:
+        #     self.retrieve_injections()
+        #
+        # if bins is not None:
+        #     self.bins_stat_histogram_inj = bins
+        #     self.bins_gauss_stat_histogram_inj = bins
+        # else:
+        #     if self.bins_stat_histogram is not None:
+        #         self.bins_stat_histogram_inj = self.bins_stat_histogram
+        #     else:
+        #         bin_mi, bin_ma = self._get_bin_min_bin_max()
+        #         if bin_min is None:
+        #             bin_min = bin_mi
+        #         if bin_max is None:
+        #             bin_max = bin_ma
+        #         self.bins_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+        #
+        #     if self.bins_gauss_stat_histogram is not None:
+        #         self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
+        #     else:
+        #         bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
+        #         if bin_min is None:
+        #             bin_min = bin_mi
+        #         if bin_max is None:
+        #             bin_max = bin_ma
+        #         self.bins_gauss_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+        #
+        # self.distr_stat_inj_all = np.histogram(np.array(self.retrieved_stat_bad + self.retrieved_stat_success),
+        #                                        bins=self.bins_stat_histogram_inj)[0]
+        # self.distr_stat_inj_all = (self.distr_stat_inj_all / self.number_of_injections * self.search_prob_factor)
+        # self.distr_stat_inj_success = np.histogram(np.array(self.retrieved_stat_success), bins=self.bins_stat_histogram_inj)[0]
+        # self.distr_stat_inj_success = (self.distr_stat_inj_success / self.number_of_injections * self.search_prob_factor)
+        #
+        # # same for gaussianized
+        # self.distr_gauss_stat_inj_all = np.histogram(np.array(self.retrieved_gauss_stat_bad + self.retrieved_gauss_stat_success),
+        #                                        bins=self.bins_gauss_stat_histogram_inj)[0]
+        # self.distr_gauss_stat_inj_all = (self.distr_gauss_stat_inj_all / self.number_of_injections * self.search_prob_factor)
+        # self.distr_gauss_stat_inj_success = np.histogram(np.array(self.retrieved_gauss_stat_success),
+        #                                                  bins=self.bins_gauss_stat_histogram_inj)[0]
+        # self.distr_gauss_stat_inj_success = (self.distr_gauss_stat_inj_success / self.number_of_injections * self.search_prob_factor)
 
     def calculate_significance(self, remake_histograms=True):
         # TODO!

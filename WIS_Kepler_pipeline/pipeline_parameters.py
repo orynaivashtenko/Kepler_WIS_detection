@@ -99,7 +99,7 @@ def get_occurrence_table_enlarged():
 #     """
 #     Per one star
 #     :param stellar_radius:
-#     :type stellar_radius: floar, in solar radii
+#     :type stellar_radius: float, in solar radii
 #     :param per_days: desired period or periods in days
 #     :type per_days: ndarray(float) or float
 #     :param rp_rearth: desired planetary radius in Earth radii. if None, `rp_rstar` will be used
@@ -160,7 +160,7 @@ Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune
 # P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
 # -> this one used to be when I had 25 templates. Now I have more, so we must increase
 # P_chunks_search = 1000  # 1440
-Per_phases_per_chunk = 1200000  # 660000
+Per_phases_per_chunk = 1500000  # 660000
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
@@ -194,7 +194,8 @@ Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a f
 Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
 Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
-Run_name = 'run_9'
+Problems_folder = None
+Run_name = 'run_10'
 
 Kepler_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/KeplerFiles'
 
@@ -216,6 +217,7 @@ if Working_place == 'WEXAC':
     Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
+    Problems_folder = '/home/labs/barakz/orynai/' + str(Run_name) + '/outputs_stars'
 
 Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
 Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
@@ -239,6 +241,7 @@ if force_data_output_locations_creation:
 Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'
 
 Summary_target_txt_filename_postfix = 'target_summary.txt'
+Problems_target_txt_filename_postfix = 'problems.txt'
 Dict_target_txt_filename_postfix = 'target_class_dict.txt'
 Pickle_target_small_attributes_filename_postfix = 'target_class_small_attributes.pickle'
 Conditioned_data_filename_postfix = 'conditioned_data'
