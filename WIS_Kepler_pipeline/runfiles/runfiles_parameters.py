@@ -23,7 +23,8 @@ Star_full_output_filename_postfix = 'full_output.txt'
 
 Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_list.txt'
 
-Queue = 'physics-short'
+# Queue = 'physics-short'
+Queue = 'risk'
 Mem_per_job_gb = '3.9'
 
 Slides_runfile_filename = 'timeslides_runfile.py'

@@ -4,16 +4,18 @@ import os
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
-from pipeline_parameters import *
+# from pipeline_parameters import *
 from runfiles.runfiles_parameters import *
 import file_operations as fop
-tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/tids_to_run_first_timeslides_runs_6_7_pastro_0_9.txt'
-                  # '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_had_problems.txt'
-                  # '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_lacked_space.txt'
+tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/tids_to_run_first_timeslides_runs_6_7.txt'
+# '/home/labs/barakz/Collaboration-Kepler/orynai/tids_to_run_first_timeslides_runs_6_7_pastro_0_9.txt'
+# '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_had_problems.txt'
+# '/home/labs/barakz/Collaboration-Kepler/orynai/tid_that_lacked_space.txt'
 
 with open(tid_to_run_file, 'r') as ttrf:
     target_ids = ttrf.readlines()
 target_ids = [tid.strip() for tid in target_ids]
+target_ids = target_ids[:300]
 
 for target_id in target_ids:
     fop.write_job_file(code_file=None,
@@ -59,3 +61,4 @@ for target_id in target_ids:
 #                            other_args=[['target_id', target_id]])
 
 # bsub -q physics-short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/all_stars_main_search_job_creator.py
+# bsub -q risk /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/all_stars_main_search_job_creator.py

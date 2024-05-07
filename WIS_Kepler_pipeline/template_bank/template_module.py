@@ -11,11 +11,12 @@ import batman
 import copy
 import os
 import auxiliary_functions as af
+from utils import whiten_vector
 from pipeline_parameters import Default_template_bank_folder, Default_templates_filename, \
     Default_templates_shifts_filename, Default_shifts_filename, Default_durations_filename, Default_indices_of_templates_filename, \
     Default_templates_of_indices_filename, Default_template_params_filename, Precomputed_tables_location, \
     Log_occurrences_templates_periods_m13r_per_edges_filename, Log_second_derivs_cos2_shifts_templates_filename, \
-    Log_cos2_derivs_templates_filename, Log_template_prior_m13r_per_edges_filename
+    Log_cos2_derivs_templates_filename, Log_template_prior_m13r_per_edges_filename, Limb_darkening_array_file, Default_limb_darkening_coefs
 
 # dt_lc = 1765.5 / (60 * 60 * 24)  # days long cadence interval
 dt_lc = 0.02043368  # almost the same. measured from data
@@ -28,8 +29,6 @@ Indices_of_templates = np.load(os.path.join(Default_template_bank_folder, Defaul
 Templates_of_indices = np.load(os.path.join(Default_template_bank_folder, Default_templates_of_indices_filename), allow_pickle=True)
 N_templates = len(Indices_of_templates)
 Max_cos = 0.97  # was used in the bank generation. If cos was smaller, it was added to the bank
-Limb_darkening_coefs_sun = (0.47, 0.23)
-
 
 def get_default_templates_params(folder=Default_template_bank_folder, filename=Default_template_params_filename):
     # m_1_3_r_s, period, a, inc, ecc, w, u1, u2
@@ -729,7 +728,8 @@ def normalize(x, method='norm', t=None):
         raise ValueError('Unrecognized `method`!')
 
 
-def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=90., u1=0.47, u2=0.23, t0=0,
+def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=90.,
+             u1=Default_limb_darkening_coefs[0], u2=Default_limb_darkening_coefs[1], t0=0,
              supersample_factor=20, exp_time=None):
     """
     Generates a light curve with batman package from the specified parameters.
@@ -807,7 +807,9 @@ def flux_par(t=None, params=None, per=365., rp=0.01, a=215., inc=90., ecc=0., w=
     return flux
 
 
-def make_template_from_pars(L, per, a, inc, ecc, w, u1=0.47, u2=0.23, template_support=256, min_cos_shift=0.93, n_shifts=3, rp=0.02,
+def make_template_from_pars(L, per, a, inc, ecc, w,
+                            u1=Default_limb_darkening_coefs[0], u2=Default_limb_darkening_coefs[1],
+                            template_support=256, min_cos_shift=0.93, n_shifts=3, rp=0.02,
                             enforce_symmetrization=True, dt=dt_lc, effective_wf_fd=None):
     shift_step = dt / n_shifts
     if effective_wf_fd is None:
@@ -956,6 +958,119 @@ def calculate_depth_factor(params):
     if not was_many_params:
         depth_factors = depth_factors[0]
     return depth_factors
+
+
+def get_rp_inj(snr_req, wf_fd, n_transits, per_inj=300., m_1_3_r_s=1, inc_inj=90., ecc_inj=0, w_inj=90.,
+               u1_inj=Default_limb_darkening_coefs[0], u2_inj=Default_limb_darkening_coefs[1],
+               nperseg_psd=128, include_detrending=True, dt=dt_lc):
+    """
+    Returns the planetary raduis that needs to be injected to the data with the PSD corresponding to a
+    whitening filter `wf_fd` and with `n_transits` transits.
+    :param snr_req: Required SNR of the entire planet (not squared). The required SNR is the SNR expected from the pipeline assuming
+        that the PSD will be measured and the detrending will be (maybe) done.
+    :type snr_req: float
+    :param wf_fd: whitening filter in the Fourier domain
+    :type wf_fd: numpy.ndarray of float
+    :param n_transits: required number of transits
+    :type n_transits: int
+    :param per_inj: Injected perios, days. Is used to determine the shape of the transit, and not the number of them.
+    :type per_inj: float
+    :param m_1_3_r_s: Mass of the star (in units of solar masses) to the power 1/3 divided by the radius of the
+        star (in units of solar radii)
+    :type m_1_3_r_s: float
+    :param inc_inj: Required inclination, degrees
+    :type inc_inj: float
+    :param ecc_inj: Required eccentricity
+    :type ecc_inj: float
+    :param w_inj: Required periastron abgle, degrees
+    :type w_inj: float
+    :param u1_inj: Required first limb darkening coefficient
+    :type u1_inj: float
+    :param u2_inj: Required second limb darkening coefficient
+    :type u2_inj: float
+    :param nperseg_psd: Slice size that will be used to measure the PSD. Is needed to zero all the expected SNR in the low
+        frequencies which are not resolved by this slice.
+    :type nperseg_psd: int
+    :param include_detrending: Whether to take into account that detrending will be done to the data, so that all the frequencies
+        which are not resolved by the PSD measurement will have zero power. This will increase the needed radius for a given expected SNR.
+    :type include_detrending: bool
+    :param dt: Time step, days
+    :type dt: float
+    :return: rp_inj, injected planet radius in units of stellar radii
+    :rtype: float
+    """
+    rp_generation = 0.02
+    from pipeline_parameters import M_sun, G, R_sun
+    a_inj = (G / (4 * np.pi ** 2) * (per_inj * 24 * 60 * 60) ** 2) ** (1 / 3) * m_1_3_r_s * (M_sun ** (1 / 3) / R_sun)
+
+    flux_model = 1 - flux_par(per=per_inj, rp=rp_generation, a=a_inj, inc=inc_inj, ecc=ecc_inj, w=w_inj, u1=u1_inj, u2=u2_inj)
+    depth_factor = np.max(flux_model) / rp_generation ** 2
+
+    support = 2 * (len(wf_fd) - 1)
+    if include_detrending:
+        freqs_wf_fd = np.fft.rfftfreq(support, d=dt)
+        freq_psd_resolution = 1 / (nperseg_psd * dt)
+        wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
+
+    flux_model = flux_model / np.nanmax(flux_model) * depth_factor
+    flux_model = whiten_vector(flux_model, wf_fd=wf_fd)
+    # snr_predic = np.linalg.norm(flux) * n_transits_max ** 0.5 * (rp_rs ** 2)
+    rp_inj = (snr_req / (np.linalg.norm(flux_model) * n_transits ** 0.5)) ** 0.5
+    return rp_inj
+
+
+def make_limb_darkening_coefficients_array(limb_darkening_table_file, save_file=False):
+    """
+    Opens the Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)
+    and returns the array of [Teff,logg,M/H,a,b], where a, b are the u1, u2 quadratic limb darkening coeffs.
+    #Limb_darkening_full_table_file = '/Collaboration-Kepler/KeplerFiles/limb_darkening_kepler_table.txt'
+    :param limb_darkening_table_file: The full path to the txt table with coefficietns
+    :type limb_darkening_table_file: str
+    :return: The array of relevant parameters and the limb darlening quadratic coefficients.
+    :rtype: numpy.ndarray
+    """
+    with open(limb_darkening_table_file, 'r') as fil:
+        # 'Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)'
+        lines = fil.readlines()
+        # Teff|logg|  M/H|      u|      a|      b|     c2|     c3|     c4|     a1|     a2|     a3|     a4
+    lines = [line.strip() for line in lines]
+    lines = [line for line in lines if line[0].isnumeric()]
+    lines = [line.split('|') for line in lines]
+    lines = [[line[0], line[1], line[2], line[4], line[5]] for line in lines]
+    # [Teff,logg,M/H,a,b]
+    lines = [[float(e.strip()) for e in line] for line in lines]
+    lines = np.array(lines)
+    lines = lines[lines[:, 0] != 1.]
+    if save_file:
+        np.save(os.path.join(os.path.dirname(limb_darkening_table_file)), 'limb_darkening_kepler_array.npy')
+    return lines
+
+
+def get_limb_darkening_coefs(teff, logg, metallicity, limb_darkening_array_file=Limb_darkening_array_file,
+                             default=Default_limb_darkening_coefs):
+    if (teff is None) or (logg is None) or (metallicity is None):
+        return default
+    if np.isnan(np.array([teff, logg, metallicity])).any():
+        return default
+
+    teff_s, logg_s, meh_s, a_s, b_s = np.load(limb_darkening_array_file, allow_pickle=True).T
+
+    meh_set = np.array([-5.0, -4.5, -4.0, -3.5, -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.5, 1.0])
+    logg_set = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
+    teff_set = np.array([3500.0, 3750.0, 4000.0, 4250.0, 4500.0, 4750.0, 5000.0, 5250.0, 5500.0, 5750.0, 6000.0, 6250.0, 6500.0, 6750.0,
+                         7000.0, 7250.0, 7500.0, 7750.0, 8000.0, 8500.0, 8750.0, 9000.0, 9500.0, 9750.0, 10000.0, 10500.0, 11000.0, 11500.0,
+                         12000.0, 12500.0, 13000.0, 14000.0, 15000.0, 16000.0, 17000.0, 18000.0, 19000.0, 20000.0, 21000.0, 22000.0,
+                         23000.0,
+                         24000.0, 25000.0, 26000.0, 27000.0, 28000.0, 29000.0, 30000.0, 31000.0, 32000.0, 33000.0, 34000.0, 35000.0,
+                         37500.0,
+                         40000.0, 42500.0, 45000.0, 47500.0, 50000.0])
+    metallicity_table = meh_set[np.argmin(np.abs(meh_set - metallicity))]
+    logg_table = logg_set[np.argmin(np.abs(logg_set - logg))]
+    teff_table = teff_set[np.argmin(np.abs(teff_set - teff))]
+    index = np.where((teff_s == teff_table) & (logg_s == logg_table) & (meh_s == metallicity_table))[0]
+    index = index[0]
+    return a_s[index], b_s[index]
+
 
 
 """

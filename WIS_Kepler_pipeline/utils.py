@@ -46,6 +46,13 @@ def dec_to_bin(num, return_list=False, return_str=False):
         return int(''.join([str(b) for b in bits[::-1]]))
 
 
+def get_uniform_random_sequence(low, high, n):
+    res = np.linspace(low, high, n, endpoint=False)
+    dx = res[1] - res[0]
+    res = res + np.random.uniform(low=0, high=dx, size=n)
+    return res
+
+
 def cos_vec(h1, h2, wf_fd=None, freqmask=None):
     """
     Calculate cosine angle between two vectors h1, h2, which are given in the time domain
@@ -2463,6 +2470,7 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target
             new_data[it[0]: it[1]] = data[ip[0]: ip[1]]
         return new_data
 
+# ################################################################################################
 
 def replace_if_deviating(vector, replacement, tester=None, mindev=1, minwid=1):
     sign = np.sign(mindev)

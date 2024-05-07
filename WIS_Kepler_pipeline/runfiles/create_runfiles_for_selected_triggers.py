@@ -39,41 +39,44 @@ N_slides_total_for_now = N_slides_total
 #     trig_ids = ttrf.readlines()
 # trig_ids = [tid.strip() for tid in trig_ids]
 
-tid_to_run_file = '/home/labs/barakz/orynai/run_9/threshold_crossing_kid_info.txt'
-# tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/triggers_to_run_injections_run_8_4.txt'
-with open(tid_to_run_file, 'r') as ttrf:
-    trig_ids = ttrf.readlines()
-trig_ids = [tid.split()[0] for tid in trig_ids]
+# tid_to_run_file = '/home/labs/barakz/orynai/run_10/threshold_crossing_kid_info.txt'
+# # tid_to_run_file = '/home/labs/barakz/Collaboration-Kepler/orynai/triggers_to_run_injections_run_8_4.txt'
+# with open(tid_to_run_file, 'r') as ttrf:
+#     trig_ids = ttrf.readlines()
+# trig_ids = [tid.split()[0] for tid in trig_ids]
+
+trig_ids = ['011285206', '004179080', '005648820', '011340623']
 
 # queue = 'new-short'
-queues = ['physics-short', 'new-short']
+# queues = ['physics-short', 'new-short']
+queues = ['risk']
 
-Output_location_wexac = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_9'
+Output_location_wexac = '/home/labs/barakz/Collaboration-Kepler/orynai/output_run_10'
 # noinspection DuplicatedCode
 for itid, tid in enumerate(trig_ids):
-    queue = queues[itid % 2]
-    for i in range(int(N_slides_total_for_now // N_slides_chunk)  # how many times we need to repeat timeslides
-                   + int(bool(N_slides_total_for_now % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
-        # noinspection DuplicatedCode
-        fop.write_job_file(code_file=None,
-                           code_filename=Slides_runfile_filename,
-                           code_file_dir=Run_files_folder,
-                           jobname=Slides_job_filename_prefix + '_' + tid + '.bsub',
-                           job_file=None,
-                           job_filename=Slides_job_filename_prefix + '_' + tid + '_' + str(i) + '.bsub',
-                           job_file_dir=Job_files_folder,
-                           queue=queue,
-                           mem_per_job_gb=Mem_per_job_gb,
-                           array_indices=None,
-                           output_file=None,
-                           output_filename=Slides_output_filename_prefix + '_' + tid + '.out',
-                           output_file_dir=Output_files_folder,
-                           error_file=None,
-                           error_filename=Slides_error_filename_prefix + '_' + tid + '.out',
-                           error_file_dir=Error_files_folder,
-                           output_error_overwrite=False,
-                           arg_jobind=False,
-                           other_args=[['target_id', tid]])
+    queue = queues[0]  # [itid % 2]
+    # for i in range(int(N_slides_total_for_now // N_slides_chunk)  # how many times we need to repeat timeslides
+    #                + int(bool(N_slides_total_for_now % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
+    #     # noinspection DuplicatedCode
+    #     fop.write_job_file(code_file=None,
+    #                        code_filename=Slides_runfile_filename,
+    #                        code_file_dir=Run_files_folder,
+    #                        jobname=Slides_job_filename_prefix + '_' + tid + '.bsub',
+    #                        job_file=None,
+    #                        job_filename=Slides_job_filename_prefix + '_' + tid + '_' + str(i) + '.bsub',
+    #                        job_file_dir=Job_files_folder,
+    #                        queue=queue,
+    #                        mem_per_job_gb=Mem_per_job_gb,
+    #                        array_indices=None,
+    #                        output_file=None,
+    #                        output_filename=Slides_output_filename_prefix + '_' + tid + '.out',
+    #                        output_file_dir=Output_files_folder,
+    #                        error_file=None,
+    #                        error_filename=Slides_error_filename_prefix + '_' + tid + '.out',
+    #                        error_file_dir=Error_files_folder,
+    #                        output_error_overwrite=False,
+    #                        arg_jobind=False,
+    #                        other_args=[['target_id', tid]])
 
     # f_sl = [ff for ff in os.listdir(os.path.join('/home/labs/barakz/Collaboration-Kepler/orynai/output_run_8', tid[:4], tid)) if 'mes_slides' in ff]
     #
@@ -136,28 +139,28 @@ for itid, tid in enumerate(trig_ids):
     #                    arg_jobind=False,
     #                    other_args=[['target_id', tid]])
 
-    # for i in np.arange(int(N_injections_total // N_injections_chunk)  # how many times we need to repeat
-    #                    + int(bool(N_injections_total % N_injections_chunk))):
-    #     queue = 'physics-short'  # queues[i % 2]
-    #     fop.write_job_file(code_file=None,
-    #                        code_filename=Injection_detection_runfile_filename,
-    #                        code_file_dir=Run_files_folder,
-    #                        jobname=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
-    #                        job_file=None,
-    #                        job_filename=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
-    #                        job_file_dir=Job_files_folder,
-    #                        queue=queue,
-    #                        mem_per_job_gb=Mem_per_job_gb,
-    #                        array_indices=None,
-    #                        output_file=None,
-    #                        output_filename=Injection_detection_output_filename_prefix+'_'+tid+'.out',
-    #                        output_file_dir=Output_files_folder,
-    #                        error_file=None,
-    #                        error_filename=Injection_detection_error_filename_prefix+'_'+tid+'.out',
-    #                        error_file_dir=Error_files_folder,
-    #                        output_error_overwrite=False,
-    #                        arg_jobind=False,
-    #                        other_args=[['target_id', tid], ['first_injection_load_parameters_index', i]])
+    for i in np.arange(int(N_injections_total // N_injections_chunk)  # how many times we need to repeat
+                       + int(bool(N_injections_total % N_injections_chunk))):
+        queue = queues[0]
+        fop.write_job_file(code_file=None,
+                           code_filename=Injection_detection_runfile_filename,
+                           code_file_dir=Run_files_folder,
+                           jobname=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
+                           job_file=None,
+                           job_filename=Injection_detection_job_filename_prefix+'_'+tid+'_'+str(i)+'.bsub',
+                           job_file_dir=Job_files_folder,
+                           queue=queue,
+                           mem_per_job_gb=Mem_per_job_gb,
+                           array_indices=None,
+                           output_file=None,
+                           output_filename=Injection_detection_output_filename_prefix+'_'+tid+'.out',
+                           output_file_dir=Output_files_folder,
+                           error_file=None,
+                           error_filename=Injection_detection_error_filename_prefix+'_'+tid+'.out',
+                           error_file_dir=Error_files_folder,
+                           output_error_overwrite=False,
+                           arg_jobind=False,
+                           other_args=[['target_id', tid], ['first_injection_load_parameters_index', i]])
 
     # if len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid)) if Injections_filename_postfix in ff]) > 0:
     #     # noinspection DuplicatedCode
@@ -207,3 +210,4 @@ for itid, tid in enumerate(trig_ids):
 # bsub -q new-short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_runfiles_for_selected_triggers.py
 # bsub -q physics-short -sp 100 /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_runfiles_for_selected_triggers.py
 # bsub -q physics-short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_runfiles_for_selected_triggers.py
+# bsub -q risk -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_runfiles_for_selected_triggers.py

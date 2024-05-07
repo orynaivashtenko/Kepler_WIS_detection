@@ -12,6 +12,7 @@ au = 1.495978707e13  # cm #astronomical unit
 M_sun = 1.989e33  # g #solar mass
 G = 6.67430e-8  # dyn⋅cm2/g2 #gravitational constant
 R_sun_R_e = 109.076  # sun radii to Earth radii
+Default_limb_darkening_coefs = (0.47, 0.23)
 
 Pipeline_folder = os.path.dirname(__file__)
 force_data_output_locations_creation = False
@@ -170,7 +171,7 @@ Stat_candidate_search = 40  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
 N_slides_total = 50000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
-N_slides_chunk = 40  # in run 8, it was 1000, but now I run for the full bank, so it takes time
+N_slides_chunk = 200
 N_injections_total = 10000  # total number of all injections (all radii and periods etc.)
 N_injections_chunk = 40  # the previous one was perhaps run_8, but now we have full bank
 # N_injections_chunk = 20  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
@@ -181,7 +182,7 @@ Per_wing_injection_and_slides_absolute = 2 / 50  # Range to the left and to the 
 N_best_saving_slides = 3  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 # Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
-Max_phase_mismatch_to_dur = 0.5  # Maximal relative phase difference for defining successful injections
+Max_phase_mismatch_to_dur = 1.5  # Maximal phase difference in units of template duration for defining successful injections
 Default_min_plot_stat = 10
 Default_max_plot_stat = 140
 
@@ -223,6 +224,7 @@ Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
 Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
 Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
 Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
+Limb_darkening_array_file = os.path.join(Kepler_files_folder, 'limb_darkening_kepler_array.npy')
 
 # Gaia_kepler_file = '/home/orynai/Kepler_Notebooks/kepler_dr3_good.fits'
 # Default_koi_file = '/home/orynai/Kepler_Notebooks/cumulative_2022.05.30_11.44.28.csv'
@@ -253,10 +255,6 @@ All_injection_parameters_filename_postfix = 'all_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'
 # these stupid names are because of the search which checks `in`, and I need one file not to be in another one
 Slides_res_filename_postfix = 'scramble_res_scramble'
-Slides_stats_filename_postfix = 'scramble_stats_scramble'  # 'slides_mes_slides'
-Slides_pers_filename_postfix = 'scramble_pers_scramble'  # 'slides_pers_slides'
-Slides_first_times_filename_postfix = 'scramble_first_times_scramble'  # 'slides_first_times_slides'
-Slides_gauss_stats_filename_postfix = 'scramble_gauss_stats_scramble'
 
 Histogram_stats_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
 

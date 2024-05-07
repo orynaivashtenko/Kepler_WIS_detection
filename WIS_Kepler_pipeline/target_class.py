@@ -18,7 +18,7 @@ import auxiliary_functions as af
 import utils as ut
 import time
 from pipeline_parameters import *  # all the parameters, physical constants, occurrence table
-from file_operations import report_exception
+from file_operations import report_exception, Locker
 # import warnings
 # warnings.filterwarnings("ignore")
 np.set_printoptions(threshold=1000, linewidth=10000)
@@ -109,6 +109,7 @@ class KeplerTarget(object):
                  koi_dict_file=Koi_dict_file,
                  ttv_dict_file=Ttv_dict_file,
                  villanova_dict_file=Villanova_dict_file,
+                 limb_darkening_array_file=Limb_darkening_array_file,
                  overwrite_location_parameters_by_unpickle=False,
                  allow_output_folder_creation=True,
                  allow_data_folder_creation=True,
@@ -179,6 +180,8 @@ class KeplerTarget(object):
         """Where the known TTV info file is saved"""
         self.villanova_dict_file = villanova_dict_file
         """Where the Villanova Kepler eclipsing binary catalog file is saved"""
+        self.limb_darkening_array_file = limb_darkening_array_file
+        """Where the limb darkening coefficients table is saved"""
 
         # ############################################################################################################
         # Target properties from the catalogs:
@@ -198,6 +201,10 @@ class KeplerTarget(object):
         """Stellar color. Should be obtained from GAIA if exists"""
         self.teff = None
         """Stellar effective temperature in Kelvins. Should be obtained from GAIA if exists"""
+        self.metallicity = None
+        """Stellar [Fe/H], which is used as [Me/H]"""
+        self.logg = None
+        """Stellar log g from Gaia"""
         self.ra = None
         """Stellar right ascention coordinate. Should be obtained from GAIA if exists"""
         self.dec = None
@@ -212,6 +219,9 @@ class KeplerTarget(object):
         """GAIA flag of variable star. Should be obtained from GAIA if exists"""
         self.m_1_3_r_s = None  # M**(1/3)*R[in M_sun and R_sun]
         """Mass of the star in units of solar mass divided by the radius of the star to the power 1/3"""
+        self.limb_darkening_coefs = None
+        """u1, u2, the quadratic law limb darkening coefficients, approximately defined from 
+           stellar temperature, metallicity and log gravity"""
 
         # ############################################################################################################
         # Data-processing-related facts:
@@ -481,7 +491,6 @@ class KeplerTarget(object):
 
         self.failures = ''  # if something bad happens, we will write it here
         """Records problems in data or processing which appeared during the run"""
-        self.errors = ''
         # TODO: this field did not work in the catalog!!!
         self.is_good_for_processing = True
 
@@ -544,25 +553,26 @@ class KeplerTarget(object):
         file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
                                             filename_postfix=pickle_small_attributes_filename_postfix, file_format='pickle')
 
-        if not overwrite_location_parameters:
-            output_location = self.output_location
-        data_location = self.data_location
-        gaia_kepler_file_path = self.gaia_kepler_file
-        koi_dict_file = self.koi_dict_file
-        ttv_dict_file = self.ttv_dict_file
-        villanova_dict_file = self.villanova_dict_file
+        old_output_location = self.output_location
+        old_data_location = self.data_location
+        old_gaia_kepler_file_path = self.gaia_kepler_file
+        old_koi_dict_file = self.koi_dict_file
+        old_ttv_dict_file = self.ttv_dict_file
+        old_villanova_dict_file = self.villanova_dict_file
+        old_limb_darkening_array_file = self.limb_darkening_array_file
 
         with open(file_path, 'rb') as pickle_file:
             dict1 = pickle.load(pickle_file)
             self.__dict__.update(dict1.items())
 
         if not overwrite_location_parameters:
-            self.data_location = data_location
-            self.output_location = output_location
-            self.gaia_kepler_file = gaia_kepler_file_path
-            self.koi_dict_file = koi_dict_file
-            self.ttv_dict_file = ttv_dict_file
-            self.villanova_dict_file = villanova_dict_file
+            self.data_location = old_data_location
+            self.output_location = old_output_location
+            self.gaia_kepler_file = old_gaia_kepler_file_path
+            self.koi_dict_file = old_koi_dict_file
+            self.ttv_dict_file = old_ttv_dict_file
+            self.villanova_dict_file = old_villanova_dict_file
+            self.limb_darkening_array_file = old_limb_darkening_array_file
 
     def get_fields_from_gaia(self, gaia_file_path=None):
         """
@@ -585,6 +595,8 @@ class KeplerTarget(object):
             self.phot_g_mean_mag = gaia_file[1].data['phot_g_mean_mag'][index]
             self.parallax = (gaia_file[1].data['parallax'])[index]  # mas # parallaxes (needed for absolute magnitude)
             self.phot_g_mean_mag = (gaia_file[1].data['phot_g_mean_mag'])[index]  # photometric g magnitudes
+            self.metallicity = (gaia_file[1].data['feh'])[index]  # stellar metallicity, [Fe/H]
+            self.logg = (gaia_file[1].data['logg'])[index]  # stellar log gravity
             if self.parallax < 0:
                 self.failures += ' Parallax value negative;'
                 self.gaia_abs_gmag = None
@@ -609,6 +621,8 @@ class KeplerTarget(object):
             else:
                 m_1_3_r_s = self.stellar_mass ** (1 / 3) / self.stellar_radius
             self.m_1_3_r_s = m_1_3_r_s  # M**(1/3)*R[in M_sun and R_sun]
+            self.limb_darkening_coefs = tm.get_limb_darkening_coefs(teff=self.teff, logg=self.logg, metallicity=self.metallicity,
+                                                                    limb_darkening_array_file=self.limb_darkening_array_file)
 
             for key in self.star_attributes:
                 try:
@@ -929,11 +943,15 @@ class KeplerTarget(object):
         snr_exp = np.linalg.norm(flux_model) * n_transits_est ** 0.5 * (rp_rs ** 2)
         return snr_exp
 
-    def get_rp_inj_from_snr(self, snr_req, per_inj=300., m_1_3_r_s=None, inc_inj=90., ecc_inj=0, w_inj=90., u1_inj=0.47, u2_inj=0.23,
+    def get_rp_inj_from_snr(self, snr_req, per_inj=300., m_1_3_r_s=None, inc_inj=90., ecc_inj=0, w_inj=90., u1_inj=None, u2_inj=None,
                             nperseg_psd=128, include_detrending=True,
                             conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
         if m_1_3_r_s is None:
             m_1_3_r_s = self.m_1_3_r_s
+        if u1_inj is None or u2_inj is None:
+            u1_inj, u2_inj = self.limb_darkening_coefs
+        if u1_inj is None or u2_inj is None:
+            u1_inj, u2_inj = Default_limb_darkening_coefs
         wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
         n_quarters = len(wf_fds)
         wf_fd = np.mean(np.array(wf_fds) ** 2, axis=0) ** 0.5
@@ -1199,27 +1217,12 @@ class KeplerTarget(object):
                                                              filename_postfix=conditioned_data_filename_postfix, file_format='npy')
         if self.klc.statistics_full is None or not hasattr(self.klc, 'statistics_full'):
             if os.path.exists(file_path_connected_data):
-                if not hasattr(self, "errors"):
-                    self.errors = ''
                 try:
-                    self.klc.load_connected_stats(file_path=file_path_connected_data)
-                except (EOFError, IOError, OSError, ValueError) as error:
-                    self.errors += str(type(error)) + ' ' + str(error) + '\n'
-                    success = False
-                    rep_err = ''
-                    np.random.seed(None)
-                    # -> it can be that another process is trying to open the same file, so we will wait
-                    for _ in range(3):
-                        time.sleep(1. + np.random.rand() * 3.)
-                        try:
-                            self.klc.load_connected_stats(file_path=file_path_connected_data)
-                            success = True
-                        except (EOFError, IOError, OSError, ValueError) as error:
-                            rep_err = error
-                        if success:
-                            break
-                    if not success:
-                        raise IOError(str(type(rep_err)) + " " + str(rep_err))
+                    with Locker(file_path_connected_data):
+                        self.klc.load_connected_stats(file_path=file_path_connected_data)
+                except Exception as exc:
+                    report_exception(exception=exc, file_to_append=self.problems_file_location,
+                                     title='statistics_full file', info='')
             else:
                 if self.klc.statistics_raw is None:
                     if os.path.exists(file_path_conditioned_data):
@@ -1630,6 +1633,8 @@ class KeplerTarget(object):
                             list_ch.append(self.klc.best_periodic_scores_data[s_ind][0])
                             list_g_ch.append(self.klc.best_periodic_scores_data[s_ind][1])
                     except Exception as exc:
+                        with open(self.problems_file_location, 'a') as fil:
+                            print(exc, file=fil)
                         report_exception(exception=exc, file_to_append=self.problems_file_location,
                                          title='slides pers='+str(pers_summing[0])+'-'+str(pers_summing[1]), info='seed='+str(new_seed))
                 if len(int_scores_chunk) > 0:  # If everything failed, there will be no result
@@ -1646,17 +1651,25 @@ class KeplerTarget(object):
             new_res_array = np.vstack((stats, pers, first_times, gauss_stats, int_scores,
                                        stats_g, pers_g, first_times_g, gauss_stats_g, int_scores_g)).transpose()
 
-            filename = [filn for filn in os.listdir(self.output_location)
-                        if self.target_id + '_' + slides_res_filename_postfix + '_' in filn]
-            if len(filename) > 0:
-                filename = filename[0]
-                n_slides_0 = int(filename[len(self.target_id + '_' + slides_res_filename_postfix + '_'): filename.index('.')])
-                n_slides += n_slides_0
-                hist_0 = np.load(os.path.join(self.output_location, filename), allow_pickle=True)
-                new_res_array = np.vstack((hist_0, new_res_array))
-                os.remove(os.path.join(self.output_location, filename))
-            np.save(os.path.join(self.output_location, self.target_id + '_' + slides_res_filename_postfix + '_' + str(n_slides)),
-                    new_res_array, allow_pickle=True)
+            file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                filename_postfix=slides_res_filename_postfix, file_format='npy')
+            try:
+                with Locker(file_path):
+                    if os.path.exists(file_path):
+                        hist_slides = np.load(file_path, allow_pickle=True)
+                        hist_slides = np.vstack((hist_slides, new_res_array))
+
+                    else:
+                        hist_slides = new_res_array
+                    n_slides = len(hist_slides)
+                    np.save(file_path, hist_slides, allow_pickle=True)
+                    with open(os.path.join(self.output_location, 'number_of_slides.txt'), 'w') as fil1:
+                        print(n_slides, file=fil1)
+            except Exception as exc:
+                with open(self.problems_file_location, 'a') as fil:
+                    print(exc, file=fil)
+                report_exception(exception=exc, file_to_append=self.problems_file_location,
+                                 title='saving timeslides', info='')
 
     def load_rel_wf_fds(self, conditioned_data_filename_postfix=spip.Default_conditioned_data_filename_postfix):
         """
@@ -1693,7 +1706,7 @@ class KeplerTarget(object):
             n_w=20,
             n_cos_incl=2000,  # This divides the full circle  # should be at least few semi-major axes
             n_rp=30,
-            u=(0.47, 0.23),
+            u=None,
             snr_min_injected=5.,
             snr_max_1_injected=8,
             snr_max_full_injected=40,
@@ -1701,6 +1714,10 @@ class KeplerTarget(object):
         if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
             self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
 
+        if u is None:
+            u = self.limb_darkening_coefs
+        if u is None:
+            u = Default_limb_darkening_coefs
         file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                             filename_postfix=injection_parameters_filename_postfix, file_format='txt')
         if os.path.exists(file_path) and not add_to_existing_file:
@@ -1800,10 +1817,13 @@ class KeplerTarget(object):
         count_orbit_transiting = 0
         count_orbit_transiting_relevant_radii = 0
         for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
+            # Semi major axis of the orbit in units of R_star
             a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (M_sun ** (1 / 3) / R_sun)
             e_max = min(1 - 2 / a, 0.97)
             assert e_max > 0, 'Semi-major axis is too small or stellar radius is too large!'
             power_2 = int(np.ceil(np.log2(n_ecc)))
+            # get_uniform_random_sequence
+            # Replace by np.linspace(e_min, e_max, N_samples)?
             e_range = Sobol(d=1, scramble=True).random_base2(power_2).T[0][:n_ecc]
             e_range = e_range[e_range <= e_max]
             for ecc in e_range:
@@ -1843,282 +1863,20 @@ class KeplerTarget(object):
                             count_orbit_transiting_relevant_radii += len(rps)  # will be divided by rp_numbers_total
                             for rp in rps:
                                 injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
-                # How many injections transit per period:
-                count_orbit_transiting = count_orbit_transiting / n_per
-                # How many injections transit per period and fall in the interesting snr regime:
-                count_orbit_transiting_relevant_radii = count_orbit_transiting_relevant_radii / rp_numbers_total / n_per
-
         # Probability to transit given a planet of a given period:
-        self.transit_probability = transit_prob_measure * count_orbit_transiting
+        self.transit_probability = count_orbit_transiting / n_per * transit_prob_measure
+        # Number of planets per star in the considered period range with any radius:
         self.transiting_planets_of_radii_in_per_range_one_star = self.prior_planets_in_period_range_one_star * self.transit_probability
         # Probability to transit and be in the relevant snr range given a planet of a given period:
-        self.transit_and_range_probability = transit_prob_measure * count_orbit_transiting_relevant_radii
-        self.transiting_planets_in_relevant_range = (self.prior_planets_in_period_range_one_star
-                                                     * transit_prob_measure * count_orbit_transiting_relevant_radii)
+        self.transit_and_range_probability = count_orbit_transiting_relevant_radii / rp_numbers_total / n_per * transit_prob_measure
+        # Number of planets per star in the considered period range with radii that provide relevant SNR:
+        self.transiting_planets_in_relevant_range = self.prior_planets_in_period_range_one_star * self.transit_and_range_probability
         selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
                                              replace=True if len(injection_parameter_sets) < n_injections else False)
         self.injection_par_list = list(np.array(injection_parameter_sets, dtype=object)[selection_indices])
 
         self.save_injection_parameters()
         self.pickle_small_attributes()
-
-    # def generate_injection_parameters_old(
-    #         self, n_injections=N_injections_total, add_to_existing_file=False,
-    #         use_special_per_wing=False,
-    #         per_wing_injection_relative=Per_wing_injection_and_slides_relative,
-    #         injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
-    #         # mean_psd_filename_postfix=spip.Default_psd_for_injections_filename_postfix,
-    #         all_injection_parameters_filename_postfix=All_injection_parameters_filename_postfix,
-    #         d_ecc=0.3,
-    #         n_w=5,  #
-    #         d_inc=0.5,  # this is in degrees! and often until 85 is fine
-    #         u=(0.47, 0.23),
-    #         snr_min_injected=5.,
-    #         snr_max_1_injected=8,
-    #         snr_max_full_injected=40,
-    #         n_per=50,
-    #         n_rp=30):
-    #     """
-    #     TODO REWRITE THIS!
-    #     TODO # make sure we really obtain the correct rate, meaning that when we exclude some duration from the bank,
-    #     TODO # it should decrease the overall rate. The full rate of Zhu and Dong include all the planetary parameters,
-    #     TODO # therefore when we use only part of them, our rate should not sum up to the rate of Zhu and Dong.
-    #
-    #
-    #     without a good reason for that, and then the template factor will heavily suppress the result. Maybe I need to account for
-    #     the specific expected snr of this transit to smear the templates much more. Or I need to also inject other shit, but this
-    #     is even more complicated.
-    #
-    #     :param n_injections: Number of injections to generate in the end. The inner number of generations will be defined by the
-    #     ranges of parameters. `n_injections` is just how many will be returned in the end for the best template
-    #     :type n_injections:
-    #     :param per_wing_injection_relative: days to the left and the same to the right used in the time slides in units of period
-    #     :type per_wing_injection_relative: float
-    #     :param n_per: Number of periods within the period wings to generate. Not evenly, they will be sampled randomly.
-    #     :type n_per: int
-    #     :param n_rp: How many radii is tried per one parameter set
-    #     :type n_rp: int
-    #     :param d_ecc: Eccentricity step when calculating how many eccentricities to generate. Needed for uniformity of eccentricity
-    #     density generation to make sure that when the range of possible orbital is smaller, we generate fewer of them.
-    #     :type d_ecc: float
-    #     :param n_w: Number of periastron angles to generate in each loop. Since this is uniform and with no bounds,
-    #     it does not really matter how many of them we produce
-    #     :type n_w: int
-    #     :param d_inc: Inclination step when calculating how many inclinations to generate. Needed for uniformity of inclination
-    #     density generation to make sure that when the range of possible transit inclinations is smaller, we generate fewer of them.
-    #     This is in degrees! and often until 85 is fine
-    #     :type d_inc: float, this is in degrees! and often until 85 is fine
-    #     :param u: Limb darkening coefficients. nothing is too sensitive to them, so they are just fixed
-    #     :type u: [float, float]
-    #     :param snr_min_injected: full snr, not single-transit
-    #     :type snr_min_injected: float
-    #     :param add_to_existing_file:
-    #     :type add_to_existing_file:
-    #     :param injection_parameters_filename_postfix:
-    #     :type injection_parameters_filename_postfix:
-    #     :param all_injection_parameters_filename_postfix:
-    #     :type all_injection_parameters_filename_postfix:
-    #     :return:
-    #     :rtype:
-    #
-    #     (DONE): DO NOT FORGET THE BUG AND LOOK AT THE TRANSIT TIME AND NOT THE BADLY DEFINED PHASE!
-    #     (DONE): THINK ABOUT THE REPETITIONS: WHEN YOU GENERATE ONE P_INJ, YOU USE IT FOR ALL THE OTHER PARAMETERS,
-    #     WHICH IS NOT REALLY FAIR. HOWEVER , IF YOU CHANGE THE THING EVERY TIME, THEN YOU WILL GIVE NOT PROPORTIONAL
-    #     WEIGHTS TO SMALL INCLINATIONS AND BIG INCLINATIONS, LET'S SAY. SO EITHER YOU NEED TO GENERATE MANY OF THEM AND REJECT
-    #     THE NON-TRANSITING ONES, OR SOMETHING ELSE.............OR IT IS OKAY THAT THEY ARE DISCRETE
-    #     :return:
-    #     """
-    #     if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
-    #         self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass;'
-    #
-    #     file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-    #                                         filename_postfix=injection_parameters_filename_postfix, file_format='txt')
-    #     if os.path.exists(file_path) and not add_to_existing_file:
-    #         with open(file_path, 'w'):
-    #             pass  # will delete the contents of the file
-    #
-    #     # templs_prepared_for_cos_fd = np.conj(np.load(os.path.join(Default_template_bank_folder,
-    #     #                                                           Default_templates_fd_for_injections_filename), allow_pickle=True))
-    #     # template_support = 2 * (len(templs_prepared_for_cos_fd[0]) - 1)
-    #     # dt = tm.dt_lc
-    #     # freqs = np.fft.rfftfreq(template_support, d=dt)
-    #     # effective_wf_fd = sim.get_saved_wf_fd(freqs=freqs, dt=tm.dt_lc)
-    #     # # whitened, normalized, fourier domain, conjugated
-    #
-    #     # The parity of the bank is odd, but the length 256 is even, so some tricks with time
-    #     # t = tm.time(t_tot=(template_support + 1) * tm.dt_lc, parity='odd')[1:]
-    #     t = tm.time(t_tot=(256 + 1) * tm.dt_lc, parity='odd')[1:]
-    #     # # -> make it conj for the ease of cosine
-    #     # # The following is needed to calculate the correct cosines from the vectors in the Fourier domain. Only works for even length
-    #     # cosine_coeffs = np.ones(len(templs_prepared_for_cos_fd[0])) * 2
-    #     # cosine_coeffs[0] = 1.
-    #     # cosine_coeffs[-1] = 1.
-    #     # cosine_coeffs = cosine_coeffs / template_support
-    #     # templs_prepared_for_cos_fd = templs_prepared_for_cos_fd * cosine_coeffs
-    #
-    #     self.set_periodicity_search_parameters(force_overwrite=False)
-    #     if not use_special_per_wing:
-    #         if self.periods_in_chunks is None:
-    #             periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
-    #                                                              per_phases_per_chunk=self.per_phases_per_chunk,
-    #                                                              dt=self.klc.dt_days, t_mission=self.klc.T_mission)
-    #         else:
-    #             periods_in_chunks = self.periods_in_chunks
-    #         closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, self.best_per, overlap_bins=0)
-    #         p_min_inj, p_max_inj = closest_chunk[0], closest_chunk[-1]
-    #     else:
-    #         p_max_inj = self.best_per * (1 + per_wing_injection_relative)
-    #         p_min_inj = self.best_per * (1 - per_wing_injection_relative)
-    #     # ################################################################################################
-    #     # OCCURRENCE RATES
-    #     # All the things with the occurrence rates and densities:
-    #     log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
-    #     units_of_re_to_units_of_r_star_factor = 1 / (self.stellar_radius * R_sun_R_e)
-    #     log10_best_per_low = np.log10(p_min_inj)
-    #     log10_best_per_up = np.log10(p_max_inj)
-    #     # log10_period_edges = np.log10(period_edges)
-    #     self.log10_best_period_edges = (log10_best_per_low, log10_best_per_up)
-    #     log2_rp_edges = np.log2(units_of_re_to_units_of_r_star_factor * 2. ** log2_rp_re_edges)
-    #
-    #     # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
-    #     # Number of planets of all radii in log day (per 100 stars):
-    #     # For other periods, it will be checked right now:
-    #     row_upper = len(occurrences_table) - 1
-    #     for i in range(len(log10_period_edges) - 1):
-    #         if (log10_best_per_up > log10_period_edges[i]) and (log10_best_per_up <= log10_period_edges[i + 1]):
-    #             row_upper = i
-    #             break
-    #     row_lower = len(occurrences_table) - 1
-    #     for i in range(len(log10_period_edges) - 1):
-    #         if (log10_best_per_low > log10_period_edges[i]) and (log10_best_per_low <= log10_period_edges[i + 1]):
-    #             row_lower = i
-    #             break
-    #     # planets per one star in this period range for different radii bins:
-    #     # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
-    #     # to be uniform (they are log bins)
-    #     planets_of_radii_in_per_range_one_star = np.zeros(len(occurrences_table[-1]))
-    #     for i in range(row_lower, row_upper + 1):
-    #         row_density = occurrences_table[i] / (log10_period_edges[i + 1] - log10_period_edges[i])
-    #         if i == len(occurrences_table) - 1 and log10_best_per_up > log10_period_edges[len(log10_period_edges) - 1]:
-    #             up_edge = log10_best_per_up
-    #         else:
-    #             up_edge = min(log10_best_per_up, log10_period_edges[i + 1])
-    #         if i == len(occurrences_table) - 1 and log10_best_per_low > log10_period_edges[len(log10_period_edges) - 1]:
-    #             low_edge = log10_best_per_low
-    #         else:
-    #             low_edge = max(log10_best_per_low, log10_period_edges[i])
-    #         planets_of_radii_in_per_range_one_star += row_density * (up_edge - low_edge)
-    #     self.planets_of_radii_in_per_range_one_star = planets_of_radii_in_per_range_one_star
-    #     rp_numbers = (np.ceil(planets_of_radii_in_per_range_one_star /
-    #                           np.sum(planets_of_radii_in_per_range_one_star) * n_rp)).astype(int)
-    #     rp_numbers_total = np.sum(rp_numbers)
-    #
-    #     # ################################################################################################
-    #     # PROBABILITY TO TRANSIT FACTOR
-    #
-    #     # Taking into account the probability to transit.
-    #     # for example, d_ecc means that every simulation accounts for the parameter space of the size d_ecc, and this will
-    #     # only be made once. The allowed parameter space e_allowed will be covered by the proper number of d_ecc.
-    #     # Applying the factor to every planet makes sure we count not one planet but e_allowed/e_possible planets per
-    #     # simulated star. In the end, this will be multiplied by the number of planets existing around stars. With the
-    #     # factor, we get the number of planets existing, transiting and observed. The distinction between transiting
-    #     # and observed exists because we observe not all the durations etc.
-    #     ecc_factor = d_ecc / 1.
-    #     w_factor = 1. / n_w
-    #     i_factor = d_inc / 90.
-    #     transit_prob_factor = ecc_factor * w_factor * i_factor
-    #
-    #     # effective_planet_count = [0. for _ in range(tm.N_templates)]
-    #     # templates_parameter_sets = [[] for _ in range(tm.N_templates)]
-    #     injection_parameter_sets = []
-    #     # injection_durations = []
-    #     n_star_simulations = 0
-    #     n_star_transiting = 0
-    #     for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
-    #         # Attention, this is a linear uniform distribution, although we are using logarithmic occurrences.
-    #         a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (
-    #                 M_sun ** (1 / 3) / R_sun)  # 3rd Kepler law #in units of R
-    #         # a = (G * M /(4*np.pi**2) * (per*24*60*60)**2)**(1/3) / R #3rd Kepler law #in units of R
-    #         # r_min = a*(1-e) -> 2*r_star=a*(1-e_max)
-    #         n_star_simulations += rp_numbers_total
-    #         e_max = min(1 - 2 / a, 0.97)  # for some reason, 0.98 gets computationally stuck in barman sometimes, not clear why
-    #         # SO WE JUST NEGLECT THESE 0.03!!!!
-    #         if e_max < 0:
-    #             e_range = [0.]
-    #         else:
-    #             # n_eccs = max(1, int(np.round(e_max / d_ecc)))
-    #             # e_range = np.linspace(0, e_max, n_eccs, endpoint=False)
-    #             e_range = np.arange(0, e_max, d_ecc)
-    #             if len(e_range) == 0:
-    #                 e_range = [0.]
-    #             else:
-    #                 e_range += np.random.uniform(0, d_ecc, len(e_range))
-    #                 e_range = e_range[e_range < e_max]
-    #         for ecc in e_range:
-    #             ws = np.linspace(0, 360, n_w, endpoint=False)
-    #             ws += np.random.uniform(0, (ws[1] - ws[0]), len(ws))
-    #             for w in ws:
-    #                 # i_max = np.arccos(1/a)*180/np.pi
-    #                 i_max = np.arccos(1 / a * (1 + ecc * np.cos((w-90) / 180 * np.pi)) / (1 - ecc ** 2)) * 180 / np.pi
-    #                 incls = np.arange(90, i_max, -d_inc)  # there will be added a random, so it is ok that the final point is not included
-    #                 if len(incls) > 1:
-    #                     incls -= np.random.uniform(0, d_inc, len(incls))
-    #                     incls = incls[incls >= i_max]
-    #                 for inc in incls:
-    #                     rp = 0.02  # assume the shape does not depend on the planet radius, although it is not exactly correct
-    #                     flux_obs = 1. - tm.flux_par(t=t, params=None, per=period, rp=rp, a=a, inc=inc, ecc=ecc, w=w, u1=u[0], u2=u[1],
-    #                                                 t0=0, supersample_factor=20, exp_time=tm.dt_lc)
-    #                     # we built the bank to find only certain durations
-    #                     len_zeros = len(np.where(np.isclose(flux_obs, 0))[0])  # to make sure transit is not wider than the time
-    #                     dur = tm.templ_dur_hmax_fun(flux_obs) * tm.dt_lc
-    #                     if np.linalg.norm(flux_obs) > 0:
-    #                         n_star_transiting += rp_numbers_total  # if this planet can transit, add all radii (neglect radius impact)
-    #                         # -> this will be multiplied later by the factor of the parameter space part
-    #                         # We now do not select suitable for the search because we want it to be blind, so we do not take into
-    #                         # account the duration of the transit and that it is not covered by our bank. We run everything.
-    #                         depth_factor = np.max(flux_obs) / rp ** 2
-    #                         # The following just saves us from running redundant simulations which will not contribute to density
-    #                         # around the trigger:
-    #                         rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period,
-    #                                                                                depth_factor=depth_factor, snr_min=snr_min_injected,
-    #                                                                                snr_max_1=snr_max_1_injected,
-    #                                                                                snr_max_full=snr_max_full_injected,
-    #                                                                                stellar_radius=self.stellar_radius, units='star')
-    #                         # min_rp_re.append(rp_re_min)
-    #                         rps = []
-    #                         for i in range(len(log2_rp_edges) - 1):
-    #                             rps = rps + list(2. ** (np.random.uniform(log2_rp_edges[i], log2_rp_edges[i + 1], rp_numbers[i])))
-    #                         np.random.shuffle(rps)
-    #                         rps = np.array(rps)
-    #                         rps = rps[rps >= rp_rs_min]
-    #                         rps = rps[rps <= rp_rs_max]
-    #                         # -> smaller radii will just give very small statistics, so it will not be important
-    #                         # for the density at trigger
-    #                         for rp in rps:
-    #                             injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
-    #
-    #     # Saving the injection parameters for all the templates, although we will only need for one template.
-    #     # Note that the number of injections is different for different templates, and this reflects the template prior.
-    #     # The number of injections in the run will be then renormalized to match the required number.
-    #     file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-    #                                         filename_postfix=all_injection_parameters_filename_postfix, file_format='npy')
-    #     np.save(file_path, np.array(injection_parameter_sets, dtype=float), allow_pickle=True)
-    #     # TODO fix these notations
-    #     # Part of planets that can transit geometrically and were checked so by the simulation:
-    #     self.transit_prob_factor = transit_prob_factor * n_star_transiting / n_star_simulations  # TODO this is a weird notation
-    #     # Part of planets that can transit and fall into our search criteria:
-    #     self.search_prob_factor = transit_prob_factor * len(injection_parameter_sets) / n_star_simulations
-    #     self.transiting_planets_in_search = np.sum(self.planets_of_radii_in_per_range_one_star) * self.search_prob_factor
-    #     # planets in universe for these periods per star
-    #     # from them transiting
-    #     # from them participating in the search
-    #     # effective number of planets in search (for histogram normalization)
-    #     selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
-    #                                          replace=True if len(injection_parameter_sets) < n_injections else False)
-    #     self.injection_par_list = list(np.array(injection_parameter_sets, dtype=object)[selection_indices])
-    #
-    #     self.save_injection_parameters()
-    #     self.pickle_small_attributes()
 
     def save_injection_parameters(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
         """
@@ -2162,29 +1920,13 @@ class KeplerTarget(object):
         file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                             filename_postfix=injection_parameters_filename_postfix, file_format='txt')
 
-        # This complicated thing is just opening the file. It was added because something went wrong, and I suspected
-        # that it was many cores trying to read the same file at the same time. So this thing tries to read the file
-        # several times before giving up:
         try:
-            with open(file_path, 'r') as fil:
-                lines = fil.readlines()
-        except (EOFError, IOError, OSError, ValueError) as error:
-            np.random.seed(None)
-            success = False
-            rep_err = error
-            # -> it can be that another process is trying to open the same file, so we will wait
-            for _ in range(3):
-                time.sleep(1. + np.random.rand() * 3.)
-                try:
-                    with open(file_path, 'r') as fil:
-                        lines = fil.readlines()
-                    success = True
-                except (EOFError, IOError, OSError, ValueError) as error:
-                    rep_err = error
-                if success:
-                    break
-            if not success:
-                raise IOError(str(type(rep_err)) + " " + str(rep_err))
+            with Locker(file_path):
+                with open(file_path, 'r') as fil:
+                    lines = fil.readlines()
+        except Exception as exc:
+            report_exception(exception=exc, file_to_append=self.problems_file_location,
+                             title='loading injection_parameters file', info='')
 
         lines = [line for line in lines if (line.strip()[0] != '#' and len(line.strip()) > 3)]
 
@@ -2292,34 +2034,16 @@ class KeplerTarget(object):
                                             filename_postfix=injections_filename_postfix, file_format='txt')
 
         try:
-            with open(file_path, 'a') as fil1:
-                print(per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, first_transit_time_inj,
-                      retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat, retrieved_integral_score,
-                      retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time, retrieved_g_gauss_stat,
-                      retrieved_g_integral_score,
-                      sep=' ', end='\n', file=fil1)
-        except (EOFError, IOError, OSError, ValueError) as error:
-            np.random.seed(None)
-            success = False
-            rep_err = error
-            # -> it can be that another process is trying to open the same file, so we will wait
-            for _ in range(3):
-                time.sleep(1. + np.random.rand() * 3.)
-                try:
-                    with open(file_path, 'a') as fil1:
-                        print(per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, first_transit_time_inj,
-                              retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat,
-                              retrieved_integral_score,
-                              retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time, retrieved_g_gauss_stat,
-                              retrieved_g_integral_score,
-                              sep=' ', end='\n', file=fil1)
-                    success = True
-                except (EOFError, IOError, OSError, ValueError) as error:
-                    rep_err = error
-                if success:
-                    break
-            if not success:
-                raise IOError(str(type(rep_err)) + " " + str(rep_err))
+            with Locker(file_path):
+                with open(file_path, 'a') as fil1:
+                    print(per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, first_transit_time_inj,
+                          retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat, retrieved_integral_score,
+                          retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time, retrieved_g_gauss_stat,
+                          retrieved_g_integral_score,
+                          sep=' ', end='\n', file=fil1)
+        except Exception as exc:
+            report_exception(exception=exc, file_to_append=self.problems_file_location,
+                             title='printing to injections file', info='')
 
     def retrieve_injections(self, max_phase_mismatch_to_dur=Max_phase_mismatch_to_dur, file_path=None,
                             injections_filename_postfix=Injections_filename_postfix):
@@ -2545,52 +2269,53 @@ class KeplerTarget(object):
 
         self.distr_stat_h0 = np.histogram(self.stats_slides, bins=self.bins_stat_histogram_bg)[0]
         self.distr_stat_h0 = self.distr_stat_h0 / self.n_slides
+        # TODO think about density units
         self.distr_gauss_stat_h0 = np.histogram(self.gauss_stats_slides, bins=self.bins_gauss_stat_histogram_bg)[0]
         self.distr_gauss_stat_h0 = self.distr_gauss_stat_h0 / self.n_slides
 
     def make_injections_histogram(self, bins=None, bin_min=None, bin_max=None):
-        pass
-        # TODO!
-        # if self.retrieved_stat_success is None:
-        #     self.retrieve_injections()
-        #
-        # if bins is not None:
-        #     self.bins_stat_histogram_inj = bins
-        #     self.bins_gauss_stat_histogram_inj = bins
-        # else:
-        #     if self.bins_stat_histogram is not None:
-        #         self.bins_stat_histogram_inj = self.bins_stat_histogram
-        #     else:
-        #         bin_mi, bin_ma = self._get_bin_min_bin_max()
-        #         if bin_min is None:
-        #             bin_min = bin_mi
-        #         if bin_max is None:
-        #             bin_max = bin_ma
-        #         self.bins_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
-        #
-        #     if self.bins_gauss_stat_histogram is not None:
-        #         self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
-        #     else:
-        #         bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
-        #         if bin_min is None:
-        #             bin_min = bin_mi
-        #         if bin_max is None:
-        #             bin_max = bin_ma
-        #         self.bins_gauss_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
-        #
-        # self.distr_stat_inj_all = np.histogram(np.array(self.retrieved_stat_bad + self.retrieved_stat_success),
-        #                                        bins=self.bins_stat_histogram_inj)[0]
-        # self.distr_stat_inj_all = (self.distr_stat_inj_all / self.number_of_injections * self.search_prob_factor)
-        # self.distr_stat_inj_success = np.histogram(np.array(self.retrieved_stat_success), bins=self.bins_stat_histogram_inj)[0]
-        # self.distr_stat_inj_success = (self.distr_stat_inj_success / self.number_of_injections * self.search_prob_factor)
-        #
-        # # same for gaussianized
-        # self.distr_gauss_stat_inj_all = np.histogram(np.array(self.retrieved_gauss_stat_bad + self.retrieved_gauss_stat_success),
-        #                                        bins=self.bins_gauss_stat_histogram_inj)[0]
-        # self.distr_gauss_stat_inj_all = (self.distr_gauss_stat_inj_all / self.number_of_injections * self.search_prob_factor)
-        # self.distr_gauss_stat_inj_success = np.histogram(np.array(self.retrieved_gauss_stat_success),
-        #                                                  bins=self.bins_gauss_stat_histogram_inj)[0]
-        # self.distr_gauss_stat_inj_success = (self.distr_gauss_stat_inj_success / self.number_of_injections * self.search_prob_factor)
+        if self.retrieved_stat_success is None:
+            self.retrieve_injections()
+
+        if bins is not None:
+            self.bins_stat_histogram_inj = bins
+            self.bins_gauss_stat_histogram_inj = bins
+        else:
+            if self.bins_stat_histogram is not None:
+                self.bins_stat_histogram_inj = self.bins_stat_histogram
+            else:
+                bin_mi, bin_ma = self._get_bin_min_bin_max()
+                if bin_min is None:
+                    bin_min = bin_mi
+                if bin_max is None:
+                    bin_max = bin_ma
+                self.bins_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+
+            if self.bins_gauss_stat_histogram is not None:
+                self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
+            else:
+                bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
+                if bin_min is None:
+                    bin_min = bin_mi
+                if bin_max is None:
+                    bin_max = bin_ma
+                self.bins_gauss_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+
+        self.distr_stat_inj_all = np.histogram(np.array(self.retrieved_stat_bad + self.retrieved_stat_success),
+                                               bins=self.bins_stat_histogram_inj, density=False)[0]
+        self.distr_stat_inj_all = (self.distr_stat_inj_all / self.number_of_injections * self.transiting_planets_in_relevant_range)
+        self.distr_stat_inj_success = np.histogram(np.array(self.retrieved_stat_success), bins=self.bins_stat_histogram_inj)[0]
+        self.distr_stat_inj_success = (self.distr_stat_inj_success / self.number_of_injections * self.transiting_planets_in_relevant_range)
+
+        # same for gaussianized
+        self.distr_gauss_stat_inj_all = np.histogram(np.array(self.retrieved_gauss_stat_bad + self.retrieved_gauss_stat_success),
+                                                     bins=self.bins_gauss_stat_histogram_inj)[0]
+        self.distr_gauss_stat_inj_all = (self.distr_gauss_stat_inj_all / self.number_of_injections
+                                         * self.transiting_planets_in_relevant_range)
+        self.distr_gauss_stat_inj_success = np.histogram(np.array(self.retrieved_gauss_stat_success),
+                                                         bins=self.bins_gauss_stat_histogram_inj)[0]
+        self.distr_gauss_stat_inj_success = (self.distr_gauss_stat_inj_success / self.number_of_injections
+                                             * self.transiting_planets_in_relevant_range)
 
     def calculate_significance(self, remake_histograms=True):
         # TODO!

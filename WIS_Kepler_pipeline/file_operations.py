@@ -580,13 +580,23 @@ def report_exception(exception, file_to_append, title='', info=''):
         print('', file=err_list_fil)
 
 
-# ################################################################################################
+# ####################################################################################################################
 # FILE LOCKING
-Dt_wait_locker = 0.1  # s
+Dt_wait_locker = 0.001  # s
 Waiting_time_limit_locker = 120  # s
 
 
 class Locker:
+    """
+    Class used to lock a file when some process used it, and then unlock whan the usage is finished. The locking is
+    done by creating a file with extension '.locker' in the same directory as the file that needs to be locked.
+    The class checks whether such a file exists. If yes, then it waits. Before accessing the file, the class creates
+    the locker file. After finishing the work, the class deleted the file. The syntax is:
+
+    with Locker(file=file_dir):
+        do_stuff(file_dir)
+
+    """
     def __init__(self, file, dt_wait=Dt_wait_locker, max_waiting_time=Waiting_time_limit_locker):
         self.file = file
         self.locker_file = get_locker_file(self.file)
@@ -595,7 +605,8 @@ class Locker:
 
     def __enter__(self):
         # self.open_lock = open(self.locker_file, 'w')
-        self.wait_unlock()
+        if is_locked(self.file):
+            self.wait_unlock()
         lock_file(self.file)
         return self
 
@@ -647,4 +658,5 @@ def unlock_file(file):
     else:
         os.remove(locker_file)
 
-# ################################################################################################
+
+# ####################################################################################################################

@@ -20,20 +20,24 @@ Max_jobs_submitted = 4900  # Maximal number of jobs that we can have in bjobs at
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
 
-queues = ['physics-short', 'new-short']
+# queues = ['physics-short', 'new-short']
+queues = ['risk']
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
 timeout_start = time.time()
 time_counter = 0
-while (time.time() < timeout_start + Max_work_time) and (
-        len(os.listdir(Job_files_folder)) > 0 or len(os.listdir(Running_jobs_folder)) > 0
-        or len(os.listdir(Output_files_folder)) > 0 or len(os.listdir(Error_files_folder)) > 0):
-    if time.time() - timeout_start > time_counter * 10 * 60:  # check every 10 min
+while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):
+# len(os.listdir(Job_files_folder)) > 0 or len(os.listdir(Running_jobs_folder)) > 0):
+# or len(os.listdir(Output_files_folder)) > 0 or len(os.listdir(Error_files_folder)) > 0):
+    if time.time() - timeout_start > time_counter * 5 * 60:  # check every 10 min
         # wc = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder)
         wcs = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder, queues=queues)
-        wc = wcs[0] + wcs[1]
+        if hasattr(wcs, '__len__'):
+            wc = sum(wcs)
+        else:
+            wc = wcs
         for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-            time.sleep(2.)
+            time.sleep(1.)
             os.system('bsub < '+os.path.join(Job_files_folder, ff))
             # os.replace(os.path.join(Job_files_folder, ff), os.path.join(Running_jobs_folder, ff))  # move the jobs to the running folder
             os.remove(os.path.join(Job_files_folder, ff))
@@ -81,8 +85,8 @@ while (time.time() < timeout_start + Max_work_time) and (
             # except:
             #     pass
 
-            if job_filename in os.listdir(Running_jobs_folder):  # I don't know why, but for some reason files are not always there
-                os.remove(os.path.join(Running_jobs_folder, job_filename))  # remove the file which finished
+            # if job_filename in os.listdir(Running_jobs_folder):  # I don't know why, but for some reason files are not always there
+            #     os.remove(os.path.join(Running_jobs_folder, job_filename))  # remove the file which finished
 
 
 
@@ -95,4 +99,5 @@ while (time.time() < timeout_start + Max_work_time) and (
 
 
 
-# bsub -q physics-long -R "rusage[mem=3.9GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py
+# bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py
+# bsub -q long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py
