@@ -124,62 +124,121 @@ def variables_from_file(filename):
                 globals()[name] = val
 
 
-def read_lists_from_file(file, location=None, dimension=2, to_array=True):
+# noinspection PyTypeChecker
+def read_quarters_from_file(file_name, location='', dimension=2, to_array=True):
     """
     Reads an array (numpy.array or list of float, maximum 2d) printed to the txt file
     named name and returns the output in form of list.
-    :param file: Name of the file ('.txt' is not needed).
-    :type file: str
-    :param location: Location where to create the file. If None, the current local directory
+
+    Parameters
+    ----------
+     file_name : str
+        Name of the file ('.txt' is not needed).
+    location : str
+        Location where to create the file. If None, the current local directory
         will be used
-    :type location: str
-    :param dimension: 3, 2, maybe 1. Dimensionality of the array to be read
-    :type dimension: int
-    :param to_array: whether to convert to numpy array or stay with list
-    :type to_array: bool
-    :return: List (possibly with nested lists) of data read from the file.
-    :rtype: list
+    dimension : int
+        The dimensionality of the array to be read. either 2 or 3, maybe 1.
+    to_array : bool
+    Whether convert to array
+
+    Returns
+    -------
+    res : list
+        List (possibly with nested lists) of data read from the file.
+
     """
-    if location is not None:
-        file = os.path.join(location, file)
+    # noinspection DuplicatedCode
+    if location is None:
+        if os.path.split(file_name)[0] != '':
+            file_dir = file_name
+        else:
+            location = os.getcwd()
+            file_dir = os.path.join(location, file_name)
     else:
-        if file[-4:] != '.txt':
-            file = file + '.txt'
-    file = open(file, 'r')
-    res = file.read()
-    if dimension < 3:
-        res = res.replace('array', '')
-        res = res.replace('(', '')
-        res = res.replace(')', '')
-        res = res.replace(',', ' ')
-        res = (res.split('] ['))
-        for i in range(len(res)):
-            res[i] = res[i].replace(']', '')
-            res[i] = res[i].replace('[', '')
-            res[i] = res[i].replace('\n', '')
-            res[i] = list(map(float, res[i].split()))
-        if len(res) == 1:
-            res = res[0]
-    elif dimension == 3:
-        res = res.replace('array', '')
-        res = res.replace('(', '')
-        res = res.replace(')', '')
-        res = res.replace(',', ' ')
-        res = res.replace('  ', ' ')  # important to do in because
-        # otherwise ']  [' with two spaces can appear (which we can't see)
-        res = res.split(']] [[')
-        for j in range(len(res)):
-            res[j] = (res[j].split('] ['))
-            for i in range(len(res[j])):
-                res[j][i] = res[j][i].replace(']', '')
-                res[j][i] = res[j][i].replace('[', '')
-                res[j][i] = res[j][i].replace('\n', '')
-                if to_array:
-                    res[j][i] = np.array(list(map(float, res[j][i].split())))
-                else:
-                    res[j][i] = list(map(float, res[j][i].split()))
-        file.close()
+        file_dir = os.path.join(location, file_name)
+    if file_dir[-4:] != '.txt':
+        file_dir = file_dir + '.txt'
+
+    with open(file_dir, 'r') as file:
+        res = file.read()
+        if dimension < 3:
+            res = res.replace('array', '')
+            res = res.replace('(', '')
+            res = res.replace(')', '')
+            res = res.replace(',', ' ')
+            res = list(res.split('] ['))
+            for i in range(len(res)):
+                res[i] = res[i].replace(']', '')
+                res[i] = res[i].replace('[', '')
+                res[i] = res[i].replace('\n', '')
+                res[i] = list(map(float, res[i].split()))
+            if len(res) == 1:
+                res = res[0]
+        elif dimension == 3:
+            res = res.replace('array', '')
+            res = res.replace('(', '')
+            res = res.replace(')', '')
+            res = res.replace(',', ' ')
+            res = res.replace('  ', ' ')  # important to do in because
+            # otherwise ']  [' with two spaces can appear (which we can't see)
+            res = list(res.split(']] [['))
+            for j in range(len(res)):
+                res[j] = list(res[j].split('] ['))
+                # noinspection DuplicatedCode
+                for i in range(len(res[j])):
+                    res[j][i] = res[j][i].replace(']', '')
+                    res[j][i] = res[j][i].replace('[', '')
+                    res[j][i] = res[j][i].replace('\n', '')
+                    if to_array:
+                        res[j][i] = np.array(list(map(float, res[j][i].split())))
+                    else:
+                        res[j][i] = list(map(float, res[j][i].split()))
     return res
+
+
+def write_quarters_to_txt(file_name, var, location=None):
+    """
+    Prints array (list or numpy.array of float) variable var to file named name in the location `location`.
+    If the var is not given, the name of the variable is the same as name
+
+    Parameters
+    ----------
+    file_name : str
+        Name of the file ('.txt' is not needed). If var is None, it is also
+        the name of the variable to be printed to the file.
+    var : list or array
+        Variable to be printed to the file. If var is None, name is the name
+        of the variable to be printed to the file.
+    location : str
+        Location where to create the file. If None, the current local directory
+        will be used
+
+    Returns
+    -------
+    None.
+
+    """
+    # noinspection DuplicatedCode
+    if location is None:
+        if os.path.split(file_name)[0] != '':
+            file_dir = file_name
+        else:
+            location = os.getcwd()
+            file_dir = os.path.join(location, file_name)
+    else:
+        file_dir = os.path.join(location, file_name)
+    if file_dir[-4:] != '.txt':
+        file_dir = file_dir + '.txt'
+    # if var == None:
+    #     var = globals()[file_dir]
+    if location is None:
+        location = os.getcwd()
+        fileloc = os.path.join(location, file_dir) + '.txt'
+    else:
+        fileloc = file_dir + '.txt'
+    with open(fileloc, 'w') as file:
+        print(*var, file=file)
 
 
 def read_csv_file(file, location=None, to_type=None):
@@ -330,11 +389,12 @@ def make_ttv_dict(koi_catalog_dict_path=os.path.join(Default_files_folder, Defau
         lines = [line.split() for line in lines if line.strip()[0] != '#']
 
     headers = 'KOI, n, T, O_C, O_C_Err, TDV, TDV_Err, TPV, TPV_Err, Flag_outlier, Flag_collision'.split(', ')
-    explanations = 'Kepler Object of Interest number; Transit number; Expected transit time of the linear ephemeris (BJD-2454900); \
-    O-C difference min; O-C uncertainty min; Fractional duration variation; TDV uncertainty; Fractional depth variation; TPV uncertainty; \
-    Outlier flag. Sum of: 0 = ok, 1 = pvalue > 0.025, 2= local TTV, 4= global TTV, 8= global TDV, 16 =global TPV, 32 = TTV,TDV or TPV \
-    uncertainty outlier; Collision flag. 0=ok, 1 = another relatively large (>0.25 area of transit) interfering transit close by \
-    (<2*transit duration + 1 interfering transit duration)'
+    # explanations = 'Kepler Object of Interest number; Transit number; Expected transit time of the linear ephemeris (BJD-2454900); \
+    # O-C difference min; O-C uncertainty min; Fractional duration variation; \
+    # TDV uncertainty; Fractional depth variation; TPV uncertainty; \
+    # Outlier flag. Sum of: 0 = ok, 1 = pvalue > 0.025, 2= local TTV, 4= global TTV, 8= global TDV, 16 =global TPV, 32 = TTV,TDV or TPV \
+    # uncertainty outlier; Collision flag. 0=ok, 1 = another relatively large (>0.25 area of transit) interfering transit close by \
+    # (<2*transit duration + 1 interfering transit duration)'
 
     dict_ttv = {}
     for key in headers:
@@ -376,6 +436,35 @@ def make_villanova_dict(villanova_catalog_path=os.path.join(Default_files_folder
 
         with open(pickling_dict_path, 'wb') as pickle_file:
             pickle.dump(dict_villanova, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def make_limb_darkening_coefficients_array(limb_darkening_table_file, save_file=False):
+    """
+    Opens the Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)
+    and returns the array of [Teff,logg,M/H,a,b], where a, b are the u1, u2 quadratic limb darkening coeffs.
+    #Limb_darkening_full_table_file = '/Collaboration-Kepler/KeplerFiles/limb_darkening_kepler_table.txt'
+    :param limb_darkening_table_file: The full path to the txt table with coefficietns
+    :type limb_darkening_table_file: str
+    :return: The array of relevant parameters and the limb darlening quadratic coefficients.
+    :rtype: numpy.ndarray
+    :param save_file: Whether to save the file. Default is yes
+    :type save_file: bool
+    """
+    with open(limb_darkening_table_file, 'r') as fil:
+        # 'Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)'
+        lines = fil.readlines()
+        # Teff|logg|  M/H|      u|      a|      b|     c2|     c3|     c4|     a1|     a2|     a3|     a4
+    lines = [line.strip() for line in lines]
+    lines = [line for line in lines if line[0].isnumeric()]
+    lines = [line.split('|') for line in lines]
+    lines = [[line[0], line[1], line[2], line[4], line[5]] for line in lines]
+    # [Teff,logg,M/H,a,b]
+    lines = [[float(e.strip()) for e in line] for line in lines]
+    lines = np.array(lines)
+    lines = lines[lines[:, 0] != 1.]
+    if save_file:
+        np.save(os.path.join(os.path.dirname(limb_darkening_table_file)), 'limb_darkening_kepler_array.npy')
+    return lines
 
 
 def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobname='job_noname',
@@ -433,6 +522,8 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     :type output_error_overwrite: bool
     :param arg_jobind: whether to parse the job index as an argument of the code which will be run in the job.
     :type arg_jobind: bool
+    :param env_name: Name of the conda environment to use. The default is the empty string, which is to run in the base env.
+    :type env_name: str
     :param other_args: list of lists with pairs of argument name and argument value, all strings
     :type other_args: list[list[str, str]]  or None
     :return: 
@@ -485,7 +576,7 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
 
     # text_to_write += "'conda init; conda activate " + str(env_name) + "; "
     text_to_write += "source ~/.bashrc\n"
-    text_to_write += "conda activate\n"
+    text_to_write += "conda activate " + env_name + "\n"
     # text_to_write += "conda activate " + str(env_name) + "\n"
     text_to_write += str(code_file)
     if arg_jobind:
@@ -582,7 +673,8 @@ def report_exception(exception, file_to_append, title='', info=''):
 
 # ####################################################################################################################
 # FILE LOCKING
-Dt_wait_locker = 0.001  # s
+import fcntl
+Dt_wait_locker = 2.  # s  # -> this number is just a scale, the waiting time will be random
 Waiting_time_limit_locker = 120  # s
 
 
@@ -600,30 +692,52 @@ class Locker:
     def __init__(self, file, dt_wait=Dt_wait_locker, max_waiting_time=Waiting_time_limit_locker):
         self.file = file
         self.locker_file = get_locker_file(self.file)
+        self.locker_file_fd = None
         self.dt_wait = dt_wait
         self.max_waiting_time = max_waiting_time
 
     def __enter__(self):
-        # self.open_lock = open(self.locker_file, 'w')
-        if is_locked(self.file):
-            self.wait_unlock()
-        lock_file(self.file)
+        self.wait_and_lock()
         return self
 
-    def wait_unlock(self):
+    def __exit__(self, exception_type, exception_value, exception_traceback):
+        self.unlock()
+
+    def wait_and_lock(self):
+        fd = os.open(self.locker_file, os.O_RDWR | os.O_CREAT | os.O_TRUNC)
+        locker_file_fd = None
+
         dt = self.dt_wait
         max_time = self.max_waiting_time
         t0 = time.time()
         waiting_time = 0.
-        # while is_locked(self.locker_file):
-        while os.path.exists(self.locker_file) and waiting_time < max_time:
-            time.sleep(dt + np.random.rand() * dt)
+        while waiting_time < max_time:
+            try:
+                # The LOCK_EX means that only one process can hold the lock
+                # The LOCK_NB means that the fcntl.flock() is not blocking,
+                # and we are able to implement termination of while loop, when timeout is reached.
+                # More information here: https://docs.python.org/3/library/fcntl.html#fcntl.flock
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except (IOError, OSError):
+                pass
+            else:
+                locker_file_fd = fd
+                break
+            time.sleep(np.random.rand() * dt * 2)
             waiting_time = time.time() - t0
-        if waiting_time >= max_time:
-            raise ValueError('File is locked, maximal waiting time exceeded!')
+        if locker_file_fd is None:
+            os.close(fd)
+            raise ValueError('File could not be locked!')
+        self.locker_file_fd = locker_file_fd
+        return self.locker_file_fd
 
-    def __exit__(self, exception_type, exception_value, exception_traceback):
-        unlock_file(self.file)
+    def unlock(self):
+        # Do not remove the lockfile:
+        #   https://github.com/benediktschmitt/py-filelock/issues/31
+        #   https://stackoverflow.com/questions/17708885/flock-removing-locked-file-without-race-condition
+        fcntl.flock(self.locker_file_fd, fcntl.LOCK_UN)
+        os.close(self.locker_file_fd)
+        return None
 
 
 def get_locker_file(file):
@@ -634,29 +748,33 @@ def get_locker_file(file):
     return locker_file
 
 
-def is_locked(file):
-    locker_file = get_locker_file(file)
-    if os.path.exists(locker_file):
-        return True
-    else:
-        return False
+# def is_locked(file):
+#     locker_file = get_locker_file(file)
+#     if os.path.exists(locker_file):
+#         return True
+#     else:
+#         return False
 
+# def lock_file(f):
+#     if f.writable(): fcntl.lockf(f, fcntl.LOCK_EX)
+#
+# def unlock_file(f):
+#     if f.writable(): fcntl.lockf(f, fcntl.LOCK_UN)
 
-def lock_file(file):
-    locker_file = get_locker_file(file)
-    if os.path.exists(locker_file):
-        raise ValueError(file+' is locked!')
-    else:
-        with open(locker_file, 'w') as _:
-            pass
-
-
-def unlock_file(file):
-    locker_file = get_locker_file(file)
-    if not os.path.exists(locker_file):
-        raise ValueError(file+' is not locked!')
-    else:
-        os.remove(locker_file)
-
+# def lock_file(file):
+#     locker_file = get_locker_file(file)
+#     if os.path.exists(locker_file):
+#         raise ValueError(file+' is locked!')
+#     else:
+#         with open(locker_file, 'w') as _:
+#             pass
+#
+#
+# def unlock_file(file):
+#     locker_file = get_locker_file(file)
+#     if not os.path.exists(locker_file):
+#         raise ValueError(file+' is not locked!')
+#     else:
+#         os.remove(locker_file)
 
 # ####################################################################################################################

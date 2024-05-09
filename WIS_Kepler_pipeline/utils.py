@@ -48,7 +48,10 @@ def dec_to_bin(num, return_list=False, return_str=False):
 
 def get_uniform_random_sequence(low, high, n):
     res = np.linspace(low, high, n, endpoint=False)
-    dx = res[1] - res[0]
+    if n > 1:
+        dx = res[1] - res[0]
+    else:
+        dx = high - low
     res = res + np.random.uniform(low=0, high=dx, size=n)
     return res
 

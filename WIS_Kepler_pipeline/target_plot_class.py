@@ -25,14 +25,11 @@ class KeplerTargetPlot(KeplerTarget):
                  overwrite_parameters_by_unpickle=False,
                  allow_output_folder_creation=True):
         KeplerTarget.__init__(self, target_id=target_id, data_location=data_location, output_location=output_location,
-                 load_pickled_attributes=load_pickled_attributes,
-                 get_transit_and_binary_info=get_transit_and_binary_info,
-                 gaia_kepler_file_path=gaia_kepler_file_path,
-                 koi_dict_file=koi_dict_file,
-                 ttv_dict_file=ttv_dict_file,
-                 villanova_dict_file=villanova_dict_file,
-                 overwrite_parameters_by_unpickle=overwrite_parameters_by_unpickle,
-                 allow_output_folder_creation=allow_output_folder_creation)
+                              load_pickled_attributes=load_pickled_attributes, get_transit_and_binary_info=get_transit_and_binary_info,
+                              gaia_kepler_file_path=gaia_kepler_file_path, koi_dict_file=koi_dict_file, ttv_dict_file=ttv_dict_file,
+                              villanova_dict_file=villanova_dict_file,
+                              overwrite_location_parameters_by_unpickle=overwrite_parameters_by_unpickle,
+                              allow_output_folder_creation=allow_output_folder_creation)
 
     def plot_fluxes(self, ax=None, show=True, figsize=(15, 5), clrs=((0.5, 0.5, 1), (0.2, 0.7, 0.5))):
         # TODO

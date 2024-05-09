@@ -3776,7 +3776,8 @@ class KeplerLightCurve(object):
             self.summed_corrections = summed_corrections
 
     def get_best_trigger(self, apply_veto_mes=True, fn_threshold=Fn_threshold_veto_mes, max_trials=Max_mes_veto_trials,
-                         in_gaussianized=False, save_veto_masks=False):
+                         in_gaussianized=False, save_veto_masks=False,
+                         min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction):
         """
         TODO: write
         # ATTENTION. SINCE WE USE VETO OF SES, THERE WILL BE ZEROS, AND THE INTEGRAL WILL NOT BE FULL
@@ -3841,7 +3842,7 @@ class KeplerLightCurve(object):
                 non_zero_mask = (~np.isclose(summed_stats_raw, 0)) & (~np.isclose(summed_vars, 0)) & (~np.isnan(summed_stats_raw)) & (
                     ~np.isinf(summed_vars))
                 n_non_zeros = len(np.where(non_zero_mask)[0])
-                if (n_non_zeros <= n_transits // 2) or (n_non_zeros < 3):
+                if (n_non_zeros <= n_transits * min_required_nonzero_transits_fraction) or (n_non_zeros < 3):
                     is_good = False
                 else:
                     p_val = ut.unequal_amplitude_veto(summed_stats_raw, stat_vars=summed_vars, negative=True)

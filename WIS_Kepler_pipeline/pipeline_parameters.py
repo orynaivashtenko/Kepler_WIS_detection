@@ -196,7 +196,7 @@ Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
 Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
 Problems_folder = None
-Run_name = 'run_10'
+Run_name = 'run_11'
 
 Kepler_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/KeplerFiles'
 

@@ -94,6 +94,7 @@ Pmax = 500
 P_bins_overlap = 5  # add this to the periods array for the best trigger not to be at the boundary (integral score will not be full)
 Duty_cycle = 0.03  # this was 0.1, but I changed it because sometimes it is not enough
 Fn_threshold_veto_mes = 0.02  # False negative for veto MES
+Min_required_nonzero_transits_fraction = 0.3  # Fraction of transits that are required to be non-zero to pass veto_mes
 Max_mes_veto_trials = 20000  # Try these many triggers for the best, and if they are all bad, then stop
 Std_time_scrambling = 10.  # days # for time slides
 Max_hole_pieces_scrampling = 30  # <1 day # Hole which is considered a reason to split the statistic to two pieces which can be shuffled

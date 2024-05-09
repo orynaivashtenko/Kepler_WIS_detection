@@ -10,6 +10,7 @@ import numpy as np
 import batman
 import copy
 import os
+from file_operations import read_quarters_from_file  # , write_quarters_to_txt
 import auxiliary_functions as af
 from utils import whiten_vector
 from pipeline_parameters import Default_template_bank_folder, Default_templates_filename, \
@@ -142,7 +143,7 @@ class TemplateBank(object):
                     if self.templates_file_dir[-4:] == '.npy':
                         self.initial_templates = np.load(self.templates_file_dir, allow_pickle=True)
                     elif self.templates_file_dir[-4:] == '.txt':
-                        self.initial_templates = af.read_quarters_from_file(self.templates_file_dir, dimension=3)
+                        self.initial_templates = read_quarters_from_file(self.templates_file_dir, dimension=3)
                     else:
                         raise TypeError('Unrecognized template bank file type!')
                 else:
@@ -159,7 +160,7 @@ class TemplateBank(object):
                         if self.shifts_file_dir[-4:] == '.npy':
                             self.shifts = np.load(self.shifts_file_dir, allow_pickle=True)
                         elif self.shifts_file_dir[-4:] == '.txt':
-                            self.shifts = af.read_quarters_from_file(self.shifts_file_dir, dimension=2)
+                            self.shifts = read_quarters_from_file(self.shifts_file_dir, dimension=2)
                         else:
                             raise TypeError('Unrecognized shifts file type!')
                     else:
@@ -1017,33 +1018,6 @@ def get_rp_inj(snr_req, wf_fd, n_transits, per_inj=300., m_1_3_r_s=1, inc_inj=90
     # snr_predic = np.linalg.norm(flux) * n_transits_max ** 0.5 * (rp_rs ** 2)
     rp_inj = (snr_req / (np.linalg.norm(flux_model) * n_transits ** 0.5)) ** 0.5
     return rp_inj
-
-
-def make_limb_darkening_coefficients_array(limb_darkening_table_file, save_file=False):
-    """
-    Opens the Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)
-    and returns the array of [Teff,logg,M/H,a,b], where a, b are the u1, u2 quadratic limb darkening coeffs.
-    #Limb_darkening_full_table_file = '/Collaboration-Kepler/KeplerFiles/limb_darkening_kepler_table.txt'
-    :param limb_darkening_table_file: The full path to the txt table with coefficietns
-    :type limb_darkening_table_file: str
-    :return: The array of relevant parameters and the limb darlening quadratic coefficients.
-    :rtype: numpy.ndarray
-    """
-    with open(limb_darkening_table_file, 'r') as fil:
-        # 'Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)'
-        lines = fil.readlines()
-        # Teff|logg|  M/H|      u|      a|      b|     c2|     c3|     c4|     a1|     a2|     a3|     a4
-    lines = [line.strip() for line in lines]
-    lines = [line for line in lines if line[0].isnumeric()]
-    lines = [line.split('|') for line in lines]
-    lines = [[line[0], line[1], line[2], line[4], line[5]] for line in lines]
-    # [Teff,logg,M/H,a,b]
-    lines = [[float(e.strip()) for e in line] for line in lines]
-    lines = np.array(lines)
-    lines = lines[lines[:, 0] != 1.]
-    if save_file:
-        np.save(os.path.join(os.path.dirname(limb_darkening_table_file)), 'limb_darkening_kepler_array.npy')
-    return lines
 
 
 def get_limb_darkening_coefs(teff, logg, metallicity, limb_darkening_array_file=Limb_darkening_array_file,
