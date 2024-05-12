@@ -1112,7 +1112,7 @@ class KeplerLightCurve(object):
         :type dp: float or None
         :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
             In units of days. Overriden by `periods`.
-        :type duty_cycle: float
+        :type duty_cycle: float or None
         :param periods: Specifies all the periods, and then the previous parameters are not needed.
             Overrides `p_min`, `p_max`, `dp`, `duty_cycle`
         :type periods: numpy.ndarray of float
@@ -2791,16 +2791,16 @@ class KeplerLightCurve(object):
     def check_possible_number_of_transits(self, period, return_number=True, return_relative=False):
         """
         Roughly checks how many non-zero transits there can be in this data. Meaning transits which
-        do not fall in the holes, assuming period `period`. It is a rough check needed to filter out stars that
-        really lack data.
+        do not fall in the holes, assuming period `period`.  It is a rough check needed to filter out stars that lack
+        data and will be probably rejected by veto_mes. The check is performed by roughly folding the mask and seeing
+        what is the maximal stack of non-masked points. Returned values can be either the actual number of such good transits, or their
+        relative fraction with respect to the total number of transits (how many layers there are in the fold).
         :param period: period in days
         :type period: float
-        :param return_number:
+        :param return_number: Whether to return the actual maximal number of transits
         :type return_number: bool
         :param return_relative: Whether to return the fraction of transits that should happen in this time.
         :type return_relative: bool
-        :return:
-        :rtype:
         """
         or_mask = np.bitwise_or.reduce(self.stat_masks_full, axis=0).astype(float)
         rough_folding = ut.rough_fold(array=or_mask, period_bins=int(np.round(period / self.dt_days)))
@@ -2814,12 +2814,38 @@ class KeplerLightCurve(object):
         elif return_number:
             return int(np.round(max_n))
 
-    # TODO TODODOODODOODODOODODODOOD
-    # def check_if_potentially_enough_transits(self, periods):
-    #
-    #     max_fraction_nonzero_transits = max(
-    #         self.klc.check_possible_number_of_transits(period=pers[0], relative_units=True, return_number=True, return_relative=False),
-    #         self.klc.check_possible_number_of_transits(period=pers[-1], relative_units=True))
+    def if_has_potentially_enough_transits(self, periods_to_check,
+                                           min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
+                                           min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction):
+        """
+        Checks whether it is possible from the rough geometric considerations to get needed number of valid transits
+        and their fraction with respect to the total expected number of transits for these periods.
+        It is a rough check needed to filter out stars that lack data and will be probably rejected by veto_mes. The check is performed by
+        roughly folding the mask and seeing what is the maximal stack of non-masked points.
+        Warning: the check is only done for the specified periods, so in principle, there can be other periods in-between
+        :param periods_to_check: List of periods to perform the chack on them 
+        :type periods_to_check: list of float or numpy.ndarray of float
+        :param min_required_nonzero_transits_number: Minimal number of valid transits that should be to pass the test
+        :type min_required_nonzero_transits_number: int
+        :param min_required_nonzero_transits_fraction: Minimal fraction of transits with respect to the total number
+            of transits allowed by time, that should be to pass the test
+        :type min_required_nonzero_transits_fraction: float
+        :return: Whether there are enough transits, as required
+        :rtype: bool
+        """
+        numbers = []
+        fractions = []
+        for per in periods_to_check:
+            num, frac = self.check_possible_number_of_transits(period=per, return_number=True, return_relative=True)
+            numbers.append(num)
+            fractions.append(frac)
+        max_number_nonzero_transits = np.max(numbers)
+        max_fraction_nonzero_transits = np.max(fractions)
+        if (max_number_nonzero_transits >= min_required_nonzero_transits_number
+                and max_fraction_nonzero_transits >= min_required_nonzero_transits_fraction):
+            return True
+        else:
+            return False
 
     def scramble_full_stats(self, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling,
                             random_state=None, random_seed=None, regenerate_pieces=False):
@@ -3199,6 +3225,9 @@ class KeplerLightCurve(object):
             if the trigger is on the boundary.
         :type safety_bins: int
         """
+        if duty_cycle is None:
+            duty_cycle = Duty_cycle
+
         if periods is None:
             self.pmin = p_min
             self.pmax = p_max
@@ -3811,6 +3840,7 @@ class KeplerLightCurve(object):
 
     def get_best_trigger(self, apply_veto_mes=True, fn_threshold=Fn_threshold_veto_mes, max_trials=Max_mes_veto_trials,
                          in_gaussianized=False, save_veto_masks=False,
+                         min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
                          min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction):
         """
         TODO: write
@@ -3880,7 +3910,8 @@ class KeplerLightCurve(object):
                 non_zero_mask = (~np.isclose(summed_stats_raw, 0)) & (~np.isclose(summed_vars, 0)) & (~np.isnan(summed_stats_raw)) & (
                     ~np.isinf(summed_vars))
                 n_non_zeros = len(np.where(non_zero_mask)[0])
-                if (n_non_zeros < n_transits * min_required_nonzero_transits_fraction) or (n_non_zeros < 3):
+                if ((n_non_zeros < n_transits * min_required_nonzero_transits_fraction)
+                        or (n_non_zeros < min_required_nonzero_transits_number)):
                     is_good = False
                 else:
                     p_val = ut.unequal_amplitude_veto(summed_stats_raw, stat_vars=summed_vars, negative=True)

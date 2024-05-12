@@ -8,6 +8,7 @@ import numpy as np
 
 # PARAMETERS INITIALIZATION
 
+Default_end_time = 1560.  # If the end of the mission is needed for some estimations
 Default_m_1_3_r_s = 1.  # Mass of the star in units of solar mass divided by the radius of the star to the power 1/3
 # Normalization
 Average_flux_method = 'mean'  # can be 'mean' or 'median
@@ -94,6 +95,7 @@ Pmax = 500
 P_bins_overlap = 5  # add this to the periods array for the best trigger not to be at the boundary (integral score will not be full)
 Duty_cycle = 0.03  # this was 0.1, but I changed it because sometimes it is not enough
 Fn_threshold_veto_mes = 0.02  # False negative for veto MES
+Min_required_nonzero_transits_number = 3  # Minimal number of valid transits that is required for a trigger
 Min_required_nonzero_transits_fraction = 0.3  # Fraction of transits that are required to be non-zero to pass veto_mes
 Max_mes_veto_trials = None  # If None, all the possibilities will be tried
 # -> Try these many triggers for the best, and if they are all bad, then stop
