@@ -50,7 +50,7 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
             job_filename = os.path.split(text[(text.index('Job <') + len('Job <')):text.index('> was submitted')])[1]  # take the job file name
             target_id = ''.join(list(map(lambda x: x if x.isnumeric() else '', list(fo.split('.')[0]))))  # will extract numerical part
             if 'Exited with exit code' in text or 'Terminated' in text or 'Killed' in text:
-                with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
+                with open(os.path.join(Output_stars_folder, target_id[:4], target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
                     print('FILE:  ' + fo, file=fs)
                     dtt = time.localtime()
                     print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
@@ -60,7 +60,7 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
                     print(file=fs)
                     print('########################################################################################################################################################################',
                           file=fs)
-                with open(Error_list_file, 'a') as elf:
+                with open(List_of_exited_jobs_file, 'a') as elf:
                     print(job_filename, file=elf)
             os.remove(os.path.join(Output_files_folder, fo))
 
@@ -70,7 +70,8 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
                 with open(os.path.join(Error_files_folder, fe)) as err_fil:
                     text_err = err_fil.read()
                     if len(text_err) > 10:  # just that it is not empty
-                        with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
+                        with open(os.path.join(Output_stars_folder, target_id[:4],
+                                               target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
                             print('FILE:  ' + fe, file=fs)
                             dtt = time.localtime()
                             print(str(dtt.tm_mday) + '.' + str(dtt.tm_mon) + '.' + str(dtt.tm_year) + ', ' + str(dtt.tm_hour) + ':' + str(
@@ -86,16 +87,6 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
 
             # if job_filename in os.listdir(Running_jobs_folder):  # I don't know why, but for some reason files are not always there
             #     os.remove(os.path.join(Running_jobs_folder, job_filename))  # remove the file which finished
-
-
-
-
-
-
-
-
-
-
 
 
 # bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py

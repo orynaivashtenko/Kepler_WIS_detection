@@ -22,6 +22,7 @@ Output_stars_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/ou
 Star_full_output_filename_postfix = 'full_output.txt'
 
 Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_list.txt'
+List_of_exited_jobs_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/exited_jobs.txt'
 
 # Queue = 'physics-short'
 Queue = 'risk'
