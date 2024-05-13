@@ -499,7 +499,7 @@ class KeplerTarget(object):
         self.failures = ''  # if something bad happens, we will write it here
         """Records problems in data or processing which appeared during the run"""
         self.is_good_for_processing = True
-        self.search_went_wrong = False
+        self.ses_search_failed = False
 
         if load_pickled_attributes:
             self.unpickle_small_attributes(overwrite_location_parameters=overwrite_location_parameters_by_unpickle)
@@ -1164,7 +1164,8 @@ class KeplerTarget(object):
         # TODO: work this out when we detect more than one planet per star.
         # TODO: why do we mask the planet, and not subtract? We could also subtract villanova ephemeris.
 
-    def run_ses_search(self, conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
+    def run_ses_search(self, min_quarters_to_process=Min_quarters_to_process,
+                       conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
                        mask_koi_planet=True, save_conditioned_data=False, save_connected_stats=True,
                        connected_stats_filename_postfix=Connected_statistic_data_filename_postfix,
                        save_no_veto_no_score_cor_stats=True, stop_if_bad=True,
@@ -1182,6 +1183,9 @@ class KeplerTarget(object):
         - Saving the processed data for future use
         The next stage after this would be to run the periodicity search.
 
+        :param min_quarters_to_process: Minimal number of quarters that is required to process the data. If
+            there are fewer quarters, the search will stop.
+        :type min_quarters_to_process: int
         :param save_conditioned_data: Whether to save conditioned data
         :type save_conditioned_data: bool
         :param conditioned_data_filename_postfix: Text added to the target ID in the name of the file saving conditioned data.
@@ -1211,36 +1215,40 @@ class KeplerTarget(object):
                                          output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s)  # Q17 is removed
         if len(self.klc.quarters) < 6:
             self.print_problem('has only ' + str(len(self.klc.quarters)) + ' quarters')
-        if len(self.klc.quarters) < 2:
-            self.is_too_short = True  # too few quarters to search for a 50-day period
-        self.bad_fft_check()  # Made on orig_fluxes
-        if self.is_koi and mask_koi_planet:
-            self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
-                                 include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives)
-            # Attention: we do not mask candidates
-        self.klc.condition_data()  # In outlier mask, positive and negative nsig_outliers are the same because we run inversion after.
-        self.was_notched = self.klc.was_notched
-        self.klc.condition_templates()
-        self.check_detectable_radius(stellar_radius=self.stellar_radius)
-        if self.is_bad_fft:
-            self.print_problem('is bad fft')
-        if self.is_koi:
-            self.print_problem('is koi')
-        if self.was_notched:
-            self.print_problem('was notched')
-        if (not self.is_bad_fft and not self.is_too_short) or (not stop_if_bad):
-            if save_conditioned_data:
-                self.klc.save_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
-            self.klc.detect_single_transits(apply_veto=True, gaussianize=True, save_no_veto_no_score_cor_stats_as_attr=True)
-            if save_no_veto_no_score_cor_stats:
-                self.klc.save_no_veto_no_score_cor_stats(filename_postfix=no_veto_no_score_cor_filename_postfix)
-            self.klc.connect_quarters()
-            if save_connected_stats:
-                self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix)
-            self.klc.interleave_shifts(delete_fulls=delete_full_stats)
 
-            t2 = time.time()
-            self.conditioning_ses_time = t2 - t1
+        if len(self.klc.quarters) < min_quarters_to_process:
+            self.is_too_short = True  # too few quarters to search for a 50-day period
+        else:
+            self.is_too_short = False
+            self.bad_fft_check()  # Made on orig_fluxes
+            if (not self.is_bad_fft) or (not stop_if_bad):
+                if self.is_koi and mask_koi_planet:
+                    self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
+                                         include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives)
+                    # Attention: we do not mask candidates
+                self.klc.condition_data()
+                self.was_notched = self.klc.was_notched
+                self.klc.condition_templates()
+                self.check_detectable_radius(stellar_radius=self.stellar_radius)
+                if self.is_bad_fft:
+                    self.print_problem('is bad fft')
+                if self.is_koi:
+                    self.print_problem('is koi')
+                if self.was_notched:
+                    self.print_problem('was notched')
+                if (not self.is_too_short) and (not self.is_bad_fft or (not stop_if_bad)):
+                    if save_conditioned_data:
+                        self.klc.save_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
+                    self.klc.detect_single_transits(apply_veto=True, gaussianize=True, save_no_veto_no_score_cor_stats_as_attr=True)
+                    if save_no_veto_no_score_cor_stats:
+                        self.klc.save_no_veto_no_score_cor_stats(filename_postfix=no_veto_no_score_cor_filename_postfix)
+                    self.klc.connect_quarters()
+                    if save_connected_stats:
+                        self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix)
+                    self.klc.interleave_shifts(delete_fulls=delete_full_stats)
+
+                    t2 = time.time()
+                    self.conditioning_ses_time = t2 - t1
 
     def get_connected_klc(self, reinitialize=True, conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
                           connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
@@ -1481,6 +1489,7 @@ class KeplerTarget(object):
     def run_main_search(self, p_min=P_min_search, p_max=P_max_search,
                         per_phases_per_chunk=Per_phases_per_chunk,
                         candidate_threshold=Stat_candidate_search,
+                        min_quarters_to_process=Min_quarters_to_process,
                         mask_koi_planet=True,
                         save_to_threshold_crossing_list=True,
                         save_conditioned_data=True,
@@ -1507,6 +1516,9 @@ class KeplerTarget(object):
             Is set by memory estimation. Number of phases is different for every period, therefore chunks will have
             different number of periods in them.
         :type per_phases_per_chunk: int
+        :param min_quarters_to_process: Minimal number of quarters that is required to process the data. If
+            there are fewer quarters, the search will stop.
+        :type min_quarters_to_process: int
         :param best_periodic_scores_filename_postfix: Text added to the target ID in the name of the file saving
             the best periodic scores found for this target. See naming notations.
         :type best_periodic_scores_filename_postfix: str
@@ -1570,18 +1582,18 @@ class KeplerTarget(object):
 
         try:
             self.run_ses_search(save_conditioned_data=save_conditioned_data,
+                                min_quarters_to_process=min_quarters_to_process,
                                 conditioned_data_filename_postfix=conditioned_data_filename_postfix,
                                 save_no_veto_no_score_cor_stats=save_no_veto_no_score_cor_stats,
                                 no_veto_no_score_cor_filename_postfix=no_veto_no_score_cor_stats_filename_postfix,
-                                save_connected_stats=save_connected_stats, stop_if_bad=True,
+                                save_connected_stats=save_connected_stats, stop_if_bad=stop_if_bad,
                                 connected_stats_filename_postfix=connected_stats_data_filename_postfix,
                                 mask_koi_planet=mask_koi_planet)
         except Exception as exc:
             report_exception(exception=exc, file_to_append=self.problems_file_location,
                              title='ses_search: ', info='')
-            if self.klc.statistics_interleaved is None:
-                self.search_went_wrong = True
-        if ((not self.is_bad_fft and not self.is_too_short) or (not stop_if_bad)) and self.search_went_wrong is not None:
+            self.ses_search_failed = True
+        if ((not self.is_too_short) and (not self.is_bad_fft or not stop_if_bad)) and not self.ses_search_failed:
             self.run_periodicity_search(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk,
                                         best_periodic_scores_filename_postfix=best_periodic_scores_filename_postfix,
                                         overlap_period_bins=overlap_period_bins)

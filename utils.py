@@ -2619,8 +2619,10 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
     best_scale = 1.
     best_coef = 0.  # If the mixture is not needed, this will be the answer
     more_than_upper = (counts_linear - upper) > 0  # Checking where the histigram deviates
-    # If the histogram does deviate somewhere:
-    if len(np.where(more_than_upper)[0]) > 0:
+    total_dev_bins = np.sum(more_than_upper[centr_bins_linear >= beg_min])
+
+    # Whether the histogram has significant deviation in relevant bins:
+    if total_dev_bins > 0 and np.max(stats) > beg_min:
         cum_more_than_upper = np.cumsum(more_than_upper)
         ind_dev = np.where((cum_more_than_upper > min(7, cum_more_than_upper[-1] / 3)) & (centr_bins_linear >= beg_min))[0]
         if len(ind_dev) == 0:
@@ -2634,7 +2636,7 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
         ###########################################################################
         # QUADRATIC HIST
         stats_squared = np.array(stats) ** 2
-        bins_quadr = np.linspace(0, np.max(stats_squared) + 0.5, n_bins)
+        bins_quadr = np.linspace(0, np.max(bins_linear)**2, n_bins)
         counts_quadr_non_norm, bins_quadr = np.histogram(stats_squared, bins=bins_quadr, density=False)
         last_non_zero = np.where(counts_quadr_non_norm > 0)[0][-1]
         counts_quadr_non_norm = counts_quadr_non_norm[:last_non_zero + 1]

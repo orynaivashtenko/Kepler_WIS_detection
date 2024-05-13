@@ -2802,17 +2802,47 @@ class KeplerLightCurve(object):
         :param return_relative: Whether to return the fraction of transits that should happen in this time.
         :type return_relative: bool
         """
-        or_mask = np.bitwise_or.reduce(self.stat_masks_full, axis=0).astype(float)
-        rough_folding = ut.rough_fold(array=or_mask, period_bins=int(np.round(period / self.dt_days)))
-        max_n = np.nanmax(rough_folding)
-        if return_relative:
-            min_expected_transits = ut.rough_fold(array=np.ones(len(or_mask)), period_bins=int(np.round(period / self.dt_days)))
-            if return_number:
-                return int(np.round(max_n)), max_n / min_expected_transits
-            else:
-                return max_n / min_expected_transits
-        elif return_number:
-            return int(np.round(max_n))
+        if hasattr(self, 'stat_masks_full') and self.stat_masks_full is not None:
+            or_mask = np.bitwise_or.reduce(self.stat_masks_full, axis=0).astype(float)
+            rough_folding = ut.rough_fold(array=or_mask, period_bins=int(np.round(period / self.dt_days)))
+            max_n = np.nanmax(rough_folding)
+            if return_relative:
+                min_expected_transits = ut.rough_fold(array=np.ones(len(or_mask)), period_bins=int(np.round(period / self.dt_days)))
+                max_fraction = np.max(rough_folding / min_expected_transits)
+                if return_number:
+                    return int(np.round(max_n)), max_fraction
+                else:
+                    return max_fraction
+            elif return_number:
+                return int(np.round(max_n))
+        else:
+            assert hasattr(self, 'stat_masks_interleaved') and self.stat_masks_interleaved is not None
+            assert hasattr(self, 'stat_masks_not_interleaved') and self.stat_masks_not_interleaved is not None
+
+            period_bins_interleaved = int(np.round(period / (self.dt_days / self.n_shifts)))
+            or_mask_interleaved = np.bitwise_or.reduce(self.stat_masks_interleaved, axis=0).astype(float)
+            rough_folding_interleaved = ut.rough_fold(array=or_mask_interleaved, period_bins=period_bins_interleaved)
+            max_n_interleaved = np.nanmax(rough_folding_interleaved)
+
+            period_bins_not_interleaved = int(np.round(period / self.dt_days))
+            or_mask_not_interleaved = np.bitwise_or.reduce(self.stat_masks_not_interleaved, axis=0).astype(float)
+            rough_folding_not_interleaved = ut.rough_fold(array=or_mask_not_interleaved, period_bins=period_bins_not_interleaved)
+            max_n_not_interleaved = np.nanmax(rough_folding_not_interleaved)
+            if return_relative:
+                min_expected_transits_interleaved = ut.rough_fold(array=np.ones(len(or_mask_interleaved)),
+                                                                  period_bins=period_bins_interleaved)
+                max_fraction_interleaved = np.max(rough_folding_interleaved / min_expected_transits_interleaved)
+
+                min_expected_transits_not_interleaved = ut.rough_fold(array=np.ones(len(or_mask_not_interleaved)),
+                                                                      period_bins=period_bins_not_interleaved)
+                max_fraction_not_interleaved = np.max(rough_folding_not_interleaved / min_expected_transits_not_interleaved)
+                if return_number:
+                    return (max(int(np.round(max_n_interleaved)), int(np.round(max_n_not_interleaved))),
+                            max(max_fraction_interleaved, max_fraction_not_interleaved))
+                else:
+                    return max(max_fraction_interleaved, max_fraction_not_interleaved)
+            elif return_number:
+                return max(int(np.round(max_n_interleaved)), int(np.round(max_n_not_interleaved)))
 
     def if_has_potentially_enough_transits(self, periods_to_check,
                                            min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
