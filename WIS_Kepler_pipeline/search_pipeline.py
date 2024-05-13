@@ -219,7 +219,7 @@ class KeplerLightCurve(object):
         """Minimal Kepler time of the considered data"""
         self.tmax = np.nanmax([np.nanmax(t) for t in self.times])
         """Maximal Kepler time of the considered data"""
-        self.T_mission = self.tmax - self.tmin  # NOT CHANGED IN TIME SLIDES
+        self.t_mission = self.tmax - self.tmin  # NOT CHANGED IN TIME SLIDES
         """Total time span in days of the considered data"""
         tmax = np.max(np.array([len(t) for t in self.orig_times]))  # maximum length of the time
         # the closest (but bigger) power of 2 to the length        Tmax += tm.L_ban
@@ -1112,7 +1112,7 @@ class KeplerLightCurve(object):
         :type dp: float or None
         :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
             In units of days. Overriden by `periods`.
-        :type duty_cycle: float
+        :type duty_cycle: float or None
         :param periods: Specifies all the periods, and then the previous parameters are not needed.
             Overrides `p_min`, `p_max`, `dp`, `duty_cycle`
         :type periods: numpy.ndarray of float
@@ -2788,6 +2788,95 @@ class KeplerLightCurve(object):
                                                                            is_time_cut=~self.is_zero_padded, dt=self.dt_days,
                                                                            fill_gaps_by_nan=False)[1]
 
+    def check_possible_number_of_transits(self, period, return_number=True, return_relative=False):
+        """
+        Roughly checks how many non-zero transits there can be in this data. Meaning transits which
+        do not fall in the holes, assuming period `period`.  It is a rough check needed to filter out stars that lack
+        data and will be probably rejected by veto_mes. The check is performed by roughly folding the mask and seeing
+        what is the maximal stack of non-masked points. Returned values can be either the actual number of such good transits, or their
+        relative fraction with respect to the total number of transits (how many layers there are in the fold).
+        :param period: period in days
+        :type period: float
+        :param return_number: Whether to return the actual maximal number of transits
+        :type return_number: bool
+        :param return_relative: Whether to return the fraction of transits that should happen in this time.
+        :type return_relative: bool
+        """
+        if hasattr(self, 'stat_masks_full') and self.stat_masks_full is not None:
+            or_mask = np.bitwise_or.reduce(self.stat_masks_full, axis=0).astype(float)
+            rough_folding = ut.rough_fold(array=or_mask, period_bins=int(np.round(period / self.dt_days)))
+            max_n = np.nanmax(rough_folding)
+            if return_relative:
+                min_expected_transits = ut.rough_fold(array=np.ones(len(or_mask)), period_bins=int(np.round(period / self.dt_days)))
+                max_fraction = np.max(rough_folding / min_expected_transits)
+                if return_number:
+                    return int(np.round(max_n)), max_fraction
+                else:
+                    return max_fraction
+            elif return_number:
+                return int(np.round(max_n))
+        else:
+            assert hasattr(self, 'stat_masks_interleaved') and self.stat_masks_interleaved is not None
+            assert hasattr(self, 'stat_masks_not_interleaved') and self.stat_masks_not_interleaved is not None
+
+            period_bins_interleaved = int(np.round(period / (self.dt_days / self.n_shifts)))
+            or_mask_interleaved = np.bitwise_or.reduce(self.stat_masks_interleaved, axis=0).astype(float)
+            rough_folding_interleaved = ut.rough_fold(array=or_mask_interleaved, period_bins=period_bins_interleaved)
+            max_n_interleaved = np.nanmax(rough_folding_interleaved)
+
+            period_bins_not_interleaved = int(np.round(period / self.dt_days))
+            or_mask_not_interleaved = np.bitwise_or.reduce(self.stat_masks_not_interleaved, axis=0).astype(float)
+            rough_folding_not_interleaved = ut.rough_fold(array=or_mask_not_interleaved, period_bins=period_bins_not_interleaved)
+            max_n_not_interleaved = np.nanmax(rough_folding_not_interleaved)
+            if return_relative:
+                min_expected_transits_interleaved = ut.rough_fold(array=np.ones(len(or_mask_interleaved)),
+                                                                  period_bins=period_bins_interleaved)
+                max_fraction_interleaved = np.max(rough_folding_interleaved / min_expected_transits_interleaved)
+
+                min_expected_transits_not_interleaved = ut.rough_fold(array=np.ones(len(or_mask_not_interleaved)),
+                                                                      period_bins=period_bins_not_interleaved)
+                max_fraction_not_interleaved = np.max(rough_folding_not_interleaved / min_expected_transits_not_interleaved)
+                if return_number:
+                    return (max(int(np.round(max_n_interleaved)), int(np.round(max_n_not_interleaved))),
+                            max(max_fraction_interleaved, max_fraction_not_interleaved))
+                else:
+                    return max(max_fraction_interleaved, max_fraction_not_interleaved)
+            elif return_number:
+                return max(int(np.round(max_n_interleaved)), int(np.round(max_n_not_interleaved)))
+
+    def if_has_potentially_enough_transits(self, periods_to_check,
+                                           min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
+                                           min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction):
+        """
+        Checks whether it is possible from the rough geometric considerations to get needed number of valid transits
+        and their fraction with respect to the total expected number of transits for these periods.
+        It is a rough check needed to filter out stars that lack data and will be probably rejected by veto_mes. The check is performed by
+        roughly folding the mask and seeing what is the maximal stack of non-masked points.
+        Warning: the check is only done for the specified periods, so in principle, there can be other periods in-between
+        :param periods_to_check: List of periods to perform the chack on them 
+        :type periods_to_check: list of float or numpy.ndarray of float
+        :param min_required_nonzero_transits_number: Minimal number of valid transits that should be to pass the test
+        :type min_required_nonzero_transits_number: int
+        :param min_required_nonzero_transits_fraction: Minimal fraction of transits with respect to the total number
+            of transits allowed by time, that should be to pass the test
+        :type min_required_nonzero_transits_fraction: float
+        :return: Whether there are enough transits, as required
+        :rtype: bool
+        """
+        numbers = []
+        fractions = []
+        for per in periods_to_check:
+            num, frac = self.check_possible_number_of_transits(period=per, return_number=True, return_relative=True)
+            numbers.append(num)
+            fractions.append(frac)
+        max_number_nonzero_transits = np.max(numbers)
+        max_fraction_nonzero_transits = np.max(fractions)
+        if (max_number_nonzero_transits >= min_required_nonzero_transits_number
+                and max_fraction_nonzero_transits >= min_required_nonzero_transits_fraction):
+            return True
+        else:
+            return False
+
     def scramble_full_stats(self, max_hole=Max_hole_pieces_scrampling, max_piece=Max_piece_scrambling, min_piece=Min_piece_scrambling,
                             random_state=None, random_seed=None, regenerate_pieces=False):
         """
@@ -2991,9 +3080,6 @@ class KeplerLightCurve(object):
         if hasattr(self, 'whitened_templates_td'):
             del self.whitened_templates_td
             self.whitened_templates_td = None
-        if hasattr(self, 'stat_moving_vars'):
-            del self.stat_moving_vars
-            self.stat_moving_vars = None
         if hasattr(self, 'notch_soss'):
             del self.notch_soss
             self.notch_soss = None
@@ -3033,6 +3119,9 @@ class KeplerLightCurve(object):
         if hasattr(self, 'stats_raw_no_veto_no_score_cor'):
             del self.stats_raw_no_veto_no_score_cor
             self.stats_raw_no_veto_no_score_cor = None
+        if hasattr(self, 'veto_masks'):
+            del self.veto_masks
+            self.veto_masks = None
         if hasattr(self, 'veto_bit_masks'):
             del self.veto_bit_masks
             self.veto_bit_masks = None
@@ -3060,7 +3149,7 @@ class KeplerLightCurve(object):
         :rtype: numpy.ndarray 1d
         """
         if t_mission is None:
-            t_mission = self.T_mission
+            t_mission = self.t_mission
         if p_min is None:
             p_min = self.pmin
         if p_max is None:
@@ -3116,7 +3205,7 @@ class KeplerLightCurve(object):
         :type duty_cycle: float
         :param dt: Time step of the data. If None, `self.dt_days` will be used
         :type dt: float or None
-        :param t_mission: Total duration of the mission in days. If None, `self.T_mission` will be used
+        :param t_mission: Total duration of the mission in days. If None, `self.t_mission` will be used
         :type t_mission: float
         :return: list of chunks of small period grids
         :rtype: list of np.ndarray 1d
@@ -3126,7 +3215,7 @@ class KeplerLightCurve(object):
         if p_max is None:
             p_max = self.pmax
         if t_mission is None:
-            t_mission = self.T_mission
+            t_mission = self.t_mission
         if dt is None:
             dt = self.dt_days
         return ut.make_periods_chunks(p_min=p_min, p_max=p_max, per_phases_per_chunk=per_phases_per_chunk,
@@ -3166,6 +3255,9 @@ class KeplerLightCurve(object):
             if the trigger is on the boundary.
         :type safety_bins: int
         """
+        if duty_cycle is None:
+            duty_cycle = Duty_cycle
+
         if periods is None:
             self.pmin = p_min
             self.pmax = p_max
@@ -3740,7 +3832,7 @@ class KeplerLightCurve(object):
             corrections = self.corrections_not_interleaved[templ_not_interl]
             is_interleaved = False
         summed_indices, expected_times = af.find_indices(time=time, first_time=first_transit_time, period=period, return_times=True)
-        summed_indices = np.array(summed_indices)
+        summed_indices = np.array(summed_indices).astype(int)
         # WARNING ATTENTION: in reality, it is impossible to find these values. The resulting score is marginalized
         # over all the templates, and this thing is per template.
         if is_interleaved and minimize_downsampling:  # try to release the consequence of downsampling
@@ -3749,6 +3841,7 @@ class KeplerLightCurve(object):
             for si in indss:
                 assert (si - len(var) < (self.n_shifts - 1)).all(), 'Indices are out of range!'
                 si[si - len(var) >= 0] = len(var) - 1
+                si = si.astype(int)
                 msk = (~np.isinf(var[si]) & (~np.isclose(var[si], 0)))
                 scal = np.sum(var[si][msk]) ** 0.5
                 if scal == 0:
@@ -3777,6 +3870,7 @@ class KeplerLightCurve(object):
 
     def get_best_trigger(self, apply_veto_mes=True, fn_threshold=Fn_threshold_veto_mes, max_trials=Max_mes_veto_trials,
                          in_gaussianized=False, save_veto_masks=False,
+                         min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
                          min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction):
         """
         TODO: write
@@ -3816,6 +3910,10 @@ class KeplerLightCurve(object):
         flat_inds = ut.nanargsort(stats_periodic_mar_temp[self.period_overlap_bins: len(
             stats_periodic_mar_temp) - self.period_overlap_bins, :].flatten())
         sorting_inds = np.array([flat_inds // shap_x + self.period_overlap_bins, flat_inds % shap_x]).T[::-1]
+        if max_trials is not None:
+            max_trials = min(max_trials, len(sorting_inds))
+        else:
+            max_trials = len(sorting_inds)
 
         if apply_veto_mes:
             veto_mes_masks = np.ones_like(stats_periodic_mar_temp).astype(bool)
@@ -3842,7 +3940,8 @@ class KeplerLightCurve(object):
                 non_zero_mask = (~np.isclose(summed_stats_raw, 0)) & (~np.isclose(summed_vars, 0)) & (~np.isnan(summed_stats_raw)) & (
                     ~np.isinf(summed_vars))
                 n_non_zeros = len(np.where(non_zero_mask)[0])
-                if (n_non_zeros <= n_transits * min_required_nonzero_transits_fraction) or (n_non_zeros < 3):
+                if ((n_non_zeros < n_transits * min_required_nonzero_transits_fraction)
+                        or (n_non_zeros < min_required_nonzero_transits_number)):
                     is_good = False
                 else:
                     p_val = ut.unequal_amplitude_veto(summed_stats_raw, stat_vars=summed_vars, negative=True)
@@ -3857,37 +3956,54 @@ class KeplerLightCurve(object):
             if save_veto_masks:
                 self.veto_mes_masks = veto_mes_masks
             if not is_good:
-                raise ValueError('No MES passing veto was found after ' + str(index_counter) + ' trials!')
+                # raise ValueError('No MES passing veto was found after ' + str(index_counter) + ' trials!')
+                best_per_index, best_phase_index = np.nan, np.nan
         else:
             best_per_index, best_phase_index = sorting_inds[0]
         if not in_gaussianized:
             self.best_per_index = best_per_index
             self.best_phase_index = best_phase_index
-            self.best_period = self.periods[self.best_per_index]
-            self.best_ftt = self.tmin + self._phases[self.best_phase_index]
-            if self.statistics_periodic is not None:
-                self.best_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=False,
-                                                                        ind_period=self.best_per_index,
-                                                                        ind_phase=self.best_phase_index, period=self.best_period)
-            self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
-            self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
-            self.best_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index, phase_ind_max=self.best_phase_index,
-                                                                      gaussianized=False)
+            if (not np.isnan(best_per_index)) and (not np.isnan(best_phase_index)):
+                self.best_period = self.periods[self.best_per_index]
+                self.best_ftt = self.tmin + self._phases[self.best_phase_index]
+                if self.statistics_periodic is not None:
+                    self.best_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=False,
+                                                                            ind_period=self.best_per_index,
+                                                                            ind_phase=self.best_phase_index, period=self.best_period)
+                self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
+                self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
+                self.best_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
+                                                                          phase_ind_max=self.best_phase_index, gaussianized=False)
+            else:
+                self.best_period = np.nan
+                self.best_ftt = np.nan
+                self.best_template_index = np.nan
+                self.best_stat = np.nan
+                self.best_stat_gaussianized = np.nan
+                self.best_integral_score = np.nan
+
         else:
             self.best_g_per_index = best_per_index
             self.best_g_phase_index = best_phase_index
-            self.best_g_period = self.periods[self.best_g_per_index]
-            if self.stats_gaussianized_periodic is not None:
-                self.best_g_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=True,
-                                                                          ind_period=self.best_g_per_index,
-                                                                          ind_phase=self.best_g_phase_index,
-                                                                          period=self.best_g_period)
+            if (not np.isnan(best_per_index)) and (not np.isnan(best_phase_index)):
+                self.best_g_period = self.periods[self.best_g_per_index]
+                if self.stats_gaussianized_periodic is not None:
+                    self.best_g_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=True,
+                                                                              ind_period=self.best_g_per_index,
+                                                                              ind_phase=self.best_g_phase_index,
+                                                                              period=self.best_g_period)
 
-            self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
-            self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
-            self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
-            self.best_g_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_g_per_index,
-                                                                        phase_ind_max=self.best_g_phase_index, gaussianized=True)
+                self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
+                self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
+                self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
+                self.best_g_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_g_per_index,
+                                                                            phase_ind_max=self.best_g_phase_index, gaussianized=True)
+            else:
+                self.best_g_template_index = np.nan
+                self.best_g_stat = np.nan
+                self.best_g_stat_gaussianized = np.nan
+                self.best_g_ftt = np.nan
+                self.best_g_integral_score = np.nan
 
     def make_best_periodic_scores(self):
         """

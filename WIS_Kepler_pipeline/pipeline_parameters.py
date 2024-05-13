@@ -147,12 +147,18 @@ def get_occurrence_table_enlarged():
 #     return result
 
 
+# MASKING KOIs
+Mask_kepler_candidates = False
+Mask_kepler_false_positives = False
+
 # TARGET CLASS PARAMETERS
+
+Min_quarters_to_process = 4  # If there are less quarters in the data, the search will not run
 # Bad fft check:
 Amp_max_bad_fft = 300.  # Limit amplitude of the fft maximum (above it the maximum is bad)
 Dif_max_bad_fft = 11.  # Maximal difference between the value at point and the surrounding. Bigger is bad.
 
-
+# Search
 P_min_search = 30  # days
 P_max_search = 500  # days
 Rp_re_max = 11  # this number of earth radii we search for now. 11 is Jupiter
@@ -218,7 +224,7 @@ if Working_place == 'WEXAC':
     Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
-    Problems_folder = '/home/labs/barakz/orynai/' + str(Run_name) + '/outputs_stars'
+    Problems_folder = '/home/labs/barakz/orynai/' + str(Run_name) + '/problems_stars'
 
 Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
 Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')

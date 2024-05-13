@@ -193,7 +193,7 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
     sum2 = np.concatenate(([0], sum2[:-1]))
     counts = np.nancumsum(mask)
     counts = np.concatenate(([0], counts[:-1]))
-    mov_var = np.ones(len(signal)) * np.inf
+    # mov_var = np.ones(len(signal)) * np.inf
 
     hnw = nwind // 2
     hng = ngap // 2
@@ -233,25 +233,21 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
 def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128):
     """
     Calculates the std of data without impact of outliers and excluding masked regions
-
-    Parameters
-    ----------
-    data : np.array 1d of float
-        The data, may contain nans.
-    nsig : float
-        Minimum amplitude in numbers of sigma (std) that is considered an outlier
-    mask : np.array 1d of bool
-        mask of bad values (False is bad, True is good). If None, will be
+    :param data: The data, may contain nans.
+    :type data: np.array 1d of float
+    :param nsig: Minimum amplitude in numbers of sigma (std) that is considered an outlier
+    :type nsig: float
+    :param n_iterations:
+    :type n_iterations:
+    :param mask: mask of bad values (False is bad, True is good). If None, will be
         replaced by measured mask of nans.
-    detrend : bool
-        If True, data will be detrended before measuring std
-    detr_len : int
-        If detrend, data will be detrended with this detrending length
-
-    Returns
-    -------
-    float
-        std of the data
+    :type mask: np.array 1d of bool
+    :param detrend: If True, data will be detrended before measuring std
+    :type detrend: bool
+    :param detr_len: If detrend, data will be detrended with this detrending length
+    :type detr_len: int
+    :return: std of the data
+    :rtype: float
     """
     if mask is None:
         mask = ~np.isnan(data)
@@ -326,23 +322,22 @@ def window_data(data, alpha=0.1):
 def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, return_zero_padding_ends=False):
     """
     Pads data by zeros from the two sides.
-
-    Parameters
-    -------------------
-    data : array 1d
-    support : int or None
-        the new length of padded data. If None, The new length will be the closest power of 2 greater or equal to len(data)+minimal_extension
-    minimal_extension : int
-        If `support` is None, the new length of padded data is len(data)+minimal_extension
-    return_zero_padding_ends : bool
-        Whether to return the tuple of number of zeros padded from each side
-
-    Returns
-    -------------------
-    If return_zero_padding_ends:
-        data_padded, (zerlen1, zerlen2)
-    Else:
-        data_padded
+    :param data:
+    :type data: numpy.array 1d
+    :param support: the new length of padded data. If None, The new length will be the closest power of 2 greater
+        or equal to len(data)+minimal_extension
+    :type support: int or None
+    :param minimal_extension: If `support` is None, the new length of padded data is len(data)+minimal_extension
+    :type minimal_extension: int
+    :param in_the_center:
+    :type in_the_center:
+    :param return_zero_padding_ends: Whether to return the tuple of number of zeros padded from each side
+    :type return_zero_padding_ends: bool
+    :return: If return_zero_padding_ends:
+                 data_padded, (zerlen1, zerlen2)
+             Else:
+                 data_padded
+    :rtype:
     """
     if support is None:
         # the closest (but bigger) power of 2 to the length
@@ -442,8 +437,12 @@ def window_wf_td_fun(wf_fd,  extension_coef=2.5, meas_len=256):
     """
     applies the tukey window to one whitening template in the time domain to make it smooth but preserve the mean zero
     because this will ensure that the lowest frequency gets zero in the Fourier domain whitening filter.
+    :param wf_fd:
+    :type wf_fd:
     :param extension_coef:
     :type extension_coef:
+    :param meas_len:
+    :type meas_len:
     :return:
     :rtype:
         """
@@ -563,16 +562,16 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
         If vec is the time domain whitening filter, the result will be
         the INVERSE covariance matrix.
     """
-    L = len(vec)
+    length = len(vec)
     if pad_by_zeros:
-        vec = np.concatenate((vec, np.zeros(L)))
-        L = len(vec)
-    prod = np.array([np.sum(vec * np.roll(vec, i)) for i in range(L)])
-    C = np.array([[prod[k - j] for k in range(L)] for j in range(L)])
+        vec = np.concatenate((vec, np.zeros(length)))
+        length = len(vec)
+    prod = np.array([np.sum(vec * np.roll(vec, i)) for i in range(length)])
+    cov_matr = np.array([[prod[k - j] for k in range(length)] for j in range(length)])
     if pad_by_zeros and trim_zeros:
-        assert L % 4 == 0, 'The length of the vector has to be even.'
-        return C[L // 4:-L // 4, L // 4:-L // 4]
-    return C
+        assert length % 4 == 0, 'The length of the vector has to be even.'
+        return cov_matr[length // 4:-length // 4, length // 4:-length // 4]
+    return cov_matr
 
 
 def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32):
@@ -825,7 +824,7 @@ def trend_fft(data, nperseg, endlen=None, mask=None, data_low=None, fit_order='c
     data = np.array(data)
     time = np.arange(len(data))
     nanmask = ~np.isnan(data)
-    if not (nanmask).all():
+    if not nanmask.all():
         data_i = interpolate_over_mask(data, mask=nanmask)
     else:
         data_i = data
@@ -955,45 +954,41 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
     exceeds high-frequency standard deviation of the data multiplied by `nsig_step`,
     then the pieces are detrended separately.
     Attention: trend will contain nans in the places of mask.
-
-    Parameters
-    ----------
-    data : Union[ndarray, List[float]] # numpy.array or list of float
-        Data vector to be detrended
-    nperseg : int
-        Wavelength below which the frequencies should be included in the trend.
-    endlen : int
-        Length of the data in the ends to be fitted by quadratic polynomial
-    mask : array of bool
-        Masking good data points with `True`, bad data points with `False`.
-    nsig_step : float
-        Minimal step between the edges of t wo subsequent pieces so that they
+    :param data: Data vector to be detrended
+    :type data: Union[ndarray, List[float]] # numpy.array or list of float
+    :param big_mask:
+    :type big_mask:
+    :param mask: Masking good data points with `True`, bad data points with `False`.
+    :type mask: numpy.ndarray of bool
+    :param nperseg: Wavelength below which the frequencies should be included in the trend.
+    :type nperseg: int
+    :param endlen: Length of the data in the ends to be fitted by quadratic polynomial
+    :type endlen: int
+    :param nsig_step: Minimal step between the edges of t wo subsequent pieces so that they
         will be detrended separately (in units of high-frequency std of `data`)
-    checklen : int
-        Length of gap extension data from the edges used to calculate the
+    :type nsig_step: float
+    :param checklen: Length of gap extension data from the edges used to calculate the
         residuals to determine where are the steps.
-    residual_threshold_step_in_sigma : float
-        In the end, the trend is verified for having steps around holes in
+    :type checklen: int
+    :param residual_threshold_step_in_sigma: In the end, the trend is verified for having steps around holes in
         the residuals. If the residuals before and after the hole differ more than
         by `residual_threshold_step_in_sigma` sigma, the piece will be cut, and
         its ends will be fitted separately.
-    slice_for_residual_step : int
-        Length of slice used to calculate the median values around the hole
+    :type residual_threshold_step_in_sigma: float
+    :param slice_for_residual_step: Length of slice used to calculate the median values around the hole
         which are needed to identify steps after the first trend attempt.
-    return_trend : bool
-        Whether to return trend in addition to detrended data
-
-    Returns
-    -------
-    if return_trend:
-        detrended, trend : numpy.arrays
-        Detrended data and trend
-    else:
-        detrended : numpy.array
-        `detrended` is detrended data containing zeros in the bad places of masks.
-        `trend` is the low-frequency trend of the data containinhg nans
-        in the bad places of masks
-
+    :type slice_for_residual_step: float
+    :param return_trend: Whether to return trend in addition to detrended data
+    :type return_trend: bool
+    :return: if return_trend:
+                 detrended, trend : numpy.arrays
+                 Detrended data and trend
+             else:
+                 detrended : numpy.array
+                 `detrended` is detrended data containing zeros in the bad places of masks.
+                 `trend` is the low-frequency trend of the data containinhg nans
+                 in the bad places of masks
+    :rtype:
     """
     threshold_step_size_std = residual_threshold_step_in_sigma  # redefining names
     medlen = slice_for_residual_step
@@ -1111,18 +1106,21 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
                     detr_length_outliers=Detr_length_outliers, remove_outliers_light=False):
     """
     Amateur detrending function. Subtracting the moving mean or median from the data.
-
-    Parameters
-    --------------------------
-    data : np.array 1d or list. Data sample from which the moving average has to be subtracted
-    length : int. The length of sample to calculate moving average. At a given point,
+    :param data: Data sample from which the moving average has to be subtracted
+    :type data: np.array 1d or list
+    :param length: The length of sample to calculate moving average. At a given point,
                     half length to the left and to the right are taken.
-    method : str. Kind of moving value to subtract: 'median' or 'mean'
+    :type length: int
+    :param mask:
+    :type mask:
+    :param method: Kind of moving value to subtract: 'median' or 'mean'
                     The default is 'median', because it is less sensitive to outliers.
-    endmethod: str. Kind of moving value to subtract at the ends of the data (see below): 'median' or 'mean'.
+    :type method: str
+    :param endmethod: Kind of moving value to subtract at the ends of the data (see below): 'median' or 'mean'.
                     The default is 'mean', because it is less sensitive to small
                     amount of data samples available in the ends.
-    ends : str. How to treat the points closer than length/2 to the ends of the data:
+    :type endmethod: str
+    :param ends: How to treat the points closer than length/2 to the ends of the data:
                 'symmetric' :  endlen is length/4
                                1) if point<endlen, take endlen samples from the right, and up to zero from the left
                                2) if endlen<point<half length, takethe same number of points from left and right
@@ -1134,15 +1132,25 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
                                2) if point>half length, take usual half length from both sides
                                for the second end, the same in opposite direction
                 'cut' : not to calculate the result at this point. The size of the output will be len(data)-length
-    endlen : int, default is None. Minimal length to take from the end for determining the average in the
+    :type ends: str
+    :param endlen: Minimal length to take from the end for determining the average in the
         first (last) point. If None, will be assigned depending on the method (see description of ends)
-    return_trend : bool. Whether to return the trend in addition to the detrended data
-    keep_overall_level : bool. If true, the total mean or median will be added to the data (that is preserved)
-
-    Returns
-    --------------------------
-    if not return_trend: data with subtracted mean, np.array
-    if return_trend: data with subtracted mean, np.array; trend (moving mean), np.array
+    :type endlen: int or None
+    :param return_trend: Whether to return the trend in addition to the detrended data
+    :type return_trend: bool
+    :param keep_overall_level: If true, the total mean or median will be added to the data (that is preserved)
+    :type keep_overall_level: bool
+    :param remove_outliers:
+    :type remove_outliers:
+    :param nsig_outliers:
+    :type nsig_outliers:
+    :param detr_length_outliers:
+    :type detr_length_outliers:
+    :param remove_outliers_light:
+    :type remove_outliers_light:
+    :return: if not return_trend: data with subtracted mean, np.array
+             if return_trend: data with subtracted mean, np.array; trend (moving mean), np.array
+    :rtype:
     """
     assert ((method == 'mean') or (method == 'median')), 'Incorrect method specified'
     data = np.array(data)
@@ -1179,7 +1187,7 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
             for i in np.arange(0, l2):
                 if (mask[0:i + int(l4 + (l2 - l4) / l2 * i)]).any():
                     m = np.nanmedian((data[0:i + int(l4 + (l2 - l4) / l2 * i)]
-                                     )[mask[0:i + int(l4 + (l2 - l4) / l2 * i)]])
+                                      )[mask[0:i + int(l4 + (l2 - l4) / l2 * i)]])
                     trend.append(m)
                     res.append(data[i] - m)
                 else:
@@ -1190,7 +1198,7 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
             for i in np.arange(0, l2):
                 if (mask[0:i + int(l4 + (l2 - l4) / l2 * i)]).any():
                     m = np.nanmean((data[0:i + int(l4 + (l2 - l4) / l2 * i)]
-                                   )[mask[0:i + int(l4 + (l2 - l4) / l2 * i)]])
+                                    )[mask[0:i + int(l4 + (l2 - l4) / l2 * i)]])
                     trend.append(m)
                     res.append(data[i] - m)
                 else:
@@ -1221,7 +1229,7 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
             for i in np.arange(len(data) - l2, len(data)):
                 if (mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]).any():
                     m = np.nanmedian((data[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]
-                                     )[mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]])
+                                      )[mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]])
                     trend.append(m)
                     res.append(data[i] - m)
                 else:
@@ -1433,18 +1441,18 @@ def notch_fun(f0, fs=6.28, df=None, irl=None, htol=1e-4, min_val=0, min_db=None,
     # To use scipy.iirnotch we have to convert from out parameters to one accepted by it
     w0 = 2 * np.pi * f0 / fs  # Convert from physical frequency to the digital frequency
     if irl is not None:
-        D = htol ** (1 / irl)  # amplitude of the pole (close to unity)
-        dw = 2 * np.arctan(1 / D - 1)  # digital frequency width defined from it
-        Q = w0 / dw / 2  # Quality factor, dimensionless parameter that characterizes
-        # notch filter -3 dB bandwidth bw relative to its center frequency, Q = w0/bw
+        ampl = htol ** (1 / irl)  # amplitude of the pole (close to unity)
+        dw = 2 * np.arctan(1 / ampl - 1)  # digital frequency width defined from it
+        quality = w0 / dw / 2  # Quality factor, dimensionless parameter that characterizes
+        # notch filter -3 dB bandwidth bw relative to its center frequency, quality = w0/bw
         # (for some reason, it works correctly with factor of 1/2 )
     else:  # if the impulse response length is not specified, use df
         if df is not None:
-            Q = f0 / df / 2  # iQuality factor. In reality, Q gives w0/dw/2
+            quality = f0 / df / 2  # iQuality factor. In reality, quality gives w0/dw/2
             # for some reason, it works correctly with factor of 1/2
         else:
-            Q = 30  # the default quality factor if no defining parameter is specified
-    b, a = iirnotch(f0, Q, fs=fs)  # numerator and denominator polynomials of the IIR filter
+            quality = 30  # the default quality factor if no defining parameter is specified
+    b, a = iirnotch(f0, quality, fs=fs)  # numerator and denominator polynomials of the IIR filter
     # if we want to notch the frequency not to zero, but to some minimal value,
     # we beed to shift and renormalize the numerator
     if min_val != 0:
@@ -2223,7 +2231,7 @@ def pdf_max_norm(x, n=2, loc=0, scale=1):
     return sum
 
 
-def unequal_amplitude_veto_old(values, variances=None, A_all=None, indmax=None, A_1=None, units_of_snr=True):
+def unequal_amplitude_veto_old(values, variances=None, ampl_all=None, indmax=None, ampl_1=None, units_of_snr=True):
     values = np.array(values)
 
     if variances is None:
@@ -2234,23 +2242,23 @@ def unequal_amplitude_veto_old(values, variances=None, A_all=None, indmax=None, 
     variances = variances[~np.isnan(values)]
     values = values[~np.isnan(values)]
 
-    if A_all is None:
-        A_all = np.sum(values / variances) / np.sum(1 / variances)
+    if ampl_all is None:
+        ampl_all = np.sum(values / variances) / np.sum(1 / variances)
     if indmax is None:
         indmax = np.argmax(values)
-    if A_1 is None:
-        A_1 = values[indmax]
+    if ampl_1 is None:
+        ampl_1 = values[indmax]
 
-    expected_mean_H_all = sum(A_all ** 2 / variances) - A_1 * A_all / variances[indmax]
-    expected_variance_H_all = np.abs(
-        sum(A_all ** 2 / variances) - 2 * A_1 * A_all / variances[indmax] + A_1 ** 2 / variances[indmax])
-    statistic = -(A_all * sum(values / variances) - A_1 * values[indmax] / variances[indmax] - expected_mean_H_all)
-    if np.isclose(expected_variance_H_all, 0):
+    expected_mean_h_all = sum(ampl_all ** 2 / variances) - ampl_1 * ampl_all / variances[indmax]
+    expected_variance_h_all = np.abs(
+        sum(ampl_all ** 2 / variances) - 2 * ampl_1 * ampl_all / variances[indmax] + ampl_1 ** 2 / variances[indmax])
+    statistic = -(ampl_all * sum(values / variances) - ampl_1 * values[indmax] / variances[indmax] - expected_mean_h_all)
+    if np.isclose(expected_variance_h_all, 0):
         statistic = np.inf
     elif units_of_snr:
-        statistic = statistic / expected_variance_H_all ** 0.5
+        statistic = statistic / expected_variance_h_all ** 0.5
     else:
-        statistic = statistic / expected_variance_H_all
+        statistic = statistic / expected_variance_h_all
     return statistic
 
 
@@ -2293,7 +2301,7 @@ def unequal_amplitude_veto(stats_raw, stat_vars=None, negative=True):
     return p_val
 
 
-def fstr(f, nzdig=2, maxdec=5, flexible_length=True):  # nicely formatted string from numbers
+def fstr(f, nzdig=2, maxdec=5):  # , flexible_length=True):  # nicely formatted string from numbers
     """
     Takes float and returns string which is more convenient for printing, not having 16 digits or so.
     nzdig : number of non-zero digits to leave
@@ -2439,6 +2447,8 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target
     :type fill_hole_with:
     :param inds_target: If not None, the pieces from inds_pieces will put into places of inds_target
     :type inds_target:
+    :param return_inds_target_res:
+    :type return_inds_target_res: bool
     :return: `new_data`, the rearranged pieces of the `data` interleaved with the holes
     :rtype: ndarray
     """
@@ -2474,6 +2484,7 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target
         return new_data
 
 # ################################################################################################
+
 
 def replace_if_deviating(vector, replacement, tester=None, mindev=1, minwid=1):
     sign = np.sign(mindev)
@@ -2554,14 +2565,14 @@ def expected_hist(total_counts, bins, loc=0, scale=1, times_per_bins=1, n_sigma=
         lower = binom.ppf(prob/2, n=total_counts, p=pbins, loc=0)
         return expected, upper, lower
     else:
-        norm_factor = total_counts * (bins[1] - bins[0]) * 2  # factor 2 because both positive and begative values
+        # norm_factor = total_counts * (bins[1] - bins[0]) * 2  # factor 2 because both positive and negative values
         stds_predicted = (pbins * (1-pbins) * total_counts)**0.5
         if n_sigma is None:
             prob = times_per_bins/(len(bins)-1)  # something which happens one per bin
             n_sigma = norm.isf(prob/2, loc=loc, scale=scale)  # how far we can go to still be within this prob
         upper = expected + n_sigma * stds_predicted
         lower = expected - n_sigma * stds_predicted
-        lower[lower<0] = 0
+        lower[lower < 0] = 0
         return expected, upper, lower
 
 
@@ -2608,8 +2619,10 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
     best_scale = 1.
     best_coef = 0.  # If the mixture is not needed, this will be the answer
     more_than_upper = (counts_linear - upper) > 0  # Checking where the histigram deviates
-    # If the histogram does deviate somewhere:
-    if len(np.where(more_than_upper)[0]) > 0:
+    total_dev_bins = np.sum(more_than_upper[centr_bins_linear >= beg_min])
+
+    # Whether the histogram has significant deviation in relevant bins:
+    if total_dev_bins > 0 and np.max(stats) > beg_min:
         cum_more_than_upper = np.cumsum(more_than_upper)
         ind_dev = np.where((cum_more_than_upper > min(7, cum_more_than_upper[-1] / 3)) & (centr_bins_linear >= beg_min))[0]
         if len(ind_dev) == 0:
@@ -2623,7 +2636,7 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
         ###########################################################################
         # QUADRATIC HIST
         stats_squared = np.array(stats) ** 2
-        bins_quadr = np.linspace(0, np.max(stats_squared) + 0.5, n_bins)
+        bins_quadr = np.linspace(0, np.max(bins_linear)**2, n_bins)
         counts_quadr_non_norm, bins_quadr = np.histogram(stats_squared, bins=bins_quadr, density=False)
         last_non_zero = np.where(counts_quadr_non_norm > 0)[0][-1]
         counts_quadr_non_norm = counts_quadr_non_norm[:last_non_zero + 1]
@@ -2763,7 +2776,7 @@ def select_connected_component(image, center):
             new_coords_boundary = list(set(new_coords_boundary))
             ncb_reshaped = list(zip(*new_coords_boundary))
             in_image_inds_new_coords_boundary = \
-            np.where((image[ncb_reshaped[0], ncb_reshaped[1]]) & (~included_mask[ncb_reshaped[0], ncb_reshaped[1]]))[0]
+                np.where((image[ncb_reshaped[0], ncb_reshaped[1]]) & (~included_mask[ncb_reshaped[0], ncb_reshaped[1]]))[0]
             if len(in_image_inds_new_coords_boundary) == 0:
                 break
             new_coords_boundary = [new_coords_boundary[ind] for ind in in_image_inds_new_coords_boundary]
@@ -2852,8 +2865,6 @@ def make_periods_chunks(p_min, p_max, per_phases_per_chunk, duty_cycle, dt=0.020
     :type p_min: float or None
     :param p_max: Maximal period in the search.
     :type p_max: float or None
-    :param dp: Period step. If None, will be calculated from the `duty_cycle`. Usually is always None.
-    :type dp: float or None
     :param duty_cycle: Maximal accumulated deviation due to the period error in the end of the mission.
         In units of days.
     :type duty_cycle: float
@@ -2918,3 +2929,12 @@ def find_closest_chunk(per_chunks, period, overlap_bins=0):
             ind_close = np.argmin(np.abs(np.array(per_chun) - period))
             if ind_close >= overlap_bins and overlap_bins <= len(per_chun) - overlap_bins:
                 return per_chun, i
+
+
+def rough_fold(array, period_bins):
+    res = np.zeros(period_bins)
+    for i in range(int(np.ceil(len(array) / period_bins))):
+        i1 = i * period_bins
+        i2 = min(len(array), (i + 1) * period_bins)
+        res[: i2 - i1] += array[i1: i2]
+    return res
