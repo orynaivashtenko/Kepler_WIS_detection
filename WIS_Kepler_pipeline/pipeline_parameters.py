@@ -167,7 +167,7 @@ Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune
 # P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
 # -> this one used to be when I had 25 templates. Now I have more, so we must increase
 # P_chunks_search = 1000  # 1440
-Per_phases_per_chunk = 1500000  # 660000
+Per_phases_per_chunk = 1300000  # With 1500000 some jobs got killed
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template

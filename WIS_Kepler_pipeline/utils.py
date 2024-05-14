@@ -1593,6 +1593,10 @@ def clean_small_holes(mask, max_hole=Max_small_hole):
     if len(where_mask) > 0:
         ind1 = where_mask[0]
         ind2 = where_mask[-1]
+        if max_hole >= ind1 > 0:  # If there is a small hole in the beginning, fill
+            mask[: ind1] = True
+        if max_hole >= (len(mask) - 1 - ind2) > 0:  # If there is a small hole in the end, fill
+            mask[ind2:] = True
         mask1 = np.concatenate((np.ones(ind1), np.array(mask[ind1:ind2 + 1]), np.ones(len(mask) - ind2 - 1))).astype(bool)
         begholes = np.where(mask1 * np.roll(~mask1, -1))[0] + 1
         endholes = np.where(mask1 * np.roll(~mask1, 1))[0]
