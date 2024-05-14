@@ -14,11 +14,10 @@ Run_foldername = Run_name
 Run_jobs_outputs_folder = '/home/labs/barakz/orynai'
 
 Job_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/jobs'
-Future_job_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/future_jobs'
-Running_jobs_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/running_jobs'
 Output_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/outputfiles'
 Error_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/errorfiles'
 Output_stars_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/outputs_stars'
+Other_errors_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/other_errors'
 Star_full_output_filename_postfix = 'full_output.txt'
 
 Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_list.txt'
