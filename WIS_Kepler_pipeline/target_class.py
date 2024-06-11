@@ -23,7 +23,8 @@ from file_operations import report_exception, Locker
 np.set_printoptions(threshold=1000, linewidth=10000)
 
 # TODO: write documentation
-# TODO: injections paradox
+# TODO: injections check again
+# TODO: P-astro redefinition
 # TODO: look-elsewhere in the FAP
 # TODO: think about a project for bad ffts
 
@@ -165,11 +166,12 @@ class KeplerTarget(object):
         """Where the output will be saved. A target_id named folder will be made"""
         if problems_folder is None:
             problems_folder = self.output_location
-        if add_prefix_to_problems_folder:
-            self.problems_file_location = os.path.join(problems_folder, target_id[:4],
-                                                       target_id + '_' + Problems_target_txt_filename_postfix)
-        else:
-            self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_target_txt_filename_postfix)
+        elif add_prefix_to_problems_folder:
+            if (os.path.basename(problems_folder) != self.target_id[:4]
+                    and os.path.basename(problems_folder) != self.target_id):
+                if self.target_id[:4] in os.listdir(problems_folder):
+                    problems_folder = os.path.join(problems_folder, target_id[:4])
+        self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_target_txt_filename_postfix)
         if clean_problems_file:
             self.clean_problems_file()
         """File where issues in the processing will be written"""
@@ -273,6 +275,33 @@ class KeplerTarget(object):
 
         # ############################################################################################################
         # Best trigger results of our search pipeline:
+        self.best_candidates_concat = None
+        """Saves the best trigger from every periodicity search chunk. See description in the code"""
+        self.log_baseline_integral_score_rate = None
+        """Value of integral score which is subtracted from all the integral scores. Subtraction removes the
+           arbitrary units of rate and makes the scores relative. It is like having the statistic with 
+           punishment for prior and parameter space measure. 
+           The definition of the punishment is such that it vanishes at the m_1_3_r_s=1
+           and the period chunk corresponding to the lowest period (30 days usually). 
+           This rate is a product of `self.log_baseline_integral_score_rate_density` 
+           and `self.log_baseline_phase_space_measure`. 
+           It also makes scores comparable between different stars with different m_1_3_r_s."""
+        self.baseline_rate_period = None
+        """Period used fo compute `self.log_baseline_integral_score_rate`"""
+        self.log_baseline_integral_score_rate_density = None
+        """Log density of occurrence per d_period and d_first_transit time. Occurrence is for planets of all radii 
+           summed."""
+        self.dp_0 = None
+        """Period step in the reference chunk (smallest-period chunk with vanishing baseline density correction).
+           Is used in `self.log_baseline_phase_space_measure` which is needed for `self.log_baseline_integral_score_rate`
+        """
+        self.d_ftt_0 = None
+        """Phase step in the reference chunk (smallest-period chunk with vanishing baseline density correction).
+           Is used in `self.log_baseline_phase_space_measure` which is needed for `self.log_baseline_integral_score_rate`
+        """
+        self.log_baseline_phase_space_measure = None
+        """Is equal to np.log(`self.dp_0` * `self.d_ftt_0`), is used in `self.log_baseline_integral_score_rate`. 
+        """
         self.best_stat = None
         """Best score in the search pipeline - see `search_pipeline.py`"""
         self.best_per = None
@@ -285,6 +314,8 @@ class KeplerTarget(object):
         """Gaussianized statistic corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_integral_score = None
         """Integral coherent score corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
+        self.best_renormalized_integral_score = None
+        """Integral score from which the `self.log_baseline_integral_score_rate` was subtracted"""
         self.best_g_stat = None
         """Staitstic corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_per = None
@@ -312,7 +343,12 @@ class KeplerTarget(object):
         # After the best trigger:
         self.is_threshold_crossing = False
         """Whether the best trigger crossed the pre-defined detection threshold"""
-
+        self.triggers = None
+        """If multiple triggers are saved, this will keep al the results that triggered in the
+        non-gaussianized statistics"""
+        self.g_triggers = None
+        """If multiple triggers are saved, this will keep al the results that triggered in the
+           gaussianized statistics"""
         # ############################################################################################################
         # Injection parameters:
         self.per_wing_injection_and_slides = None
@@ -632,7 +668,8 @@ class KeplerTarget(object):
 
             for key in self.star_attributes:
                 try:
-                    self.__dict__[key] = float(self.__dict__[key])
+                    if self.__dict__[key] is not None:
+                        self.__dict__[key] = float(self.__dict__[key])
                 except Exception as e:
                     report_exception(exception=e, file_to_append=self.problems_file_location, title='', info='')
                     self.failures += key + ' error ' + str(e) + '; \n'
@@ -906,9 +943,9 @@ class KeplerTarget(object):
         rp_rs = min(rp_rs, rp_rs_max)
 
         n_transits_max = len(self.klc.quarters) * 2
-        snr_max = (np.max([np.mean([np.linalg.norm(self.klc.whitened_templates_td[kk][q])
-                                   for q in self.klc.quarters], axis=0) / np.max(self.klc.tb.templates_shifts[kk])
-                          for kk in range(len(self.klc.whitened_templates_td))])
+        snr_max = (np.nanmax([np.mean([np.linalg.norm(self.klc.whitened_templates_td[kk][q])
+                                      for q in self.klc.quarters], axis=0) / np.nanmax(self.klc.tb.templates_shifts[kk])
+                             for kk in range(len(self.klc.whitened_templates_td))])
                    * self.klc.mean_total * n_transits_max ** 0.5 * (rp_rs ** 2))
         # -> for an exact conversion between the snr and the radius, look dedicated functions
         if snr_max < snr_thresh:
@@ -980,7 +1017,7 @@ class KeplerTarget(object):
             freqs_wf_fd = np.fft.rfftfreq(support, d=tm.dt_lc)
             freq_psd_resolution = 1 / (nperseg_psd * tm.dt_lc)
             wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
-        n_transits = np.round(n_quarters * 90. / per_inj)
+        n_transits = int(np.round(n_quarters * 90. / per_inj))
         rp_inj = tm.get_rp_inj(snr_req=snr_req, wf_fd=wf_fd, n_transits=n_transits, per_inj=per_inj, m_1_3_r_s=m_1_3_r_s, inc_inj=inc_inj,
                                ecc_inj=ecc_inj, w_inj=w_inj, u1_inj=u1_inj, u2_inj=u2_inj, nperseg_psd=nperseg_psd,
                                include_detrending=include_detrending, dt=tm.dt_lc)
@@ -1133,7 +1170,7 @@ class KeplerTarget(object):
                     period = float(self.koi_dict['koi_period'][i])
                     if self.koi_dict['koi_num_transits'][i] == '':
                         if hasattr(self, 'klc') and hasattr(self.klc, 'times'):
-                            time_last = np.max(self.klc.times[-1])
+                            time_last = np.nanmax(self.klc.times[-1])
                         else:
                             time_last = spip.Default_end_time
                         n_transits = int(np.ceil((time_last - time_first) / period))
@@ -1252,7 +1289,7 @@ class KeplerTarget(object):
 
     def get_connected_klc(self, reinitialize=True, conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
                           connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
-                          mask_koi_planet=True, save_connected_stats=True,
+                          mask_koi_planet=True, save_connected_stats=True, save_conditioned_data=True,
                           connected_stats_filename_postfix=Connected_statistic_data_filename_postfix):
         """
         In the KeplerLightCurve instance attribute (`self.klc`) of this class, load the precomputed statistics
@@ -1273,6 +1310,8 @@ class KeplerTarget(object):
         :type mask_koi_planet: bool or None
         :param save_connected_stats: Whether to save connected statistics in the case they were calculated now.
         :type save_connected_stats: bool
+        :param save_conditioned_data: Whether to save conditioned data in the case they were calculated now.
+        :type save_conditioned_data: bool
         :param connected_stats_filename_postfix: Text added to the target ID in the name of the file saving connected data.
             See naming notations.
         :type connected_stats_filename_postfix: str
@@ -1307,6 +1346,8 @@ class KeplerTarget(object):
                     else:
                         self.klc.condition_data()
                         self.klc.condition_templates()
+                        if save_conditioned_data:
+                            self.klc.save_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
                     self.klc.detect_single_transits(gaussianize=True)
                 self.klc.connect_quarters()
                 if save_connected_stats:
@@ -1339,12 +1380,47 @@ class KeplerTarget(object):
         if self.per_phases_per_chunk is None or force_overwrite:
             self.per_phases_per_chunk = per_phases_per_chunk
 
+    def calculate_baseline_integral_score_rate(self, baseline_rate_period=None):
+        """
+        Calculates the baseline integral score rate that is used to renormalise the integral score and make it have the
+        form of statistic with punishment. This is the rate for
+        :return:
+        :rtype:
+        """
+        if self.periods_in_chunks is None:
+            self.set_periodicity_search_parameters(force_overwrite=False)
+            self.periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max,
+                                                                  per_phases_per_chunk=self.per_phases_per_chunk,
+                                                                  duty_cycle=self.duty_cycle, dt=self.klc.dt_days,
+                                                                  t_mission=self.klc.t_mission)
+
+        if baseline_rate_period is None:
+            baseline_rate_period = self.periods_in_chunks[0][0]
+            self.dp_0 = self.periods_in_chunks[0][1] - self.periods_in_chunks[0][0]
+        else:
+            per_chunk, _ = ut.find_closest_chunk(self.periods_in_chunks, baseline_rate_period, overlap_bins=0)
+            baseline_rate_period = per_chunk[0]
+            self.dp_0 = per_chunk[1] - per_chunk[0]
+
+        self.baseline_rate_period = baseline_rate_period
+        self.d_ftt_0 = tm.dt_lc  # Should be taken from KeplerLightCurve._phases, byt hopefully, this is correct
+        # Preparing densities for renormalizing the integral score
+        self.log_baseline_integral_score_rate_density = np.log(tm.get_number_of_transiting_planets_density_per_dp(
+                baseline_rate_period, m_1_3_r_s=1., dp=1.
+                ) / baseline_rate_period)
+        # -> the function gives density per dp, and dividing it by the period, we get it also for dt.
+
+        self.log_baseline_phase_space_measure = np.log(self.dp_0 * self.d_ftt_0)
+        self.log_baseline_integral_score_rate = (self.log_baseline_integral_score_rate_density
+                                                 + self.log_baseline_phase_space_measure)
+
     def run_periodicity_search(self, p_min=P_min_search, p_max=P_max_search, duty_cycle=spip.Duty_cycle,
                                per_phases_per_chunk=Per_phases_per_chunk,
                                best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix,
                                best_periodic_scores_file_dir=None, overlap_period_bins=spip.P_bins_overlap,
                                min_required_nonzero_transits_number=spip.Min_required_nonzero_transits_number,
-                               min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction):
+                               min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction,
+                               baseline_rate_period=None):
 
         """
         Runs the search for periodically repeating transits basing on the single-event statistic search done earlier
@@ -1392,6 +1468,8 @@ class KeplerTarget(object):
         :param min_required_nonzero_transits_fraction: Minimal required fraction of valid transits with respect to the total
          number of transits for a trigger. Will be used in the pre-filtering before the periodicity search and in the veto_mes
         :type min_required_nonzero_transits_fraction: float
+        :param baseline_rate_period:
+        :type baseline_rate_period:
         """
         if self.klc is None or not hasattr(self.klc, 'statistics_full') or self.klc.statistics_full is None:
             self.get_connected_klc(reinitialize=False, mask_koi_planet=None)
@@ -1403,6 +1481,8 @@ class KeplerTarget(object):
         self.periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max,
                                                               per_phases_per_chunk=self.per_phases_per_chunk,
                                                               duty_cycle=self.duty_cycle, dt=self.klc.dt_days, t_mission=self.klc.t_mission)
+        self.calculate_baseline_integral_score_rate(baseline_rate_period=baseline_rate_period)
+
         t1 = time.time()
         best_candidates_concat = []
         for pers in self.periods_in_chunks:
@@ -1418,10 +1498,12 @@ class KeplerTarget(object):
                                                 overlap_period_bins=overlap_period_bins)
                     self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False,
                                               min_required_nonzero_transits_number=min_required_nonzero_transits_number,
-                                              min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction)
+                                              min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+                                              log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
                     self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True,
                                               min_required_nonzero_transits_number=min_required_nonzero_transits_number,
-                                              min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction)
+                                              min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+                                              log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
                     self.klc.make_best_periodic_scores()
                     if np.isnan(self.klc.best_period):
                         self.print_problem(text='No trigger found after veto MES for pers=' + str(pers[0]) + '-' + str(pers[-1]),
@@ -1433,6 +1515,7 @@ class KeplerTarget(object):
                 self.klc.delete_mes()
             else:
                 self.failures += 'pers=[' + str(pers[0]) + '-' + str(pers[0]) + '] : Too small possible non-zero transits fraction;\n'
+        self.best_candidates_concat = best_candidates_concat
         if best_periodic_scores_file_dir is not None:
             np.save(best_periodic_scores_file_dir, np.array(best_candidates_concat, dtype=object), allow_pickle=True)
         else:
@@ -1440,14 +1523,148 @@ class KeplerTarget(object):
                                                 filename_postfix=best_periodic_scores_filename_postfix, file_format='npy')
             np.save(file_path, np.array(best_candidates_concat, dtype=object), allow_pickle=True)
 
-        self._find_best_trigger_from_per_chunks(best_candidates_concat=best_candidates_concat)
         t2 = time.time()
         self.periodicity_search_time = t2 - t1
 
-    def _find_best_trigger_from_per_chunks(self, best_candidates_concat=None):
+    def retrieve_best_candidates_concat(self, best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix):
+        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                            filename_postfix=best_periodic_scores_filename_postfix, file_format='npy')
+        self.best_candidates_concat = np.load(file_path, allow_pickle=True)
+
+    def save_all_triggers_from_per_chunks(self,
+                                          save_to_threshold_crossing_list=False,
+                                          threshold_crossing_list_multiple_triggers_file=None,
+                                          threshold_g_crossing_list_multiple_triggers_file=None,
+                                          threshold_crossing_list_multiple_triggers_filename=None,
+                                          threshold_g_crossing_list_multiple_triggers_filename=None,
+                                          threshold_crossing_list_location=None,
+                                          best_periodic_scores=None,
+                                          best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix):
         """
         Compares the scores of several chunks and sets the best results as class attributes
-        :param best_candidates_concat: The properly formatted list of the best cancicates from every chunk
+        :param best_periodic_scores: The properly formatted list of the best candicates from every chunk
+        :type best_periodic_scores: list of lists of length 2
+        :param save_to_threshold_crossing_list:
+        :type save_to_threshold_crossing_list:
+        :param threshold_crossing_list_multiple_triggers_file:
+        :type threshold_crossing_list_multiple_triggers_file:
+        :param threshold_g_crossing_list_multiple_triggers_file:
+        :type threshold_g_crossing_list_multiple_triggers_file:
+        :param threshold_crossing_list_multiple_triggers_filename:
+        :type threshold_crossing_list_multiple_triggers_filename:
+        :param threshold_g_crossing_list_multiple_triggers_filename:
+        :type threshold_g_crossing_list_multiple_triggers_filename:
+        :param threshold_crossing_list_location:
+        :type threshold_crossing_list_location:
+        :param best_periodic_scores_filename_postfix:
+        :type best_periodic_scores_filename_postfix:
+        """
+        if (threshold_crossing_list_multiple_triggers_file is None) and (threshold_crossing_list_location is not None):
+            threshold_crossing_list_multiple_triggers_file = os.path.join(threshold_crossing_list_location,
+                                                                          threshold_crossing_list_multiple_triggers_filename)
+        if (threshold_g_crossing_list_multiple_triggers_file is None) and (threshold_crossing_list_location is not None):
+            threshold_g_crossing_list_multiple_triggers_file = os.path.join(threshold_crossing_list_location,
+                                                                            threshold_g_crossing_list_multiple_triggers_filename)
+
+        if best_periodic_scores is None:
+            if self.best_candidates_concat is None:
+                self.retrieve_best_candidates_concat(best_periodic_scores_filename_postfix=best_periodic_scores_filename_postfix)
+            best_periodic_scores = self.best_candidates_concat
+        if len(best_periodic_scores) > 0:
+            ind_gauss = 0
+            stats_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_stats][ind_gauss] for i in range(len(best_periodic_scores))])
+            periods_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_per][ind_gauss] for i in range(len(best_periodic_scores))])
+            integral_scores_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_best_integral][ind_gauss] for i in range(len(best_periodic_scores))])
+            ftts_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_ftt][ind_gauss] for i in range(len(best_periodic_scores))])
+            stats_gauss_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_stats_gauss][ind_gauss] for i in range(len(best_periodic_scores))])
+            max_templs_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_template][ind_gauss] for i in range(len(best_periodic_scores))])
+
+            ind_gauss = 1
+            g_stats_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_stats][ind_gauss] for i in range(len(best_periodic_scores))])
+            g_periods_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_per][ind_gauss] for i in range(len(best_periodic_scores))])
+            g_integral_scores_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_best_integral][ind_gauss] for i in range(len(best_periodic_scores))])
+            g_ftts_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_ftt][ind_gauss] for i in range(len(best_periodic_scores))])
+            g_stats_gauss_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_stats_gauss][ind_gauss] for i in range(len(best_periodic_scores))])
+            g_max_templs_res = np.array(
+                [best_periodic_scores[i][spip.Best_per_results_index_template][ind_gauss] for i in range(len(best_periodic_scores))])
+
+            # Determining TCEs among [chunks maxima in non-gaussianized sense]
+            trigger_mask = integral_scores_res >= Stat_candidate_search
+            triggering_integral_scores = integral_scores_res[trigger_mask]
+            triggering_stats = stats_res[trigger_mask]
+            triggering_periods = periods_res[trigger_mask]
+            triggering_ftts = ftts_res[trigger_mask]
+            triggering_stats_gauss = stats_gauss_res[trigger_mask]
+            triggering_max_templs = max_templs_res[trigger_mask]
+
+            self.triggers = [[] for _ in range(spip.Best_per_results_length)]
+            self.triggers[spip.Best_per_results_index_best_integral] = triggering_integral_scores
+            self.triggers[spip.Best_per_results_index_stats] = triggering_stats
+            self.triggers[spip.Best_per_results_index_per] = triggering_periods
+            self.triggers[spip.Best_per_results_index_ftt] = triggering_ftts
+            self.triggers[spip.Best_per_results_index_stats_gauss] = triggering_stats_gauss
+            self.triggers[spip.Best_per_results_index_template] = triggering_max_templs
+
+            if save_to_threshold_crossing_list:
+                with open(threshold_crossing_list_multiple_triggers_file, 'a') as fil1:  # will save here these good targets
+                    for i in range(len(triggering_integral_scores)):
+                        triggering_integral_score = triggering_integral_scores[i]
+                        triggering_stat = triggering_stats[i]
+                        triggering_period = triggering_periods[i]
+                        triggering_ftt = triggering_ftts[i]
+                        triggering_max_templ = triggering_max_templs[i]
+                        triggering_stat_gauss = triggering_stats_gauss[i]
+                        print(self.target_id, triggering_integral_score, triggering_stat, triggering_period, triggering_ftt,
+                              triggering_max_templ, triggering_stat_gauss, sep=' ', end='\n', file=fil1)
+
+            # Determining TCEs among [chunks maxima in gaussianized sense]
+            # SAME FOR GAUSS BUT A DIFFERENT ORDER OF SAVING: GAUSS STAT GOES FIRST< AND THE INTEGRAL WAS ALSO MADE ON GAUSS
+            g_trigger_mask = g_integral_scores_res >= Stat_candidate_search
+            g_triggering_integral_scores = g_integral_scores_res[g_trigger_mask]
+            g_triggering_stats = g_stats_res[g_trigger_mask]
+            g_triggering_periods = g_periods_res[g_trigger_mask]
+            g_triggering_ftts = g_ftts_res[g_trigger_mask]
+            g_triggering_stats_gauss = g_stats_gauss_res[g_trigger_mask]
+            g_triggering_max_templs = g_max_templs_res[g_trigger_mask]
+
+            self.g_triggers = [[] for _ in range(spip.Best_per_results_length)]
+            self.g_triggers[spip.Best_per_results_index_best_integral] = g_triggering_integral_scores
+            self.g_triggers[spip.Best_per_results_index_stats] = g_triggering_stats
+            self.g_triggers[spip.Best_per_results_index_per] = g_triggering_periods
+            self.g_triggers[spip.Best_per_results_index_ftt] = g_triggering_ftts
+            self.g_triggers[spip.Best_per_results_index_stats_gauss] = g_triggering_stats_gauss
+            self.g_triggers[spip.Best_per_results_index_template] = g_triggering_max_templs
+
+            if save_to_threshold_crossing_list:
+                with open(threshold_g_crossing_list_multiple_triggers_file, 'a') as fil1:  # will save here these good targets
+                    for i in range(len(g_triggering_integral_scores)):
+                        g_triggering_integral_score = g_triggering_integral_scores[i]
+                        g_triggering_stat = g_triggering_stats[i]
+                        g_triggering_period = g_triggering_periods[i]
+                        g_triggering_ftt = g_triggering_ftts[i]
+                        g_triggering_max_templ = g_triggering_max_templs[i]
+                        g_triggering_stat_gauss = g_triggering_stats_gauss[i]
+                        print(self.target_id, g_triggering_integral_score, g_triggering_stat_gauss, g_triggering_period,
+                              g_triggering_ftt, g_triggering_max_templ, g_triggering_stat, sep=' ', end='\n', file=fil1)
+        else:
+            self.triggers = [[] for _ in range(spip.Best_per_results_length)]
+            self.g_triggers = [[] for _ in range(spip.Best_per_results_length)]
+
+    def find_best_trigger_from_per_chunks(self, best_candidates_concat=()):
+        """
+        Compares the scores of several chunks and sets the best results as class attributes
+        :param best_candidates_concat: The properly formatted list of the best candicates from every chunk
         :type best_candidates_concat: list of lists of length 2
         """
         if len(best_candidates_concat) > 0:
@@ -1460,8 +1677,8 @@ class KeplerTarget(object):
                     self.best_per = best_candidates[spip.Best_per_results_index_per][0]
                     self.best_ftt = best_candidates[spip.Best_per_results_index_ftt][0]
                     self.best_gauss_stat = best_candidates[spip.Best_per_results_index_stats_gauss][0]
-                    self.best_temp = best_candidates[spip.Best_per_results_index_template][0]
-
+                    self.best_temp = int(best_candidates[spip.Best_per_results_index_template][0])
+                    self.best_renormalized_integral_score = self.best_integral_score
             self.best_g_integral_score = -np.inf
             for best_candidates in best_candidates_concat:  # if there is a big MES score, further processing
                 scormax = best_candidates[spip.Best_per_results_index_best_integral][1]
@@ -1471,7 +1688,7 @@ class KeplerTarget(object):
                     self.best_g_per = best_candidates[spip.Best_per_results_index_per][1]
                     self.best_g_ftt = best_candidates[spip.Best_per_results_index_ftt][1]
                     self.best_g_gauss_stat = best_candidates[spip.Best_per_results_index_stats_gauss][1]
-                    self.best_g_temp = best_candidates[spip.Best_per_results_index_template][1]
+                    self.best_g_temp = int(best_candidates[spip.Best_per_results_index_template][1])
         else:
             self.best_integral_score = np.nan
             self.best_stat = np.nan
@@ -1486,12 +1703,30 @@ class KeplerTarget(object):
             self.best_g_gauss_stat = np.nan
             self.best_g_temp = np.nan
 
+    def save_best_candidate(self, candidate_threshold=Stat_candidate_search, threshold_crossing_list_file=None,
+                            threshold_crossing_list_location=None, threshold_crossing_list_filename=None,
+                            save_to_threshold_crossing_list=False,
+                            best_candidates_concat=None):
+        if best_candidates_concat is None:
+            best_candidates_concat = self.best_candidates_concat
+        self.find_best_trigger_from_per_chunks(best_candidates_concat=best_candidates_concat)
+        if (((not np.isnan(self.best_stat)) and (self.best_stat is not None) and self.best_stat >= candidate_threshold)
+                or ((not np.isnan(self.best_g_gauss_stat)) and (self.best_g_gauss_stat is not None)
+                    and self.best_g_gauss_stat >= candidate_threshold)):
+            self.is_threshold_crossing = True
+            if save_to_threshold_crossing_list:
+                if (threshold_crossing_list_file is None) and (threshold_crossing_list_location is not None):
+                    threshold_crossing_list_file = os.path.join(threshold_crossing_list_location, threshold_crossing_list_filename)
+                with open(threshold_crossing_list_file, 'a') as fil1:  # will save here these good targets
+                    print(self.target_id, self.best_stat, self.best_per, self.best_ftt, self.best_gauss_stat, self.best_integral_score,
+                          self.best_g_stat, self.best_g_per, self.best_g_ftt, self.best_g_gauss_stat, self.best_g_integral_score,
+                          sep=' ', end='\n', file=fil1)
+
     def run_main_search(self, p_min=P_min_search, p_max=P_max_search,
                         per_phases_per_chunk=Per_phases_per_chunk,
                         candidate_threshold=Stat_candidate_search,
                         min_quarters_to_process=Min_quarters_to_process,
                         mask_koi_planet=True,
-                        save_to_threshold_crossing_list=True,
                         save_conditioned_data=True,
                         save_no_veto_no_score_cor_stats=False,
                         save_connected_stats=True,
@@ -1499,9 +1734,13 @@ class KeplerTarget(object):
                         best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix,
                         no_veto_no_score_cor_stats_filename_postfix=No_veto_no_score_cor_stats_filename_postfix,
                         connected_stats_data_filename_postfix=Connected_statistic_data_filename_postfix,
+                        save_to_threshold_crossing_list=True,
                         threshold_crossing_list_file=None,
                         threshold_crossing_list_location=Threshold_crossing_lists_folder,
                         threshold_crossing_list_filename=Threshold_crossing_list_filename,
+                        save_multiple_triggers=False,
+                        threshold_crossing_list_multiple_triggers_filename=Threshold_crossing_list_multiple_triggers_filename,
+                        threshold_g_crossing_list_multiple_triggers_filename=Threshold_g_crossing_list_multiple_triggers_filename,
                         clean_dir_if_not_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap,
                         clean_problems_file=True, stop_if_bad=True):
 
@@ -1568,15 +1807,18 @@ class KeplerTarget(object):
             this number of bins for them to overlap. is needed for coherent score integral in order for
             the maximum not to be on the edge
         :type overlap_period_bins: int
+        :param save_multiple_triggers:
+        :type save_multiple_triggers:
+        :param threshold_crossing_list_multiple_triggers_filename:
+        :type threshold_crossing_list_multiple_triggers_filename:
+        :param threshold_g_crossing_list_multiple_triggers_filename:
+        :type threshold_g_crossing_list_multiple_triggers_filename:
         :param clean_problems_file: Whether to clean before the search the file that reports the exceptions
             and the problems of the search
         :type clean_problems_file: bool
         :param stop_if_bad: Whether to stop the search if the data is too poor quality or too short
         :type stop_if_bad: bool
         """
-        if (threshold_crossing_list_file is None) and (threshold_crossing_list_location is not None):
-            threshold_crossing_list_file = os.path.join(threshold_crossing_list_location, threshold_crossing_list_filename)
-
         if clean_problems_file:
             self.clean_problems_file()
 
@@ -1598,15 +1840,19 @@ class KeplerTarget(object):
                                         best_periodic_scores_filename_postfix=best_periodic_scores_filename_postfix,
                                         overlap_period_bins=overlap_period_bins)
 
-            if (((not np.isnan(self.best_stat)) and (self.best_stat is not None) and self.best_stat >= candidate_threshold)
-                or ((not np.isnan(self.best_g_gauss_stat)) and (self.best_g_gauss_stat is not None)
-                    and self.best_g_gauss_stat >= candidate_threshold)):
-                self.is_threshold_crossing = True
-                if save_to_threshold_crossing_list:
-                    with open(threshold_crossing_list_file, 'a') as fil1:  # will save here these good targets
-                        print(self.target_id, self.best_stat, self.best_per, self.best_ftt, self.best_gauss_stat, self.best_integral_score,
-                              self.best_g_stat, self.best_g_per, self.best_g_ftt, self.best_g_gauss_stat, self.best_g_integral_score,
-                              sep=' ', end='\n', file=fil1)
+            self.save_best_candidate(candidate_threshold=candidate_threshold, threshold_crossing_list_file=threshold_crossing_list_file,
+                                     threshold_crossing_list_location=threshold_crossing_list_location,
+                                     threshold_crossing_list_filename=threshold_crossing_list_filename,
+                                     save_to_threshold_crossing_list=save_to_threshold_crossing_list,
+                                     best_candidates_concat=self.best_candidates_concat)
+
+            if save_multiple_triggers:
+                self.save_all_triggers_from_per_chunks(
+                        save_to_threshold_crossing_list=save_to_threshold_crossing_list,
+                        threshold_crossing_list_multiple_triggers_filename=threshold_crossing_list_multiple_triggers_filename,
+                        threshold_g_crossing_list_multiple_triggers_filename=threshold_g_crossing_list_multiple_triggers_filename,
+                        threshold_crossing_list_location=threshold_crossing_list_location,
+                        best_periodic_scores=self.best_candidates_concat)
 
             if (not self.is_threshold_crossing) and clean_dir_if_not_threshold_crossing:
                 # delete conditioned data because we have no space on the disk!
@@ -1647,7 +1893,7 @@ class KeplerTarget(object):
             the period grid. Overrides `per_wing_slides_relative`. Overriden by `n_chunks_around_best`.
         :type per_wing_slides: float
         :param per_wing_slides_relative: Relative wing to take to the left and to the right from the central period
-            to build the period grid. Meaning that the central period will be multiplitd by this number to get the
+            to build the period grid. Meaning that the central period will be multiplied by this number to get the
             value in days. Thet is, the size of the wing will be proportional to the central period.
             Overriden by `n_chunks_around_best` and `per_wing_slides`.
         :type per_wing_slides_relative: float
@@ -1670,7 +1916,7 @@ class KeplerTarget(object):
             See naming notations.
         :type slides_res_filename_postfix: str
         :param assert_main_search_periods:
-        :type slides_res_filename_postfix: bool
+        :type assert_main_search_periods: bool
         :param min_required_nonzero_transits_number: Minimal required number of valid transits for a trigger. Will be used
             in the pre-filtering before the periodicity search and in the veto_mes
         :type min_required_nonzero_transits_number: int
@@ -1702,10 +1948,10 @@ class KeplerTarget(object):
                 ind_in_chunk = np.nanargmin(np.abs(np.array(closest_chunk) - period))
                 if ind_in_chunk < len(closest_chunk) / 2:
                     chunk_inds_choose = (closest_chunk_index + np.arange(-(n_chunks_around_best // 2),
-                                                                        (n_chunks_around_best + 1) // 2)).astype(int)
+                                                                          (n_chunks_around_best + 1) // 2)).astype(int)
                 else:
                     chunk_inds_choose = (closest_chunk_index + np.arange(-(n_chunks_around_best - 1) // 2,
-                                                                        (n_chunks_around_best + 2) // 2)).astype(int)
+                                                                          (n_chunks_around_best + 2) // 2)).astype(int)
                 period_chunks = [periods_in_chunks[i] for i in chunk_inds_choose]
             else:
                 if per_wing_slides is not None:
@@ -1723,6 +1969,10 @@ class KeplerTarget(object):
                 else:
                     periods = self.klc.make_periods_array(p_min=p_min, p_max=p_max)
                     period_chunks = [periods]
+
+            if self.log_baseline_integral_score_rate is None:
+                self.calculate_baseline_integral_score_rate()
+
             # HISTOGRAM DATA WILL BE COLLECTED HERE
             stats = []
             pers = []
@@ -1770,10 +2020,12 @@ class KeplerTarget(object):
                                                         delete_non_marginalized=False, overlap_period_bins=overlap_period_bins)
                             self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False,
                                                       min_required_nonzero_transits_number=min_required_nonzero_transits_number,
-                                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction)
+                                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+                                                      log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
                             self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True,
                                                       min_required_nonzero_transits_number=min_required_nonzero_transits_number,
-                                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction)
+                                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+                                                      log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
                             self.klc.make_best_periodic_scores()
                             if np.isnan(self.klc.best_period):
                                 self.print_problem(text='No slides trigger found after veto MES for pers='
@@ -1796,8 +2048,8 @@ class KeplerTarget(object):
                                              title='slides pers='+str(pers_summing[0])+'-'+str(pers_summing[-1]),
                                              info='seed='+str(new_seed))
                 if len(int_scores_chunk) > 0:  # If everything failed, there will be no result
-                    best_ind_chunk = np.argmax(int_scores_chunk)
-                    best_g_ind_chunk = np.argmax(int_scores_g_chunk)
+                    best_ind_chunk = np.nanargmax(int_scores_chunk)
+                    best_g_ind_chunk = np.nanargmax(int_scores_g_chunk)
                     for list_full, list_full_g, list_ch, list_ch_g in [[stats, stats_g, stats_chunk, stats_g_chunk],
                                                                        [pers, pers_g, pers_chunk, pers_g_chunk],
                                                                        [first_times, first_times_g, first_times_chunk, first_times_g_chunk],
@@ -1810,7 +2062,8 @@ class KeplerTarget(object):
                                        stats_g, pers_g, first_times_g, gauss_stats_g, int_scores_g)).transpose()
 
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                filename_postfix=slides_res_filename_postfix, file_format='npy')
+                                                filename_postfix=slides_res_filename_postfix + str(int(np.round(central_period))),
+                                                file_format='npy')
             try:
                 with Locker(file_path):
                     if os.path.exists(file_path):
@@ -1905,47 +2158,15 @@ class KeplerTarget(object):
         # ################################################################################################
         # OCCURRENCE RATES
         # All the things with the occurrence rates and densities:
-        log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
+        planets_of_radii_in_per_range_one_star, log2_rp_re_edges = tm.get_occurrence_rate_per_chunk(period_min=p_min_inj,
+                                                                                                    period_max=p_max_inj)
         units_of_re_to_units_of_r_star_factor = 1 / (self.stellar_radius * R_sun_R_e)
-        log10_best_per_low = np.log10(p_min_inj)
-        log10_best_per_up = np.log10(p_max_inj)
-        # self.log10_best_period_edges = (log10_best_per_low, log10_best_per_up)
         log2_rp_edges = np.log2(units_of_re_to_units_of_r_star_factor * 2. ** log2_rp_re_edges)
-
-        # FINDING ROWS IN THE OCCURRENCE TABLE THAT SPAN OUR PERIOD RANGE:
-        # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
-        # Number of planets of all radii in log day (per 100 stars):
-        # For other periods, it will be checked right now:
-        row_upper = len(occurrences_table) - 1
-        for i in range(len(log10_period_edges) - 1):
-            if (log10_best_per_up > log10_period_edges[i]) and (log10_best_per_up <= log10_period_edges[i + 1]):
-                row_upper = i
-                break
-        row_lower = len(occurrences_table) - 1
-        for i in range(len(log10_period_edges) - 1):
-            if (log10_best_per_low > log10_period_edges[i]) and (log10_best_per_low <= log10_period_edges[i + 1]):
-                row_lower = i
-                break
-        # CALCULATING EXPECTED NUMBER OF PLANETS IN OUR PERIOD RANGE:
-        # planets per one star in this period range for different radii bins:
-        # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
-        # to be uniform (they are log bins)
-        planets_of_radii_in_per_range_one_star = np.zeros(len(occurrences_table[-1]))
-        for i in range(row_lower, row_upper + 1):
-            row_density = occurrences_table[i] / (log10_period_edges[i + 1] - log10_period_edges[i])
-            if i == len(occurrences_table) - 1 and log10_best_per_up > log10_period_edges[len(log10_period_edges) - 1]:
-                up_edge = log10_best_per_up
-            else:
-                up_edge = min(log10_best_per_up, log10_period_edges[i + 1])
-            if i == len(occurrences_table) - 1 and log10_best_per_low > log10_period_edges[len(log10_period_edges) - 1]:
-                low_edge = log10_best_per_low
-            else:
-                low_edge = max(log10_best_per_low, log10_period_edges[i])
-            planets_of_radii_in_per_range_one_star += row_density * (up_edge - low_edge)
+        self.log2_rp_edges = log2_rp_edges
 
         self.prior_planets_in_period_range_one_star = np.sum(planets_of_radii_in_per_range_one_star)
         self.prior_radii_distribution = planets_of_radii_in_per_range_one_star / np.sum(planets_of_radii_in_per_range_one_star)
-        self.injections_period_range = (10. ** log10_best_per_low, 10. ** log10_best_per_up)
+        self.injections_period_range = (p_min_inj, p_max_inj)
 
         rp_numbers = (np.ceil(planets_of_radii_in_per_range_one_star /
                               np.sum(planets_of_radii_in_per_range_one_star) * n_rp)).astype(int)
@@ -1996,7 +2217,7 @@ class KeplerTarget(object):
                         count_orbit_simulations += 1
                         if np.linalg.norm(flux_obs) > 0:
                             count_orbit_transiting += 1
-                            depth_factor = np.max(flux_obs) / rp_generation ** 2
+                            depth_factor = np.nanmax(flux_obs) / rp_generation ** 2
                             rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period,
                                                                                    depth_factor=depth_factor, snr_min=snr_min_injected,
                                                                                    n_quarters=n_quarters, wf_fd=wf_fd,
@@ -2163,6 +2384,7 @@ class KeplerTarget(object):
         if self.is_koi:  # Masking koi planets
             self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
                                  include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives)
+        # TODO! MASK THE LONGEST ANF NOT THE BEST
         masked_dur = 2. * tm.Durations[self.best_temp]
         self.klc.mask_ephemeris(period=self.best_per, durations=masked_dur, transit_times=self.best_ftt)
         # Mask the suspected real transit. Warning, can kill some of injected signal
@@ -2173,16 +2395,21 @@ class KeplerTarget(object):
         self.klc.delete_irrelevant()  # For memory
         self.klc.interleave_shifts(delete_fulls=True)
         try:
+            if self.log_baseline_integral_score_rate is None:
+                self.calculate_baseline_integral_score_rate()
+
             self.klc.periodicity_search(p_min=None, p_max=None, periods=periods_to_search,
                                         force_interleave_shifts=False, delete_periodic_interleaved=True,
                                         save_uncorrected_periodic=False, delete_non_marginalized=False,
                                         overlap_period_bins=overlap_period_bins)
             self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False,
                                       min_required_nonzero_transits_number=min_required_nonzero_transits_number,
-                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction)
+                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+                                      log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
             self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True,
                                       min_required_nonzero_transits_number=min_required_nonzero_transits_number,
-                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction)
+                                      min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+                                      log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
             self.klc.make_best_periodic_scores()
             if np.isnan(self.klc.best_period):
                 self.print_problem(text='No inj trigger found after veto MES for pers='
@@ -2257,7 +2484,7 @@ class KeplerTarget(object):
             self.__dict__['retrieved_g_integral_score_' + status] = []
         if file_path is None:
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                            filename_postfix=injections_filename_postfix, file_format='txt')
+                                                filename_postfix=injections_filename_postfix, file_format='txt')
         with open(file_path, 'r') as fil1:
             inj_lines = fil1.readlines()
 
@@ -2317,16 +2544,29 @@ class KeplerTarget(object):
         self.number_of_success_injections = len(self.per_inj_success)
         self.number_of_injections = len(self.per_inj_bad) + len(self.per_inj_success)
 
-    def retrieve_background(self, slides_res_filename_postfix=Slides_res_filename_postfix):
+    def retrieve_background(self, slides_res_filename_postfix=Slides_res_filename_postfix,
+                            central_period=None):
         """
         Opens the file where the time-shuffling runs results were saved, retrieves these data
-        and stores as sttributes.
+        and stores as attributes.
         :param slides_res_filename_postfix: Text added to the target ID in the name of the file saving
             the time-shuffled search results. See naming notations.
         :type slides_res_filename_postfix: str
+        :param central_period: period around which the timeslides were done. There can be several such periods.
+        :type central_period: float
         """
-        fil_slides = [ff for ff in os.listdir(self.output_location) if
-                      ((str(self.target_id) in ff) and (slides_res_filename_postfix in ff))][0]
+        if central_period is not None:
+            central_period_name = str(int(np.round(central_period)))
+            fil_slides = [ff for ff in os.listdir(self.output_location) if
+                          ((str(self.target_id) in ff) and (slides_res_filename_postfix in ff)
+                           and (central_period_name in ff))]
+        else:
+            fil_slides = [ff for ff in os.listdir(self.output_location) if
+                          ((str(self.target_id) in ff) and (slides_res_filename_postfix in ff))]
+        if len(fil_slides) == 0:
+            raise ValueError('No timeslides file found for the requested parameters!')
+        else:
+            fil_slides = fil_slides[0]
         res_slides = np.load(os.path.join(self.output_location, fil_slides), allow_pickle=True)
         self.stats_slides = res_slides[:, 0]
         self.pers_slides = res_slides[:, 1]

@@ -1,6 +1,12 @@
-import pickle
 import os
+core_num = "1"
+os.environ["OMP_NUM_THREADS"] = core_num
+os.environ["OPENBLAS_NUM_THREADS"] = core_num
+os.environ["MKL_NUM_THREADS"] = core_num
+os.environ["VECLIB_MAXIMUM_THREADS"] = core_num
+os.environ["NUMEXPR_NUM_THREADS"] = core_num
 import numpy as np
+import pickle
 from sys import getsizeof
 
 import target_class

@@ -173,7 +173,7 @@ Per_phases_per_chunk = 1300000  # With 1500000 some jobs got killed
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
 # N_periods_per_chunk = 80  # Now I run for the full bank
 # I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
-Stat_candidate_search = 40  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
+Stat_candidate_search = 40.  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
 N_slides_total = 50000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
@@ -247,6 +247,8 @@ if force_data_output_locations_creation:
         os.mkdir(Output_location)
 
 Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'
+Threshold_crossing_list_multiple_triggers_filename = 'threshold_crossing_list_multiple.txt'
+Threshold_g_crossing_list_multiple_triggers_filename = 'threshold_g_crossing_list_multiple.txt'
 
 Summary_target_txt_filename_postfix = 'target_summary.txt'
 Problems_target_txt_filename_postfix = 'problems.txt'
@@ -282,6 +284,7 @@ Log_occurrences_templates_periods_m13r_per_edges_filename = 'log_occurrences_tem
 Log_second_derivs_cos2_shifts_templates_filename = 'log_second_derivs_cos2_shifts_templates.npy'
 Log_cos2_derivs_templates_filename = 'log_cos2_derivs_templates.npy'
 Log_template_prior_m13r_per_edges_filename = 'log_template_prior_m13r_per_edges.npy'
+Transit_probabilities_m13r_periods_filename = 'm13r_period_transit_probabilities.npy'
 
 # -> effective_filter_whitened normalized to have unit time-domain norm, shifter all to have peaks to the left
 # (even the subbin shifts are forcefully shifted, as will the models be)

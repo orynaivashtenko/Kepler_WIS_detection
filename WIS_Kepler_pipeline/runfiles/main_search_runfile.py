@@ -10,8 +10,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 import target_class
-import file_operations as fop
-import pipeline_parameters as pp
+import datetime
 from runfiles_parameters import *
 import traceback
 
@@ -30,13 +29,15 @@ if not targ.is_good_for_processing:  # is villanova binary or is not in Gaia
 else:  # for now, run the search only if it is not a villanova binary
     try:
         targ.run_main_search(save_to_threshold_crossing_list=True,
-                             clean_dir_if_not_threshold_crossing=True)
+                             clean_dir_if_not_threshold_crossing=True,
+                             save_multiple_triggers=True)
 
     except Exception as exc:
         tb = sys.exc_info()
         list_str_exc = traceback.format_exception(exc, value=tb[1], tb=tb[2])
         with open(Error_list_file, 'a') as err_list_fil:
             print(targ.target_id, file=err_list_fil)
+            print(datetime.datetime.now(), file=err_list_fil)
             for str_exc in list_str_exc:
                 print(str_exc.strip(), file=err_list_fil)
             print('', file=err_list_fil)

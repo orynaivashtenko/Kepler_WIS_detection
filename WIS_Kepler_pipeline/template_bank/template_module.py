@@ -11,13 +11,15 @@ import batman
 import copy
 import os
 from file_operations import read_quarters_from_file  # , write_quarters_to_txt
+from pipeline_parameters import get_occurrence_table
 import auxiliary_functions as af
 from utils import whiten_vector
 from pipeline_parameters import Default_template_bank_folder, Default_templates_filename, \
     Default_templates_shifts_filename, Default_shifts_filename, Default_durations_filename, Default_indices_of_templates_filename, \
     Default_templates_of_indices_filename, Default_template_params_filename, Precomputed_tables_location, \
     Log_occurrences_templates_periods_m13r_per_edges_filename, Log_second_derivs_cos2_shifts_templates_filename, \
-    Log_cos2_derivs_templates_filename, Log_template_prior_m13r_per_edges_filename, Limb_darkening_array_file, Default_limb_darkening_coefs
+    Log_cos2_derivs_templates_filename, Log_template_prior_m13r_per_edges_filename, Limb_darkening_array_file, \
+    Default_limb_darkening_coefs, Transit_probabilities_m13r_periods_filename
 
 # dt_lc = 1765.5 / (60 * 60 * 24)  # days long cadence interval
 dt_lc = 0.02043368  # almost the same. measured from data
@@ -30,6 +32,12 @@ Indices_of_templates = np.load(os.path.join(Default_template_bank_folder, Defaul
 Templates_of_indices = np.load(os.path.join(Default_template_bank_folder, Default_templates_of_indices_filename), allow_pickle=True)
 N_templates = len(Indices_of_templates)
 Max_cos = 0.97  # was used in the bank generation. If cos was smaller, it was added to the bank
+
+Interleaved_numbers = np.array([i for i in range(len(Indices_of_templates))
+                                if ((Indices_of_templates[i][1] - Indices_of_templates[i][0]) >= 2)])
+Not_interleaved_numbers = np.array([i for i in range(len(Indices_of_templates))
+                                    if ((Indices_of_templates[i][1] - Indices_of_templates[i][0]) == 1)])
+
 
 def get_default_templates_params(folder=Default_template_bank_folder, filename=Default_template_params_filename):
     # m_1_3_r_s, period, a, inc, ecc, w, u1, u2
@@ -881,6 +889,109 @@ def prepare_fd_for_cos(vec_fd):
     return np.conj(vec_fd) * cosine_coeffs
 
 
+def get_transit_probability(m_1_3_r_s, period, precomputed_tables_location=Precomputed_tables_location,
+                            transit_probabilities_m13r_periods_filename=Transit_probabilities_m13r_periods_filename):
+    """
+    Gets the precomputed grid of approximate geometric transit probabilities
+    :param m_1_3_r_s: m_1_3_r_s: Stellar mass in units of solar masses to the power 1/3 divided by stellar radius
+        in units of Solar radii. Should be from 0.2 to 2.
+    :type m_1_3_r_s: float
+    :param period: Period of the planet in days. Should be from 30 to 500.
+    :type period: float
+    :param precomputed_tables_location: Folder where the precomputed transit probabilities for densities
+        and periods are stored.
+    :type precomputed_tables_location: str
+    :param transit_probabilities_m13r_periods_filename: name of the file where the precomputed transit probabilities for densities
+        and periods are stored.
+    :type transit_probabilities_m13r_periods_filename: str
+    :return: Transit probability for the specified parameters
+    :rtype: float
+    """
+    m13rs, periods, transit_probabilities = np.load(os.path.join(precomputed_tables_location,
+                                                                 transit_probabilities_m13r_periods_filename), allow_pickle=True)
+    trans_prob_m13r_interp = []
+    for i in range(len(transit_probabilities)):
+        trans_prob_m13r_interp.append(np.interp(x=period, xp=periods, fp=transit_probabilities[i]))
+    return np.interp(x=m_1_3_r_s, xp=m13rs, fp=trans_prob_m13r_interp)
+
+
+def get_occurrence_rate_per_chunk(period_min, period_max):
+    log10_best_per_low = np.log10(period_min)
+    log10_best_per_up = np.log10(period_max)
+    # Number of planets of all radii in log day (per 1 star):
+    log2_rp_re_edges, log10_period_edges, occurrences_table = get_occurrence_table()  # Per one star
+    # FINDING ROWS IN THE OCCURRENCE TABLE THAT SPAN OUR PERIOD RANGE:
+    # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
+
+    # If we are outside the table, just assume the same densities as inside the table
+    if log10_best_per_up <= log10_period_edges[0]:
+        up_edge = log10_best_per_up
+        low_edge = log10_best_per_low
+        row_density = occurrences_table[0] / (log10_period_edges[1] - log10_period_edges[0])
+        planets_of_radii_in_per_range_one_star = row_density * (up_edge - low_edge)
+    elif log10_best_per_low > log10_period_edges[-1]:
+        up_edge = log10_best_per_up
+        low_edge = log10_best_per_low
+        row_density = occurrences_table[-1] / (log10_period_edges[-1] - log10_period_edges[-2])
+        planets_of_radii_in_per_range_one_star = row_density * (up_edge - low_edge)
+
+    else:
+        # For other periods, it will be checked right now:
+        row_upper = len(occurrences_table) - 1
+        for i in range(len(log10_period_edges) - 1):
+            if (log10_best_per_up > log10_period_edges[i]) and (log10_best_per_up <= log10_period_edges[i + 1]):
+                row_upper = i
+                break
+        row_lower = len(occurrences_table) - 1
+        for i in range(len(log10_period_edges) - 1):
+            if (log10_best_per_low > log10_period_edges[i]) and (log10_best_per_low <= log10_period_edges[i + 1]):
+                row_lower = i
+                break
+        if log10_best_per_low <= log10_period_edges[0]:
+            row_lower = 0
+        # CALCULATING EXPECTED NUMBER OF PLANETS IN OUR PERIOD RANGE:
+        # planets per one star in this period range for different radii bins:
+        # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
+        # to be uniform (they are log bins)
+        planets_of_radii_in_per_range_one_star = np.zeros(len(occurrences_table[-1]))
+        for i in range(row_lower, row_upper + 1):
+            row_density = occurrences_table[i] / (log10_period_edges[i + 1] - log10_period_edges[i])
+            if i == len(occurrences_table) - 1 and log10_best_per_up > log10_period_edges[len(log10_period_edges) - 1]:
+                up_edge = log10_best_per_up
+            else:
+                up_edge = min(log10_best_per_up, log10_period_edges[i + 1])
+            if i == len(occurrences_table) - 1 and log10_best_per_low > log10_period_edges[len(log10_period_edges) - 1]:
+                low_edge = log10_best_per_low
+            else:
+                low_edge = max(log10_best_per_low, log10_period_edges[i])
+            planets_of_radii_in_per_range_one_star += row_density * (up_edge - low_edge)
+    return planets_of_radii_in_per_range_one_star, log2_rp_re_edges
+
+
+def get_occurrence_rate_density_per_dp(period, dp=1.):
+    period_min = period - dp / 2
+    period_max = period + dp / 2
+    planets_of_radii_in_per_range_one_star, log2_rp_re_edges = get_occurrence_rate_per_chunk(period_min, period_max)
+    planets_in_per_range_one_star = np.sum(planets_of_radii_in_per_range_one_star)
+    density_planets_per_dp_ons_star = planets_in_per_range_one_star / dp
+    return density_planets_per_dp_ons_star
+
+
+def get_number_of_transiting_planets_density_per_dp(period, m_1_3_r_s, dp=1.):
+    period_min = period - dp / 2
+    period_max = period + dp / 2
+    density_planets_per_dp_ons_star = get_occurrence_rate_density_per_dp(period, dp=dp)
+    transit_probability = get_transit_probability(m_1_3_r_s=m_1_3_r_s, period=(period_min + period_max) / 2)
+    return density_planets_per_dp_ons_star * transit_probability
+
+
+def get_number_of_transiting_planets_per_chunk(period_min, period_max, m_1_3_r_s):
+    planets_of_radii_in_per_range_one_star, _ = get_occurrence_rate_per_chunk(period_min=period_min, period_max=period_max)
+    planets_in_per_range_one_star = np.sum(planets_of_radii_in_per_range_one_star)
+    transit_probability = get_transit_probability(m_1_3_r_s=m_1_3_r_s, period=(period_min + period_max) / 2)
+    return planets_in_per_range_one_star * transit_probability
+
+
 def load_volume_prior_precomputed_terms(
         precomputed_tables_location=Precomputed_tables_location,
         log_occurrences_templates_periods_m13r_per_edges_filename=Log_occurrences_templates_periods_m13r_per_edges_filename,
@@ -890,7 +1001,7 @@ def load_volume_prior_precomputed_terms(
     log_cos2_derivs_templates : time derivative of template shifting wrt itself,
     log_second_derivs_cos2_shifts_templates : cos squared derivative wrt the template number and
     log_occurrences_templates_periods_m13r_per_edges : the binned occurrence rates with bins.
-    log_occurrences_templates_periods is normalized by the m_1_3_r to have the full axtrophysical occurrence rate
+    log_occurrences_templates_periods is normalized by the m_1_3_r to have the full astrophysical occurrence rate
     in every m_1_3_r bin. units are rate! no probability normalization!
     :param precomputed_tables_location: in which directory all that resides
     :type precomputed_tables_location:

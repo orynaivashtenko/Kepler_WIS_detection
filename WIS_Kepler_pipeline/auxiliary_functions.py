@@ -1,14 +1,13 @@
+#!/usr/bin/env python3
+
 import os
 os.environ["OMP_NUM_THREADS"] = "1"  #
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"  #
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
-import numpy as np
 import matplotlib.pyplot as plt
 import warnings
-# import copy
-# import os
 from scipy.optimize import minimize
 import gzip
 import shutil
@@ -16,7 +15,6 @@ import requests
 import wget
 from astropy.io import fits
 
-# import target_class
 import search_pipeline as spip
 import utils
 import utils as ut
@@ -248,11 +246,11 @@ def get_saving_file_path(output_location, target_id, filename_postfix, file_form
     :param output_location: The directory in which the output of this tarhet is saved
     :type output_location: str
     :param target_id:
-    :type target_id:
+    :type target_id: str
     :param filename_postfix:
-    :type filename_postfix:
+    :type filename_postfix: str
     :param file_format:
-    :type file_format:
+    :type file_format: str
     :return:
     :rtype:
     """
@@ -277,6 +275,8 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
 
     if masks is None:
         masks = [~np.isnan(fl) for fl in fluxes]
+    elif not hasattr(masks[0], "__len__"):
+        masks = [masks]
 
     n_timesteps = int(np.round(time_fold / dt))
     # time_fold = n_timesteps * dt

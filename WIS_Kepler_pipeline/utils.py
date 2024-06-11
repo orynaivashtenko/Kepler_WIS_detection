@@ -17,6 +17,15 @@ def nanargsort(array):
     return np.arange(len(array))[notnan_mask][argsort]
 
 
+def safe_div(numerators, denominators, fill_value=0.):
+    numerators = np.array(numerators)
+    denominators = np.array(denominators)
+
+    non_zero_mask = ~np.isclose(denominators, 0)
+    numerators[non_zero_mask] = numerators[non_zero_mask] / denominators[non_zero_mask]
+    numerators[~non_zero_mask] = fill_value
+    return numerators
+
 def dec_to_bin(num, return_list=False, return_str=False):
     """
     From decimal to binary
@@ -168,7 +177,7 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
     if mask is None:
         mask = ~np.isnan(signal)
     else:
-        mask = np.array(mask)
+        mask = np.array(mask).astype(bool)
         assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
 
     if remove_outliers:

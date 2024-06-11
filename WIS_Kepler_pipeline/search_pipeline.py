@@ -4,7 +4,7 @@
 Created on Thu Dec 17 15:11:32 2020
 
 @author: orynaivashtenko
-version October 2022
+version May 2024
 
 
 """
@@ -945,6 +945,18 @@ class KeplerLightCurve(object):
                                             filename_postfix=filename_postfix, file_format='npy')
         np.save(file_path, np.array([self.stats_raw_no_veto_no_score_cor,
                                      self.stat_moving_vars], dtype=object), allow_pickle=True)
+
+    def load_no_veto_no_score_cor_stats(self, filename_postfix=Default_no_veto_no_score_cor_stats_filename_postfix):
+        """
+        Save statistics and their moving variances before veto or gaussianization were applied
+        :param filename_postfix: Used in the name convention "target_id + filename_postfix".
+            The location will be `self.output_location`
+        :type filename_postfix: str
+
+        """
+        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                            filename_postfix=filename_postfix, file_format='npy')
+        self.stats_raw_no_veto_no_score_cor, self.stat_moving_vars = np.load(file_path, allow_pickle=True)
 
     def load_connected_stats(self, file_path=None, filename_postfix=Default_connected_statistic_data_filename_postfix, path=None):
         """
@@ -2245,7 +2257,7 @@ class KeplerLightCurve(object):
                 var_calc = np.fft.irfft(np.abs(self.whitened_templates_fd[k][q]) ** 2)[0]
                 # Zero-padding ends are not a problem because they are zeros, and the normalization is fixed by irfft
                 statmask = np.array(self.big_hole_masks[q][self.zero_padding_ends[q][0]:len(
-                    self.big_hole_masks[q]) - self.zero_padding_ends[q][1]])
+                    self.big_hole_masks[q]) - self.zero_padding_ends[q][1]]).astype(bool)
 
                 eff_temp_wid = len(np.where(self.tb.templates_shifts[k] >= np.max(self.tb.templates_shifts[k]) / 2)[0])
                 gap_len = 2 * eff_temp_wid  # It was set empirically for typical data and templates
@@ -2254,7 +2266,7 @@ class KeplerLightCurve(object):
                 wind_len = max(wind_len, nwind_moving_var_min)
                 nsamples_min = int(nsamples_min_moving_var_coef * (wind_len - gap_len))
                 movvar_meas, tot_var = ut.moving_var(np.array(stat),
-                                                     mask=np.array(statmask),
+                                                     mask=statmask,
                                                      nwind=wind_len, ngap=gap_len,
                                                      nsamples_min=nsamples_min,
                                                      remove_outliers=True, detrend_remove_outliers=False,
@@ -2555,9 +2567,9 @@ class KeplerLightCurve(object):
                     decorr_coef = (np.fft.irfft(self.whitened_templates_fd[k][q] * np.conjugate(whitened_peak_temps_fd[q]))[0] /
                                    ((whitened_peak_temps_td[q] @ whitened_peak_temps_td[q])
                                     * (self.whitened_templates_td[k][q] @ self.whitened_templates_td[k][q])) ** 0.5)  # not rolled, approx
-                    max_peak_stats = np.array([np.max(stats_peak[q][max(0, i - h_dur_check): i + h_dur_check])
+                    max_peak_stats = np.array([np.nanmax(stats_peak[q][max(0, i - h_dur_check): i + h_dur_check])
                                                for i in range(len(stats_peak[q]))])
-                    min_peak_stats = np.array([np.min(stats_peak[q][max(0, i - h_dur_check): i + h_dur_check])
+                    min_peak_stats = np.array([np.nanmin(stats_peak[q][max(0, i - h_dur_check): i + h_dur_check])
                                                for i in range(len(stats_peak[q]))])
                     signs = np.sign(self.statistics_snr[k][q][trigger_indices_quarter_unpadded])
                     min_or_max = np.array([max_peak_stats[ind_j] if signs[j] > 0 else min_peak_stats[ind_j]
@@ -3657,7 +3669,8 @@ class KeplerLightCurve(object):
             self.stats_gaussianized_periodic_mar_temp = None
 
     def get_integral_score_at_max(self, per_ind_max=None, phase_ind_max=None, gaussianized=False,
-                                  dphi=D_period_integral_score, dpi=D_phase_integral_score, m_1_3_r=None):
+                                  dphi=D_period_integral_score, dpi=D_phase_integral_score, m_1_3_r=None,
+                                  use_occurrence_rate=True, log_baseline_integral_score_rate=0):
         """
         Calculates the integral score around the best trigger. The integral score is the sum of all the statistics
         in the period-phase plane arount the specified maximum. The point should really be a maximum because the
@@ -3677,11 +3690,15 @@ class KeplerLightCurve(object):
         :type dpi: int
         :param m_1_3_r: Mass of the star in units of solar mass divided by the radius of the star to the power 1/3
         :type m_1_3_r: float
+        :param use_occurrence_rate:
+        :type use_occurrence_rate: bool
+        :param log_baseline_integral_score_rate: renormalization constant which is to be subtracted from the integral score
+        :type log_baseline_integral_score_rate: float
         """
-        _, __, log_occurrences_templates_periods, m13r_bin_edges, period_edges = tm.load_volume_prior_precomputed_terms()
         if m_1_3_r is None:
             m_1_3_r = self.m_1_3_r_s
-        m_1_3_r_bin = min(max(0, np.searchsorted(m13r_bin_edges, m_1_3_r) - 1), len(m13r_bin_edges) - 2)
+        if log_baseline_integral_score_rate is None:
+            log_baseline_integral_score_rate = 0.
 
         if not gaussianized:
             if per_ind_max is None:
@@ -3724,12 +3741,16 @@ class KeplerLightCurve(object):
         integr_score = max_val + np.log(np.nansum(np.exp(norm_vals_to_sum))) + np.log(dp * dftt)
         # integr_score = np.log(np.nansum(np.exp(vals[inds_sum])) * dp * dftt)
 
-        per_bin = min(max(0, np.searchsorted(period_edges, self.periods[per_ind_max]) - 1), len(period_edges) - 2)
-        log_occurrence = log_occurrences_templates_periods[m_1_3_r_bin, per_bin]
-        log_occurrence = np.log(np.sum(np.exp(log_occurrence)))  # sum over templates
-        # log_occurrences_templates_periods is normalized by the m_1_3_r to have the full astrophysical occurrence rate
-        # in every m_1_3_r bin. units are rate! no probability normalization!
-        return integr_score + log_occurrence
+        if use_occurrence_rate:
+            # We use density here because we already have dp that was used in multiplication. Now we multiply the result by d_number/dp
+            log_occurrence_density_per_dp_dftt = np.log(tm.get_number_of_transiting_planets_density_per_dp(
+                                                        period=self.periods[per_ind_max], m_1_3_r_s=m_1_3_r, dp=1.
+                                                        ) / self.periods[per_ind_max])
+            integr_score = integr_score + log_occurrence_density_per_dp_dftt  # dp dftt are inside the integral
+            # log_occurrences_templates_periods is normalized by the m_1_3_r to have the full astrophysical occurrence rate
+            # in every m_1_3_r bin. units are rate! no probability normalization! but multiplied by probability to transit.
+        integr_score = integr_score - log_baseline_integral_score_rate
+        return integr_score
 
     def get_best_template_index(self, with_prior=True, in_gaussianized=False, ind_period=None, ind_phase=None, period=None):
         """
@@ -3871,7 +3892,8 @@ class KeplerLightCurve(object):
     def get_best_trigger(self, apply_veto_mes=True, fn_threshold=Fn_threshold_veto_mes, max_trials=Max_mes_veto_trials,
                          in_gaussianized=False, save_veto_masks=False,
                          min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
-                         min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction):
+                         min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction,
+                         log_baseline_integral_score_rate=0):
         """
         TODO: write
         # ATTENTION. SINCE WE USE VETO OF SES, THERE WILL BE ZEROS, AND THE INTEGRAL WILL NOT BE FULL
@@ -3923,8 +3945,8 @@ class KeplerLightCurve(object):
             is_good = False
             index_counter = 0
             while (not is_good) and (index_counter < max_trials):
-                best_per_index = sorting_inds[index_counter][0]
-                best_phase_index = sorting_inds[index_counter][1]
+                best_per_index = int(sorting_inds[index_counter][0])
+                best_phase_index = int(sorting_inds[index_counter][1])
                 best_period = self.periods[best_per_index]
 
                 best_ftt = self.tmin + self._phases[best_phase_index]
@@ -3973,7 +3995,9 @@ class KeplerLightCurve(object):
                 self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
                 self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
                 self.best_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
-                                                                          phase_ind_max=self.best_phase_index, gaussianized=False)
+                                                                          phase_ind_max=self.best_phase_index, gaussianized=False,
+                                                                          use_occurrence_rate=True,
+                                                                          log_baseline_integral_score_rate=log_baseline_integral_score_rate)
             else:
                 self.best_period = np.nan
                 self.best_ftt = np.nan
@@ -3996,8 +4020,11 @@ class KeplerLightCurve(object):
                 self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
                 self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
                 self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
-                self.best_g_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_g_per_index,
-                                                                            phase_ind_max=self.best_g_phase_index, gaussianized=True)
+                self.best_g_integral_score = self.get_integral_score_at_max(
+                                                                        per_ind_max=self.best_g_per_index,
+                                                                        phase_ind_max=self.best_g_phase_index, gaussianized=True,
+                                                                        use_occurrence_rate=True,
+                                                                        log_baseline_integral_score_rate=log_baseline_integral_score_rate)
             else:
                 self.best_g_template_index = np.nan
                 self.best_g_stat = np.nan

@@ -525,7 +525,7 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     :param env_name: Name of the conda environment to use. The default is the empty string, which is to run in the base env.
     :type env_name: str
     :param other_args: list of lists with pairs of argument name and argument value, all strings
-    :type other_args: list[list[str, str]]  or None
+    :type other_args: list[list[str]]  or None
     :return: 
     :rtype: 
     """
