@@ -148,9 +148,10 @@ class KeplerLightCurve(object):
                 fluxes = [fluxes]
             assert len(times) == len(fluxes), 'Number of time pieces is supposed to be equal to the number of light curves!'
             for i in range(len(times)):
-                assert len(times[i]) == len(fluxes[i]), 'Length of fluxes[' + str(i) + '] does not match its time length!'
-            self.orig_times = times
-            self.orig_fluxes = fluxes
+                assert len(times[i]) == len(fluxes[i]), 'Length of fluxes[' + str(i) + '] = ' + str(
+                    len(fluxes[i])) + ' does not match its time length = ' + str(len(times[i])) + ' !'
+            self.orig_times = [np.array(times[q]) for q in range(len(times))]
+            self.orig_fluxes = [np.array(fluxes[q]) for q in range(len(fluxes))]
         else:
             assert target_id is not None, 'Please specify target ID!'
             self.orig_times, self.orig_fluxes = af.get_data_fun(target_id, location=data_location)
@@ -506,6 +507,8 @@ class KeplerLightCurve(object):
         """Summarizes best trigger found in the search."""
         self.veto_mes_masks = None
         """Periods and phases whose triggers were best triggers but were masked out by MES veto."""
+        self.veto_g_mes_masks = None
+        """Periods and phases whose triggers were best gaussianized triggers but were masked out by MES veto."""
 
         # ########################################################################################################
         # BEST TRIGGER PROPERTIES
@@ -639,9 +642,9 @@ class KeplerLightCurve(object):
         self.measure_psds(nperseg=self.nperseg_psd, tukey_steps_len=tukey_steps_len)
         self.whiten_fluxes(whiten_clean_fluxes=True)
         self.fill_additional_outliers(nsig=nsig_outliers_w, nsig_positive=nsig_outliers_w_pos,
-                        nsig_negative=nsig_outliers_w_neg,
-                        nsig_clean=nsig_outliers_psd, detr_length_outliers=detr_length_outliers,
-                        in_whitened_fluxes=True, modify_clean_masks=True, interpolate_clean_fluxes=True)
+                                      nsig_negative=nsig_outliers_w_neg,
+                                      nsig_clean=nsig_outliers_psd, detr_length_outliers=detr_length_outliers,
+                                      in_whitened_fluxes=True, modify_clean_masks=True, interpolate_clean_fluxes=True)
         self.whiten_fluxes(whiten_clean_fluxes=True)
         self.notch_fluxes(nsig=nsig_notch)
         self.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
@@ -1012,12 +1015,12 @@ class KeplerLightCurve(object):
 
     def condition_templates(self, templates=None, shifts=None, template_index='all'):
         """
-        Initializes and conditions the template bank. Most of the temlate properties and methods are inside the `TemplateBank` class,
-        but notchig, whitening and similar are performed here.
-        :param templates: Array of transit models used for detecton, usually produced with Batman pachageCentered at the center.
+        Initializes and conditions the template bank. Most of the template properties and methods are inside the `TemplateBank` class,
+        but notching, whitening and similar are performed here.
+        :param templates: Array of transit models used for detection, usually produced with Batman package centered at the center.
             See `template_module`
         :type templates: list numpy.ndarrays 1d of float, see `template_module`
-        :param shifts: Subbin shifts of templates, see `template_module`
+        :param shifts: Sub-bin shifts of templates, see `template_module`
         :type shifts:
         :param template_index: which templates from the bank to use
         :type template_index: int or 'all'
@@ -2791,14 +2794,16 @@ class KeplerLightCurve(object):
                                                              zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
                                                              is_time_cut=~self.is_zero_padded, dt=self.dt_days,
                                                              fill_gaps_by_nan=False)[1]
-            self.corrections_full[k] = af.connect_quarters_fun(self.times, self.log_non_gaussian_corrections[k],
-                                                               zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
-                                                               is_time_cut=~self.is_zero_padded, dt=self.dt_days,
-                                                               fill_gaps_by_nan=False)[1]
-            self.statistics_gaussianized_full[k] = af.connect_quarters_fun(self.times, self.statistics_gaussianized[k],
-                                                                           zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
-                                                                           is_time_cut=~self.is_zero_padded, dt=self.dt_days,
-                                                                           fill_gaps_by_nan=False)[1]
+            if self.log_non_gaussian_corrections is not None:
+                self.corrections_full[k] = af.connect_quarters_fun(self.times, self.log_non_gaussian_corrections[k],
+                                                                   zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
+                                                                   is_time_cut=~self.is_zero_padded, dt=self.dt_days,
+                                                                   fill_gaps_by_nan=False)[1]
+            if self.statistics_gaussianized is not None:
+                self.statistics_gaussianized_full[k] = af.connect_quarters_fun(self.times, self.statistics_gaussianized[k],
+                                                                               zero_padding_ends=None, is_data_cut=~self.is_zero_padded,
+                                                                               is_time_cut=~self.is_zero_padded, dt=self.dt_days,
+                                                                               fill_gaps_by_nan=False)[1]
 
     def check_possible_number_of_transits(self, period, return_number=True, return_relative=False):
         """
@@ -3669,7 +3674,7 @@ class KeplerLightCurve(object):
             self.stats_gaussianized_periodic_mar_temp = None
 
     def get_integral_score_at_max(self, per_ind_max=None, phase_ind_max=None, gaussianized=False,
-                                  dphi=D_period_integral_score, dpi=D_phase_integral_score, m_1_3_r=None,
+                                  dpi=D_period_integral_score, dphi=D_phase_integral_score, m_1_3_r=None,
                                   use_occurrence_rate=True, log_baseline_integral_score_rate=0):
         """
         Calculates the integral score around the best trigger. The integral score is the sum of all the statistics
@@ -3726,11 +3731,14 @@ class KeplerLightCurve(object):
         vals = vals[per_ind_left:per_ind_right][:, phase_ind_left:phase_ind_right]
         peak_coords_relative = per_ind_max - per_ind_left, phase_ind_max - phase_ind_left
 
-        ambient_val = np.nanmedian(vals)
-        inds_sum = (vals > ambient_val + 0.5 * (peak_val - ambient_val))
-        ambient_val = np.nanmedian(vals[~inds_sum])  # repetitive median to exclude peak
-        inds_sum = (vals >= ambient_val + 0.5 * (peak_val - ambient_val))
-        inds_sum = ut.select_connected_component(inds_sum, center=peak_coords_relative)
+        inds_sum = ut.get_indices_of_influence(vals=vals, per_ind_center=peak_coords_relative[0],
+                                               ftt_ind_center=peak_coords_relative[1], part_snr_2=0.5)
+
+        # ambient_val = np.nanmedian(vals)
+        # inds_sum = (vals > ambient_val + 0.5 * (peak_val - ambient_val))
+        # ambient_val = np.nanmedian(vals[~inds_sum])  # repetitive median to exclude peak
+        # inds_sum = (vals >= ambient_val + 0.5 * (peak_val - ambient_val))
+        # inds_sum = ut.select_connected_component(inds_sum, center=peak_coords_relative)
 
         dp = self.periods[max(1, per_ind_max)] - self.periods[max(0, per_ind_max - 1)]
         dftt = self._phases[max(1, phase_ind_max)] - self._phases[max(0, phase_ind_max - 1)]
@@ -3756,7 +3764,7 @@ class KeplerLightCurve(object):
         """
         Select the template which had the highest score before the marginalization over the templates was done.
         Looks at a specific position specified by `ind_period` and `ind_phase`.
-        Attention: the non-margializeed scores should not have been deleted!
+        Attention: the non-marginalized scores should not have been deleted!
         :param with_prior: Whether to select best score accounting for prior or not
         :type with_prior: bool
         :param in_gaussianized: Whether to consider the gaussianized score or non-gaussianized, but distribution-corrected
@@ -3893,13 +3901,44 @@ class KeplerLightCurve(object):
                          in_gaussianized=False, save_veto_masks=False,
                          min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
                          min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction,
-                         log_baseline_integral_score_rate=0):
+                         log_baseline_integral_score_rate=0,
+                         minimal_trackable_score=25, d_snr_2_tail=10,
+                         dpi=D_period_integral_score, dphi=D_phase_integral_score):
         """
         TODO: write
+        :param apply_veto_mes:
+        :type apply_veto_mes:
+        :param fn_threshold:
+        :type fn_threshold:
+        :param max_trials:
+        :type max_trials:
+        :param in_gaussianized:
+        :type in_gaussianized:
+        :param save_veto_masks:
+        :type save_veto_masks:
+        :param min_required_nonzero_transits_number:
+        :type min_required_nonzero_transits_number:
+        :param min_required_nonzero_transits_fraction:
+        :type min_required_nonzero_transits_fraction:
+        :param log_baseline_integral_score_rate:
+        :type log_baseline_integral_score_rate:
+        :param minimal_trackable_score:
+        :type minimal_trackable_score:
+        :param d_snr_2_tail: 15 is 8**2 - 7**2, which is one sigma deviation down
+        :type d_snr_2_tail:
+        :param dpi:
+        :type dpi:
+        :param dphi:
+        :type dphi:
+        :return:
+        :rtype:
+        """
+        """
+        
         # ATTENTION. SINCE WE USE VETO OF SES, THERE WILL BE ZEROS, AND THE INTEGRAL WILL NOT BE FULL
         # THEREFORE WE IN GENERAL LOSE SNR, BOT ALSO THE DISTRIBUTION WILL HAVE AN UNKNOWN VARIANCE
 
-        ATTENTION WARNING. The search was done on the statisitcs marginalized over templates. It is not well-defined then to
+        ATTENTION WARNING. The search was done on the statistics marginalized over templates. It is not well-defined then to
         check individual transits of individual templates. It is possible to define something like first marginalize then compare,
         but it is not the same. So it was decided in the end that we will only check the consistency of the best template.
 
@@ -3927,11 +3966,233 @@ class KeplerLightCurve(object):
             stats_periodic_mar_temp = self.stats_gaussianized_periodic_mar_temp
             statistics_periodic = self.stats_gaussianized_periodic
 
+        stats_periodic_mar_temp_initial = np.array(stats_periodic_mar_temp)
         # Finding period-phase bests list
         shap_x = stats_periodic_mar_temp.shape[1]
-        flat_inds = ut.nanargsort(stats_periodic_mar_temp[self.period_overlap_bins: len(
-            stats_periodic_mar_temp) - self.period_overlap_bins, :].flatten())
-        sorting_inds = np.array([flat_inds // shap_x + self.period_overlap_bins, flat_inds % shap_x]).T[::-1]
+        # We will scan all the bins, including ones in the safety overlap region, because there can be large bad peaks there
+        # Which will contribute to the integral score and make it too large.
+        # We will avoid safety overlap regions later on
+        flat_inds = ut.nanargsort(stats_periodic_mar_temp.flatten())
+        sorting_inds = np.array([flat_inds // shap_x, flat_inds % shap_x]).T[::-1]
+        if max_trials is not None:
+            max_trials = min(max_trials, len(sorting_inds))
+        else:
+            max_trials = len(sorting_inds)
+
+        if apply_veto_mes:
+            veto_mes_masks = np.ones_like(stats_periodic_mar_temp).astype(bool)
+            influence_matrix = np.zeros_like(stats_periodic_mar_temp)
+            assert statistics_periodic is not None, 'self.statistics_periodic needed for finding the best template'
+            best_per_index = None
+            best_phase_index = None
+            trigger_accepted = False
+            index_counter = 0
+            while (not trigger_accepted) and (index_counter < max_trials):
+                #  and (best_stat >= minimal_trackable_score or minimal_trackable_score is None or best_stat is None)):
+                to_mark_influence = False
+                best_per_index = int(sorting_inds[index_counter][0])
+                best_phase_index = int(sorting_inds[index_counter][1])
+                best_period = self.periods[best_per_index]
+                best_ftt = self.tmin + self._phases[best_phase_index]
+                best_stat = stats_periodic_mar_temp[best_per_index, best_phase_index]
+                best_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=in_gaussianized,
+                                                                   ind_period=best_per_index, ind_phase=best_phase_index,
+                                                                   period=best_period)
+
+                summed_indices, summed_times, summed_stats_raw, summed_vars, summed_stats_raw_gauss, \
+                    summed_corrections = self.get_summed_values(first_transit_time=best_ftt,
+                                                                period=best_period, template=best_template_index,
+                                                                minimize_downsampling=True, return_results=True)
+                n_transits = len(summed_stats_raw)
+                non_zero_mask = (~np.isclose(summed_stats_raw, 0)) & (~np.isclose(summed_vars, 0)) & (~np.isnan(summed_stats_raw)) & (
+                    ~np.isinf(summed_vars))
+                n_non_zeros = len(np.where(non_zero_mask)[0])
+                if ((n_non_zeros < n_transits * min_required_nonzero_transits_fraction)
+                        or (n_non_zeros < min_required_nonzero_transits_number)):
+                    is_good = False
+                    to_mark_influence = True
+                elif influence_matrix[best_per_index, best_phase_index] > best_stat + d_snr_2_tail:
+                    is_good = False
+                    # We will not mark influence of something which is small. The influence of a larger peak was already marked
+                else:
+                    p_val = ut.unequal_amplitude_veto(summed_stats_raw, stat_vars=summed_vars, negative=True)
+                    if p_val >= fn_threshold:
+                        is_good = True
+                    else:
+                        is_good = False
+                        to_mark_influence = True
+                if not is_good:
+                    veto_mes_masks[best_per_index, best_phase_index] = False
+                    # WARNING: we are zeroing the statistic which did not pass the veto for
+                    # this statistic not to impact the integral score
+
+                    # # #
+                    # mat = ut.select_influence_parallelogram(per_ind_center=best_per_index,
+                    #                                         ftt_ind_center=best_phase_index,
+                    #                                         per_center=best_period,
+                    #                                         d_per=self.periods[1] - self.periods[0],
+                    #                                         d_ftt=self._phases[1] - self._phases[0],
+                    #                                         part_snr_2=0.6,
+                    #                                         t_mission=self.t_mission,
+                    #                                         dur_max_templ=tm.Durations[-1],
+                    #                                         score_center=stats_periodic_mar_temp[best_per_index, best_phase_index],
+                    #                                         n_pers=None, n_ftts=None,
+                    #                                         influence_matrix=influence_matrix)
+
+                    if to_mark_influence:
+                        # Selecting the influence region of this peak and if someone is found to be just caused by the
+                        # tail of this bad trigger (and if it is not big because big triggers not be not tail but actual good thing),
+                        # then it will be vetted.
+
+                        per_ind_max = best_per_index
+                        phase_ind_max = best_phase_index
+                        peak_val = best_stat
+                        per_ind_left = max(0, per_ind_max - dpi)
+                        phase_ind_left = max(0, phase_ind_max - dphi)
+                        per_ind_right = min(per_ind_max + dpi, stats_periodic_mar_temp.shape[0])
+                        phase_ind_right = min(phase_ind_max + dphi, stats_periodic_mar_temp.shape[1])
+                        peak_coords_relative = per_ind_max - per_ind_left, phase_ind_max - phase_ind_left
+                        vals_selected = stats_periodic_mar_temp_initial[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right]
+                        # -> take initial because maybe connected component was destroyed by veto
+
+                        if minimal_trackable_score is not None:
+                            # Absolute difference in the snr squared between the peak and the minimal level that we bother to veto:
+                            abs_diff_snr_2 = (peak_val - minimal_trackable_score) if peak_val > minimal_trackable_score else 1
+                            # -> this 1 is just formal. If peak_val <= minimal_trackable_score, we are not really interested
+                            part_snr_2 = None
+                        else:
+                            # If it is None, then select
+                            abs_diff_snr_2 = None
+                            part_snr_2 = 0.3
+                        influence_matrix_selected = ut.get_indices_of_influence(vals_selected, per_ind_center=peak_coords_relative[0],
+                                                                                ftt_ind_center=peak_coords_relative[1],
+                                                                                part_snr_2=part_snr_2,  # used if abs_diff_snr_2 is None
+                                                                                abs_diff_snr_2=abs_diff_snr_2)
+                        # Updating the influence matrix with the new trigger:
+                        influence_matrix[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right] = np.max([
+                            influence_matrix[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right],
+                            influence_matrix_selected.astype(float) * peak_val], axis=0)
+
+                    # ###############################################################################################
+                    # Zeroing to avoid contribution to the integral:
+                    stats_periodic_mar_temp[best_per_index, best_phase_index] = 0.
+                    # The values will be zeroed only if they are larger than the best trigger!
+                # If the trigger passed the veto, then me check whether it is not in the safety overlap region
+                if is_good:
+                    if ((best_per_index >= self.period_overlap_bins)
+                            and (best_per_index < len(stats_periodic_mar_temp) - self.period_overlap_bins)):
+                        trigger_accepted = True
+                index_counter += 1
+            if save_veto_masks:
+                if not in_gaussianized:
+                    self.veto_mes_masks = veto_mes_masks
+                else:
+                    self.veto_g_mes_masks = veto_mes_masks
+            if not trigger_accepted:
+                # raise ValueError('No MES passing veto was found after ' + str(index_counter) + ' trials!')
+                best_per_index, best_phase_index = np.nan, np.nan
+        else:
+            best_per_index, best_phase_index = sorting_inds[0]
+        if not in_gaussianized:
+            self.best_per_index = best_per_index
+            self.best_phase_index = best_phase_index
+            if (not np.isnan(best_per_index)) and (not np.isnan(best_phase_index)):
+                self.best_period = self.periods[self.best_per_index]
+                self.best_ftt = self.tmin + self._phases[self.best_phase_index]
+                if self.statistics_periodic is not None:
+                    self.best_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=False,
+                                                                            ind_period=self.best_per_index,
+                                                                            ind_phase=self.best_phase_index, period=self.best_period)
+                self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
+                self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
+                self.best_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
+                                                                          phase_ind_max=self.best_phase_index, gaussianized=False,
+                                                                          use_occurrence_rate=True,
+                                                                          log_baseline_integral_score_rate=log_baseline_integral_score_rate)
+            else:
+                self.best_period = np.nan
+                self.best_ftt = np.nan
+                self.best_template_index = np.nan
+                self.best_stat = np.nan
+                self.best_stat_gaussianized = np.nan
+                self.best_integral_score = np.nan
+
+        else:
+            self.best_g_per_index = best_per_index
+            self.best_g_phase_index = best_phase_index
+            if (not np.isnan(best_per_index)) and (not np.isnan(best_phase_index)):
+                self.best_g_period = self.periods[self.best_g_per_index]
+                if self.stats_gaussianized_periodic is not None:
+                    self.best_g_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=True,
+                                                                              ind_period=self.best_g_per_index,
+                                                                              ind_phase=self.best_g_phase_index,
+                                                                              period=self.best_g_period)
+
+                self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
+                self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
+                self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
+                self.best_g_integral_score = self.get_integral_score_at_max(
+                                                                        per_ind_max=self.best_g_per_index,
+                                                                        phase_ind_max=self.best_g_phase_index, gaussianized=True,
+                                                                        use_occurrence_rate=True,
+                                                                        log_baseline_integral_score_rate=log_baseline_integral_score_rate)
+            else:
+                self.best_g_template_index = np.nan
+                self.best_g_stat = np.nan
+                self.best_g_stat_gaussianized = np.nan
+                self.best_g_ftt = np.nan
+                self.best_g_integral_score = np.nan
+
+    def get_best_trigger_old(self, apply_veto_mes=True, fn_threshold=Fn_threshold_veto_mes, max_trials=Max_mes_veto_trials,
+                         in_gaussianized=False, save_veto_masks=False,
+                         min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
+                         min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction,
+                         log_baseline_integral_score_rate=0):
+        """
+        TODO: write
+        # ATTENTION. SINCE WE USE VETO OF SES, THERE WILL BE ZEROS, AND THE INTEGRAL WILL NOT BE FULL
+        # THEREFORE WE IN GENERAL LOSE SNR, BOT ALSO THE DISTRIBUTION WILL HAVE AN UNKNOWN VARIANCE
+
+        ATTENTION WARNING. The search was done on the statistics marginalized over templates. It is not well-defined then to
+        check individual transits of individual templates. It is possible to define something like first marginalize then compare,
+        but it is not the same. So it was decided in the end that we will only check the consistency of the best template.
+
+        The test is checking whether some transits are zeros. In fact, it is the biggest amplitude difference between the transits,
+        but it was derived to check zeroness. First, explicit zeros are checked. They can be there due to holes. And then,
+        the veto is used to test statistical zeros.
+
+        not applying score correction, we need to check whether it is more probable to have all equal transits or to have
+        some equal and some zeros
+        Creates:
+        self.best_stat : Best score (SNR squared marginalized over templates, corrected for single-event-distribution non-gaussianity)
+        self.best_per_index : Index in periods corresponding to the best score
+        self.best_phase_index : Index in phases corresponding to the best score
+        self.best_period : Period corresponding to the best score
+        self.best_ftt : First transit time corresponding to the best score
+        self.best_template_index : Index of best template at the point of the best score
+        self.best_stat_gaussianized : Gaussianized statistic at the position corresponding to `self.best_stat`
+        self.best_integral_score : The inegral over statistic with prior around the maximum
+        And the same with index _g_ for the maximum over the gaussianized score.
+        """
+        if not in_gaussianized:
+            stats_periodic_mar_temp = self.stats_periodic_mar_temp
+            statistics_periodic = self.statistics_periodic
+        else:
+            stats_periodic_mar_temp = self.stats_gaussianized_periodic_mar_temp
+            statistics_periodic = self.stats_gaussianized_periodic
+
+        stats_periodic_mar_temp_initial = np.array(stats_periodic_mar_temp)
+        # Finding period-phase bests list
+        shap_x = stats_periodic_mar_temp.shape[1]
+        # flat_inds = ut.nanargsort(stats_periodic_mar_temp[self.period_overlap_bins: len(
+        #     stats_periodic_mar_temp) - self.period_overlap_bins, :].flatten())
+        # sorting_inds = np.array([flat_inds // shap_x + self.period_overlap_bins, flat_inds % shap_x]).T[::-1]
+
+        # We will scan all the bins, including ones in the safety overlap region, because there can be large bad peaks there
+        # Which will contribute to the integral score and make it too large.
+        # We will avoid safety overlap regions later on
+        flat_inds = ut.nanargsort(stats_periodic_mar_temp.flatten())
+        sorting_inds = np.array([flat_inds // shap_x, flat_inds % shap_x]).T[::-1]
         if max_trials is not None:
             max_trials = min(max_trials, len(sorting_inds))
         else:
@@ -3942,9 +4203,10 @@ class KeplerLightCurve(object):
             assert statistics_periodic is not None, 'self.statistics_periodic needed for finding the best template'
             best_per_index = None
             best_phase_index = None
-            is_good = False
+            trigger_accepted = False
             index_counter = 0
-            while (not is_good) and (index_counter < max_trials):
+            while (not trigger_accepted) and (index_counter < max_trials):
+                is_good = True
                 best_per_index = int(sorting_inds[index_counter][0])
                 best_phase_index = int(sorting_inds[index_counter][1])
                 best_period = self.periods[best_per_index]
@@ -3970,14 +4232,25 @@ class KeplerLightCurve(object):
                     if p_val >= fn_threshold:
                         is_good = True
                     else:
-                        veto_mes_masks[best_per_index, best_phase_index] = False
-                        # WARNING: we are zeroing the statistic which did not pass the veto for
-                        # this statistic not to impact the integral score
-                        self.stats_periodic_mar_temp[best_per_index, best_phase_index] = 0.
+                        is_good = False
+                if not is_good:
+                    veto_mes_masks[best_per_index, best_phase_index] = False
+                    # WARNING: we are zeroing the statistic which did not pass the veto for
+                    # this statistic not to impact the integral score
+                    stats_periodic_mar_temp[best_per_index, best_phase_index] = 0.
+                    # The values will be zeroed only if they are larger than the best trigger!
+                # If the trigger passed the veto, then me check whether it is not in the safety overlap region
+                if is_good:
+                    if ((best_per_index >= self.period_overlap_bins)
+                            and (best_per_index < len(stats_periodic_mar_temp) - self.period_overlap_bins)):
+                        trigger_accepted = True
                 index_counter += 1
             if save_veto_masks:
-                self.veto_mes_masks = veto_mes_masks
-            if not is_good:
+                if not in_gaussianized:
+                    self.veto_mes_masks = veto_mes_masks
+                else:
+                    self.veto_g_mes_masks = veto_mes_masks
+            if not trigger_accepted:
                 # raise ValueError('No MES passing veto was found after ' + str(index_counter) + ' trials!')
                 best_per_index, best_phase_index = np.nan, np.nan
         else:
@@ -4048,12 +4321,22 @@ class KeplerLightCurve(object):
         best_periodic_scores_data[Best_per_results_index_per_list] = self.periods
         self.best_periodic_scores_data = best_periodic_scores_data
 
+    def get_influence_period_indices(self, period, part_snr_2=0.5):
+        d_per = self.periods[1] - self.periods[0]
+        dur_max_templ = self.tb.durations[-1]
+        # n_transits = int(np.round(klc.t_mission / period))
+        delta_per_bins = int(np.round((period * 2 * dur_max_templ / self.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
+        close_period_ind = np.nanargmin(np.abs(self.periods - period))
+        per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
+        per_ind_right = min(len(self.periods), close_period_ind + delta_per_bins)
+        return per_ind_left, per_ind_right
+
 
 def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statistics_by_trends_gaussianized,
                     dt, tmax, tmin, periods):
     """
     Folds and sums the statistics with `periods` and all the possible initial phases. Accounts for
-    subbin template shifts, accounts for masks.
+    sub-bin template shifts, accounts for masks.
 
     :param statistics_by_trends: Single-events statistics multiplied by the mean flux trend, which is assumed to be
         proportional to the expected amplitude of the transits. If the statistic was already normalized by trends,
@@ -4108,3 +4391,22 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statis
             corrections_periodic[P_ind, :, :phaselen] += corrections[:, time_ind:time_ind + phaselen]
             stats_gaussianized_periodic[P_ind, :, :phaselen] += statistics_by_trends_gaussianized[:, time_ind:time_ind + phaselen]
     return statistics_periodic, denomsq, corrections_periodic, stats_gaussianized_periodic
+
+
+def get_minimal_processed_folded_klc(period, template_index='all', times=None, fluxes=None, target_id=None, get_data=False,
+                                     nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos, delta_period=0.1):
+    klc = KeplerLightCurve(target_id=target_id, get_data=get_data, times=times, fluxes=fluxes)
+    klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
+                       nsig_outliers_0_neg=nsig_outliers_0_neg,
+                       nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
+                       nsig_outliers_w_neg=nsig_outliers_0_neg)
+    klc.condition_templates(template_index=template_index)
+    klc.matched_filtering()
+    klc.cut_zero_padding_ends()
+    klc.connect_quarters()
+    klc.interleave_shifts()
+    klc.sum_periods(p_min=period - delta_period, p_max=period + delta_period)
+    # -> we do not marginalize, so statistics are still not in units of snr squared
+    return klc
+
+

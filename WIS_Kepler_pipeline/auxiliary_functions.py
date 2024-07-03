@@ -219,6 +219,8 @@ def get_correct_tid_folder(target_id, location, allow_creation=False):
             if target_id not in os.listdir(location):
                 os.mkdir(os.path.join(location, target_id))
             location = os.path.join(location, target_id)
+        if not os.path.exists(location):
+            os.mkdir(location)
         return location
     else:
         if os.path.split(location)[-1] == target_id:
@@ -686,6 +688,7 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
     target_id = str(target_id).rjust(9, "0")
     data_folder = get_correct_tid_folder(target_id=target_id, location=data_folder, allow_creation=True)
 
+    # noinspection DuplicatedCode
     if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
         download_target_pixel_files(target_id, data_folder)
 
@@ -705,6 +708,7 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
         times.append(time)
         target_pixels.append(target_pix)
 
+    # noinspection DuplicatedCode
     reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
     argsort = np.argsort(reference_times)
     times = [times[ind] for ind in argsort]
@@ -735,7 +739,107 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
         return times, target_pixels, aperture_masks
 
 
+def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
+    """
+
+    ra and dec are in decimal degrees
+    """
+    # import lightkurve as lk
+    from lightkurve import targetpixelfile as tpf
+
+    target_id = str(target_id).rjust(9, "0")
+    data_folder = get_correct_tid_folder(target_id=target_id, location=data_location)
+
+    # noinspection DuplicatedCode
+    if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
+        download_target_pixel_files(target_id, data_folder)
+
+    tp_fits_filenames = [ff for ff in os.listdir(data_folder) if '.fits' in ff]
+    assert len(tp_fits_filenames) >= 1, 'There are no files!'
+
+    times = []
+    fluxes = []  # fluxes for all the pixels
+    time_masks = []
+    aperture_masks = []
+    sky_coords = []
+    for tp_fits_filename in tp_fits_filenames:
+        tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
+        time_tpf = tpf1.time.value
+        flux_tpf = tpf1.flux.value
+        ra, dec = tpf1.get_coordinates(cadence='all')
+
+        mask = np.array(tpf1.quality_mask)
+        time = np.zeros(len(mask)) * np.nan
+        flux = np.zeros((len(mask), flux_tpf.shape[1], flux_tpf.shape[2])) * np.nan
+        coords = np.zeros((2, len(mask), flux_tpf.shape[1], flux_tpf.shape[2])) * np.nan
+
+        time[mask] = time_tpf
+        flux[mask] = flux_tpf
+        coords[0, mask] = ra
+        coords[1, mask] = dec
+
+        times.append(time)
+        fluxes.append(flux)
+        time_masks.append(mask)
+        sky_coords.append(coords)
+        aperture_masks.append(tpf1.pipeline_mask)
+
+    # noinspection DuplicatedCode
+    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
+    argsort = np.argsort(reference_times)
+    times = [times[ind] for ind in argsort]
+    fluxes = [fluxes[ind] for ind in argsort]
+    aperture_masks = [aperture_masks[ind] for ind in argsort]
+    sky_coords = [sky_coords[ind] for ind in argsort]
+    time_masks = [time_masks[ind] for ind in argsort]
+
+    if remove_zeroth_quarter:
+        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
+            times = times[1:]
+            fluxes = fluxes[1:]
+            aperture_masks = aperture_masks[1:]
+            sky_coords = sky_coords[1:]
+            time_masks = time_masks[1:]
+
+    if len(times) < 1:
+        raise AssertionError('There is no data to process!')
+
+    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
+        if ((1570 >= np.nanmin(times[-1])) & (
+                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
+            times = times[:-1]
+            fluxes = fluxes[:-1]
+            aperture_masks = aperture_masks[:-1]
+            sky_coords = sky_coords[:-1]
+            time_masks = time_masks[:-1]
+
+    if cut_edge_nans:
+        for q in range(len(times)):
+            non_nans = np.where(~np.isnan(times[q]))[0]
+            times[q] = times[q][non_nans[0]: non_nans[-1] + 1]
+            fluxes[q] = fluxes[q][non_nans[0]: non_nans[-1] + 1]
+            sky_coords[q] = sky_coords[q][:, non_nans[0]: non_nans[-1] + 1]
+            time_masks[q] = time_masks[q][non_nans[0]: non_nans[-1] + 1]
+
+    # times, fluxes, sky_coords, time_masks, aperture_masks
+    return times, fluxes, sky_coords, time_masks, aperture_masks
+
+
 def download_target_pixel_files(target_id, saving_folder):
+    """
+    # tp_fits_file = fits.open(os.path.join(data_folder, tp_fits_filename))
+    # time = tp_fits_file[1].data['TIME']
+    # target_pix = tp_fits_file[1].data['FLUX']
+    # aperture_mask = tp_fits_file[2].data
+    # tp_fits_file.close()
+
+    :param target_id:
+    :type target_id:
+    :param saving_folder:
+    :type saving_folder:
+    :return:
+    :rtype:
+    """
     target_id = str(target_id).rjust(9, "0")
     saving_folder = get_correct_tid_folder(target_id=target_id, location=saving_folder, allow_creation=True)
 
@@ -852,138 +956,147 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
     return star_part_sap_fluxes, bg_part_sap_fluxes
 
 
-def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_trends, summed_stat_vars, templ_max, trends_stds=None):
+def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max, flux_trend, trends_std=None):
     """
 
     :param summed_raw_stats:
     :type summed_raw_stats:
-    :param summed_trends:
-    :type summed_trends:
-    :param summed_stat_denoms:
-    :type summed_stat_denoms:
+    :param flux_trend:
+    :type flux_trend:
+    :param summed_stat_vars:
+    :type summed_stat_vars:
     :param templ_max: depth of the template that was normalized to one by the L2 norm
     :type templ_max:
-    :param trends_stds:
-    :type trends_stds:
+    :param trends_std:
+    :type trends_std:
     :return:
     :rtype:
     """
+    templ_max = templ_max / np.linalg.norm(templ_max)
     templ_max = np.abs(templ_max)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
-        not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (summed_trends > 0.) & (summed_raw_stats != 0.)
-        ampls = np.zeros(len(summed_raw_stats)) * np.nan
-        ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
-        normalized_ampls = np.zeros(len(summed_raw_stats)) * np.nan
-        # normalized_ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
-        ppms = np.zeros(len(summed_raw_stats)) * np.nan
-        ppms_stds = np.zeros(len(summed_raw_stats)) * np.nan
 
-        ampls[not_missed_transit_mask] = np.abs(summed_raw_stats / summed_stat_vars)[not_missed_transit_mask]
-        ampls_stds[not_missed_transit_mask] = (np.abs(1 / summed_stat_vars)**0.5)[not_missed_transit_mask]
-        mean_trend = np.nanmean(summed_trends)
-        normalized_ampls[not_missed_transit_mask] = (ampls / summed_trends * mean_trend)[not_missed_transit_mask]
-        if trends_stds is not None:
-            mean_trend_std = (np.nanmean(trends_stds**2) + np.nanvar(summed_trends))**0.5
-            normalized_ampls_stds = (ampls_stds * mean_trend / summed_trends
-                                     + trends_stds * ampls * mean_trend / summed_trends**2
-                                     + mean_trend_std * ampls / summed_trends)
-        else:
-            mean_trend_std = (np.nanvar(summed_trends)) ** 0.5
-            normalized_ampls_stds = (ampls_stds * mean_trend / summed_trends
-                                     + mean_trend_std * ampls * mean_trend / summed_trends ** 2
-                                     + mean_trend_std * ampls / summed_trends)
+    # with warnings.catch_warnings():
+    #     warnings.simplefilter("ignore", category=RuntimeWarning)
 
-        ampl = (np.nanmean((ampls[not_missed_transit_mask] / summed_trends[not_missed_transit_mask]))
-                * np.nanmean(summed_trends[not_missed_transit_mask]))
-        ppms[not_missed_transit_mask] = (summed_raw_stats / summed_stat_vars / summed_trends * templ_max * 1e6)[not_missed_transit_mask]
-        ppm = np.abs(np.nanmean(ppms[not_missed_transit_mask]))
-        ppms_stds[not_missed_transit_mask] = ((
-                1 / summed_stat_vars * np.var(summed_trends[not_missed_transit_mask])
-                / summed_trends ** 4 * templ_max ** 2 * 1e12)**0.5)[not_missed_transit_mask]
-        return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
+    # There is an option to specify trend for every transit, but it can also be the same if all were renormalized:
+    if not hasattr(flux_trend, '__len__'):
+        flux_trend = np.ones(len(summed_raw_stats)) * flux_trend
+    if trends_std is None:
+        trends_std = np.zeros(len(summed_raw_stats))
+
+    not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (flux_trend > 0.) & (summed_raw_stats != 0.) & (summed_stat_vars > 0.)
+
+    mean_trend = np.nanmean(flux_trend[not_missed_transit_mask])
+    mean_trend_std = (np.nanmean(trends_std[not_missed_transit_mask] ** 2) + np.nanvar(flux_trend[not_missed_transit_mask])) ** 0.5
+
+    ampls = np.zeros(len(summed_raw_stats)) * np.nan
+    ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
+    normalized_ampls = np.zeros(len(summed_raw_stats)) * np.nan
+    ppms = np.zeros(len(summed_raw_stats)) * np.nan
+    ppms_stds = np.zeros(len(summed_raw_stats)) * np.nan
+
+    ampls[not_missed_transit_mask] = summed_raw_stats[not_missed_transit_mask] / summed_stat_vars[not_missed_transit_mask]
+    ampls_stds[not_missed_transit_mask] = (np.abs(1 / summed_stat_vars[not_missed_transit_mask])**0.5)
+    normalized_ampls[not_missed_transit_mask] = (ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask] * mean_trend)
+    normalized_ampls_stds = ((ampls_stds * mean_trend / flux_trend)**2
+                             + (trends_std * ampls * mean_trend / flux_trend ** 2)**2
+                             + (mean_trend_std * ampls / flux_trend)**2)**0.5
+    ppms[not_missed_transit_mask] = (ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask] * templ_max * 1e6)
+
+    ampl = (np.nanmean((ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask]))
+            * np.nanmean(flux_trend[not_missed_transit_mask]))
+    ppm = np.nanmean(ppms[not_missed_transit_mask])
+    ppms_stds[not_missed_transit_mask] = np.abs(ppms[not_missed_transit_mask]) * (
+            (ampls_stds[not_missed_transit_mask] / ampls[not_missed_transit_mask])**2
+            + (trends_std[not_missed_transit_mask] / flux_trend[not_missed_transit_mask])**2)**0.5
+    # ppms_stds[not_missed_transit_mask] = (ppms[not_missed_transit_mask])**2 * (
+    #     (ampls_stds[not_missed_transit_mask])**2 / (ampls[not_missed_transit_mask])**2
+    #     + np.var(flux_trend[not_missed_transit_mask]) / (flux_trend[not_missed_transit_mask])**2)
+    # ppms_stds[not_missed_transit_mask] = ((1 / summed_stat_vars[not_missed_transit_mask] / (flux_trend[not_missed_transit_mask]) ** 2
+    #                                        + np.var(flux_trend[not_missed_transit_mask])
+    #                                        / flux_trend[not_missed_transit_mask] ** 4 * templ_max ** 2 * 1e12) ** 0.5)
+    return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
 
 
-def get_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time):
-    # TODO revisit!
-    nsig_outliers_0_pos = 5.
-    nsig_outliers_0_neg = 15.
+def get_ampls_and_ppms(times, flux_quarters, best_per, best_temp, best_first_transit_time,
+                       nsig_outliers_0_pos=5., nsig_outliers_0_neg=15.):
     # making the lightcurve out of the sap data and doing search:
-    klc_sap = spip.KeplerLightCurve(target_id=None, get_data=False, times=times, fluxes=flux_quarters)
-    klc_sap.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
-                           nsig_outliers_0_neg=nsig_outliers_0_neg,
-                           nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
-                           nsig_outliers_w_neg=nsig_outliers_0_neg)
-    klc_sap.condition_templates(template_index=best_temp)
-    klc_sap.matched_filtering()
-    klc_sap.cut_zero_padding_ends()
-    klc_sap.connect_quarters()
-    klc_sap.interleave_shifts()
-    klc_sap.sum_periods(pmin=best_per - 0.2, pmax=best_per + 0.2)
+    klc_sap = spip.get_minimal_processed_folded_klc(target_id=None, get_data=False, times=times, fluxes=flux_quarters,
+                                                    period=best_per, template_index=best_temp,
+                                                    nsig_outliers_0_neg=nsig_outliers_0_neg,
+                                                    nsig_outliers_0_pos=nsig_outliers_0_pos)
+    # We do not marginalize, so statistics are still not in units of snr squared
 
     # determine the depth in the needed position:
-    pi = np.argmin(np.abs(klc_sap.periods - best_per))
-    period = klc_sap.periods[pi]
     ti = 0  # we have only one template initialized, and we
     ti_sh = klc_sap.indices_of_templates[ti][0]
     if klc_sap.indices_of_templates[ti][-1] - klc_sap.indices_of_templates[ti][0] > 1:
-        phase_index = np.argmin(np.abs(klc_sap._phases_interleaved + klc_sap.tmin - best_first_transit_time))
-        pi0 = max(0, phase_index - 5)
-        phase_index = pi0 + np.argmin(klc_sap.statistics_periodic_interleaved[pi][0][
-                                                  pi0:phase_index + 5])  # allow the actual minimum to be a little bit shifted
-        first_transit_time = klc_sap._phases_interleaved[phase_index] + klc_sap.tmin
-        expected_transit_times = [first_transit_time + i * period  # I am not sure tmin does not miss some nan in the beginning
-                                  for i in range(int(np.ceil((klc_sap.tmax - first_transit_time) / period)))]
-        summed_transit_points = [np.nanargmin(np.abs(klc_sap.time_interleaved - expected_transit_times[i])) for
-                                 i in range(len(expected_transit_times))]
-        summed_transit_times = np.array(klc_sap.time_interleaved[summed_transit_points])
-        summed_raw_stats = klc_sap.statistics_interleaved[ti][summed_transit_points]
-        summed_trends = klc_sap.trend_orig_flux_interleaved[summed_transit_points]
-        # summed_vars = klc_sap.stat_vars_interleaved[ti][summed_transit_points]
-
+        phases = klc_sap._phases_interleaved
+        time = klc_sap.time_interleaved
+        statistics_periodic = klc_sap.statistics_periodic_interleaved
+        statistics = klc_sap.statistics_interleaved
+        stat_vars = klc_sap.stat_vars_interleaved
     else:
-        phase_index = np.argmin(np.abs(klc_sap._phases_not_interleaved + klc_sap.tmin - best_first_transit_time))
-        pi0 = max(0, phase_index - 5)
-        phase_index = pi0 + np.argmin(klc_sap.statistics_periodic_not_interleaved[pi][0][
-                                                  pi0:phase_index + 5])  # allow the actual minimum to be a little shifted
-        first_transit_time = klc_sap._phases_not_interleaved[phase_index] + klc_sap.tmin
-        expected_transit_times = [first_transit_time + i * period  # i am not sure tmin does not miss some nan in the beginning
-                                  for i in range(int(np.ceil((klc_sap.tmax - first_transit_time) / period)))]
-        summed_transit_points = [np.nanargmin(np.abs(klc_sap.time_not_interleaved - expected_transit_times[i])) for
-                                 i in range(len(expected_transit_times))]
-        summed_transit_times = np.array(klc_sap.time_not_interleaved[summed_transit_points])
-        summed_raw_stats = klc_sap.statistics_not_interleaved[ti][summed_transit_points]
-        summed_trends = klc_sap.trend_orig_flux_not_interleaved[summed_transit_points]
-        # summed_vars = klc_sap.stat_vars_not_interleaved[ti][summed_transit_points]
+        phases = klc_sap._phases_not_interleaved
+        time = klc_sap.time_not_interleaved
+        statistics_periodic = klc_sap.statistics_not_interleaved
+        statistics = klc_sap.statistics_not_interleaved
+        stat_vars = klc_sap.stat_vars_not_interleaved
 
-    summed_stat_denoms = np.ones(len(summed_transit_times)) * np.inf
-    # summed_mean_flux_variances = np.ones(len(summed_transit_times)) * np.nan
-    for ii, tt in enumerate(summed_transit_times):
-        for q in klc_sap.quarters:
-            if (tt >= klc_sap.times[q][0]) & (tt <= klc_sap.times[q][-1]):
-                summed_stat_denoms[ii] = klc_sap.stat_denoms[ti_sh][q]
-                # summed_mean_flux_variances[ii] = np.nanvar(klc_sap.orig_fluxes[q]) / len(klc_sap.orig_fluxes[q])
+    # period_index = np.argmin(np.abs(klc_sap.periods - best_per))
+    # delta_period_index_freedom = 5
+    # period_index_left = max(0, period_index - delta_period_index_freedom)
+    # period_index_right = min(len(klc_sap.periods), period_index + delta_period_index_freedom)
+    # phase_index = np.argmin(np.abs(phases + klc_sap.tmin - best_first_transit_time))
+    # delta_phase_index_freedom = 10
+    # phase_index_left = max(0, phase_index - delta_phase_index_freedom)
+    # phase_index_right = min(len(phases), phase_index + delta_phase_index_freedom)
 
-    not_missed_transit_mask = summed_trends > 0.  # TODO: introduce this concept everywhere
-    # ampls = np.abs(summed_raw_stats / summed_stat_denoms)
-    # best_ampl = (np.nanmean((ampls[not_missed_transit_mask] / summed_trends[not_missed_transit_mask]))
-    #              * np.nanmean(summed_trends[not_missed_transit_mask]))
-    ppms = np.zeros(len(summed_raw_stats))
-    vars_of_ppms = np.zeros(len(summed_raw_stats)) * np.nan
-    ppms[not_missed_transit_mask] = (summed_raw_stats[not_missed_transit_mask] / summed_stat_denoms[not_missed_transit_mask]
-                                     / summed_trends[not_missed_transit_mask] * np.max(np.abs(klc_sap.tb.templates_shifts[ti_sh])) * 1e6)
-    vars_of_ppms[not_missed_transit_mask] = (
-                1 / summed_stat_denoms[not_missed_transit_mask] * np.var(summed_trends[not_missed_transit_mask]) / summed_trends[
-                    not_missed_transit_mask] ** 4 * np.max(np.abs(klc_sap.tb.templates_shifts[ti_sh])) ** 2 * 1e12)
-    # ppm_std = np.nanmean(vars_of_ppms) ** 0.5
-    return ppms, vars_of_ppms ** 0.5
+    part_snr_2 = 0.5  # define this as the end of correlation
+    d_per = klc_sap.periods[1] - klc_sap.periods[0]
+    dur_max_templ = klc_sap.tb.durations[-1]
+
+    delta_per_bins = int(np.round((best_per * 2 * dur_max_templ / klc_sap.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
+    close_period_ind = np.nanargmin(np.abs(klc_sap.periods - best_per))
+    period_index_left = max(0, close_period_ind - delta_per_bins // 2)  # we do not divide delta_per_bins by 2 on purpose
+    period_index_right = min(len(klc_sap.periods), close_period_ind + delta_per_bins // 2)
+
+    d_ftt = phases[1] - phases[0]
+    delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
+    close_phase_ind = np.nanargmin(np.abs(phases + klc_sap.tmin - best_first_transit_time))
+    phase_index_left = max(0, close_phase_ind - delta_ftt_bins // 2)  # we do not divide delta_ftt_bins by 2 on purpose
+    phase_index_right = min(len(phases), close_phase_ind + delta_ftt_bins // 2)
+
+    # Allow the actual minimum to be a little bit shifted:
+    # redefining the best period index with a small freedom:
+    period_index = period_index_left + np.argmin(np.nanmin(statistics_periodic[period_index_left:period_index_right, 0,
+                                                 phase_index_left:phase_index_right], axis=-1))
+    # redefining the best phase index with a small freedom:
+    phase_index = phase_index_left + np.argmin(statistics_periodic[period_index][0][
+                                               phase_index_left:phase_index_right])
+    # -> allow the actual minimum to be a little bit shifted
+    period_new = klc_sap.periods[period_index]
+    first_transit_time_new = phases[phase_index] + klc_sap.tmin
+    expected_transit_times = [first_transit_time_new + i * period_new  # I am not sure tmin does not miss some nan in the beginning
+                              for i in range(int(np.ceil((klc_sap.tmax - first_transit_time_new) / period_new)))]
+    summed_transit_points = [np.nanargmin(np.abs(time - expected_transit_times[i])) for i in range(len(expected_transit_times))]
+    # summed_transit_times = np.array(time[summed_transit_points])
+    summed_raw_stats = statistics[ti][summed_transit_points]
+    summed_vars = stat_vars[ti][summed_transit_points]
+
+    (ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds,
+     ppms, ppms_stds) = estimate_ampls_ppms_from_stats(summed_raw_stats=summed_raw_stats, summed_stat_vars=summed_vars,
+                                                       templ_max=np.max(np.abs(klc_sap.tb.templates_shifts[ti_sh])),
+                                                       flux_trend=klc_sap.mean_total, trends_std=None)
+    return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
 
 
 def get_trigger_star_bg_ppms(target_id=None,
-                             best_first_transit_time=None, best_per=None, best_temp=None,
+                             first_transit_time=None, period=None, template_index=None,
                              # data_location=None, output_location=None,
                              target_pixels_folder=pp.Target_pixels_location,
-                             number_of_pixels_cut=None, part_of_cumsum_2=0.85, part_of_light=None):
+                             number_of_pixels_cut=None, part_of_cumsum_2=0.85, part_of_light=None,
+                             nsig_outliers_0_neg=15., nsig_outliers_0_pos=5.):
     # if targ is None:
     #     targ = target_class.KeplerTarget(target_id=target_id, load_pickled_attributes=True, data_location=data_location,
     #                                      output_location=output_location)
@@ -1001,194 +1114,168 @@ def get_trigger_star_bg_ppms(target_id=None,
                                                                              number_of_pixels_cut=number_of_pixels_cut,
                                                                              part_of_cumsum_2=part_of_cumsum_2, part_of_light=part_of_light)
 
-    star_part_ppms, star_part_stds_of_ppms = get_ppms(
-        times=pixel_times, flux_quarters=star_part_sap_fluxes, best_per=best_per, best_temp=best_temp,
-        best_first_transit_time=best_first_transit_time)
+    ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds = get_ampls_and_ppms(
+        times=pixel_times, flux_quarters=star_part_sap_fluxes, best_per=period, best_temp=template_index,
+        best_first_transit_time=first_transit_time,
+        nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
+    star_part_ppms, star_part_stds_of_ppms = ppms, ppms_stds
 
-    bg_part_ppms, bg_part_stds_of_ppms = get_ppms(
-        times=pixel_times, flux_quarters=bg_part_sap_fluxes, best_per=best_per, best_temp=best_temp,
-        best_first_transit_time=best_first_transit_time)
+    ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds = get_ampls_and_ppms(
+        times=pixel_times, flux_quarters=bg_part_sap_fluxes, best_per=period, best_temp=template_index,
+        best_first_transit_time=first_transit_time,
+        nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
+    bg_part_ppms, bg_part_stds_of_ppms = ppms, ppms_stds
 
     return star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms
 
 
-def get_centroid_series(target_pixel_fluxes):
-    centroids = []
-    for q in range(len(target_pixel_fluxes)):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            mean_stamp = np.nanmean(target_pixel_fluxes[q], axis=0)
-        nanmask = ~np.isnan(mean_stamp)
-        nanmask = nanmask.astype(float)
-        x_linspace = np.array([np.arange(len(nanmask[0])) for _ in np.arange(len(nanmask))])
-        y_linspace = np.array([np.ones(len(nanmask[0])) * j for j in np.arange(len(nanmask))])
-        denom = np.nansum(nanmask * target_pixel_fluxes[q], axis=(1, 2))
-        denom[denom == 0] = np.nan
-        cents_x = np.nansum(nanmask * x_linspace * target_pixel_fluxes[q], axis=(1, 2))
-        cents_x[cents_x == 0] = np.nan
-        cents_x = cents_x / denom
-        cents_y = np.nansum(nanmask * y_linspace * target_pixel_fluxes[q], axis=(1, 2))
-        cents_y[cents_y == 0] = np.nan
-        cents_y = cents_y / denom
-        centroids.append(np.vstack((cents_x, cents_y)))
-    return centroids
-
-
-def get_target_pixel_sky_coords_fun(target_id, data_location, return_aperture_masks=True, return_sky_coords=False,
-                                    remove_zeroth_quarter=True, remove_quarter_17=True):
-    from lightkurve import targetpixelfile as tpf
-    target_id = str(target_id).rjust(9, "0")
-    data_folder = get_correct_tid_folder(target_id=target_id, location=data_location)
-
-    if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
-        download_target_pixel_files(target_id, data_folder)
-
-    tp_fits_filenames = [ff for ff in os.listdir(data_folder) if '.fits' in ff]
-    assert len(tp_fits_filenames) >= 1, 'There are no files!'
-
-    times = []
-    target_pixels = []
-    aperture_masks = []
-    sky_coords = []
-    for tp_fits_filename in tp_fits_filenames:
-        tp_fits_file = fits.open(os.path.join(data_folder, tp_fits_filename))
-        time = tp_fits_file[1].data['TIME']
-        target_pix = tp_fits_file[1].data['FLUX']
-        if return_aperture_masks:
-            aperture_masks.append(tp_fits_file[2].data)
-        tp_fits_file.close()
-        times.append(time)
-        target_pixels.append(target_pix)
-        if return_sky_coords:
-            tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
-            crds = tpf1.get_coordinates()
-            sky_coords.append(crds)
-
-    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
-    argsort = np.argsort(reference_times)
-    times = [times[ind] for ind in argsort]
-    target_pixels = [target_pixels[ind] for ind in argsort]
-    if return_aperture_masks:
-        aperture_masks = [aperture_masks[ind] for ind in argsort]
-    if return_sky_coords:
-        sky_coords = [sky_coords[ind] for ind in argsort]
-
-    if remove_zeroth_quarter:
-        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
-            times = times[1:]
-            target_pixels = target_pixels[1:]
-            if return_aperture_masks:
-                aperture_masks = aperture_masks[1:]
-            if return_sky_coords:
-                sky_coords = sky_coords[1:]
-
-    if len(times) < 1:
-        raise AssertionError('There is no data to process!')
-
-    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
-        if ((1570 >= np.nanmin(times[-1])) & (
-                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
-            times = times[:-1]
-            target_pixels = target_pixels[:-1]
-            if return_aperture_masks:
-                aperture_masks = aperture_masks[:-1]
-            if return_sky_coords:
-                sky_coords = sky_coords[:-1]
-    if (not return_aperture_masks) and (not return_sky_coords):
-        return times, target_pixels
-    elif return_aperture_masks and (not return_sky_coords):
-        return times, target_pixels, aperture_masks
-    elif (not return_aperture_masks) and return_sky_coords:
-        return times, target_pixels, sky_coords
-    else:
-        return times, target_pixels, sky_coords, aperture_masks
-
-
-def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_times, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,
-                              max_abs=True, time_mismatch_allowed=3):
+def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=None, time_masks=None):
     """
+    see https://github.com/lightkurve/lightkurve/blob/main/src/lightkurve/targetpixelfile.py, the `estimate_centroids` function to learn
+    how they do it. They have the simple centroid, same as here, and also some polynomial-fitting one.
 
-    :param signal_quarters:
-    :type signal_quarters:
-    :param time_quarters:
-    :type time_quarters:
-    :param summed_transit_times:
-    :type summed_transit_times:
-    :param nsig_outliers_0_pos:
-    :type nsig_outliers_0_pos:
-    :param nsig_outliers_0_neg:
-    :type nsig_outliers_0_neg:
-    :param max_abs:
-    :type max_abs:
-    :param time_mismatch_allowed: is specified in bins! (very stupid name then!)
-    :type time_mismatch_allowed: int
+    :param target_pixel_fluxes: fluxes for all the quarters for all the times for all the pixels
+    :type target_pixel_fluxes: list of numpy.ndarrays of shape (len_time, pixels_dim_1, pixels_dim_2) of float
+    :param sky_coords: right ascensions and declinations for all the quarters for all the times for all the pixels.
+        If None, pixel indices (not true detector coordinates!) will be used
+    :type sky_coords: None or list of numpy.ndarrays of shape (2, len_time, pixels_dim_1, pixels_dim_2)
+    :param aperture_masks: mask of pixels that were used in the optimal aperture to calculate the SAP flux.
+    :type aperture_masks: list of numpy.ndarrays of shape (pixels_dim_1, pixels_dim_2)
+    :param time_masks: mask of times that are bad, including the Kepler quality mask
+    :type time_masks: list of numpy.ndarrays of shape (len_time)
     :return:
     :rtype:
     """
-    # making the lightcurve out of this whatever data and doing search:
-    klc = spip.KeplerLightCurve(target_id=None, get_data=False, times=time_quarters, fluxes=signal_quarters)
-    klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
-                       nsig_outliers_0_neg=nsig_outliers_0_neg,
-                       nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
-                       nsig_outliers_w_neg=nsig_outliers_0_neg)
-    klc.condition_templates()
-    klc.matched_filtering()
-    klc.cut_zero_padding_ends()
-
-    klc.templates_of_indices = [k for k in range(len(klc.indices_of_templates))
-                                for _ in range(klc.indices_of_templates[k][0], klc.indices_of_templates[k][1])]
-
-    max_stats = []
-    std_stat_maxs = []
-    max_templs = []
-    # max_templs_sh = []
-    # times_max = []
-    for i, tt in enumerate(summed_transit_times):
-        max_stat_to_std = 0.
-        max_stat = None
-        std_stat_max = None
-        templ_sh_ind = None
-        # max_templ = None
-        for q in klc.quarters:
-            if klc.times[q][~np.isnan(klc.times[q])][0] <= tt <= klc.times[q][~np.isnan(klc.times[q])][-1]:
-                ind_tr = np.nanargmin(np.abs(klc.times[q] - tt))
-                for k in range(len(klc.statistics_snr)):
-                    std_stat = ut.outlier_free_std(klc.statistics_snr[k][q], nsig=3, mask=klc.masks[q], detrend=False, detr_len=128)
-                    ti0 = max(0, ind_tr - time_mismatch_allowed)
-                    if max_abs:
-                        time_index = ti0 + np.nanargmax(np.abs(klc.statistics_snr[k][q][ti0:ind_tr + time_mismatch_allowed]))
-                        # -> allow the actual minimum to be a little shifted
-                        stat_here = klc.statistics_snr[k][q][time_index]
-                        stat_to_std_here = stat_here/std_stat
-                        if np.abs(stat_to_std_here) >= np.abs(max_stat_to_std):
-                            max_stat = stat_here
-                            templ_sh_ind = k
-                            std_stat_max = std_stat
-                            max_stat_to_std = stat_to_std_here
-                            # time_max = klc.times[q][time_index]
-                    else:
-                        time_index = ti0 + np.nanargmin(klc.statistics_snr[k][q][ti0:ind_tr + time_mismatch_allowed])
-                        # -> allow the actual minimum to be a little shifted
-                        stat_here = klc.statistics_snr[k][q][time_index]
-                        stat_to_std_here = stat_here / std_stat
-                        if stat_to_std_here <= max_stat_to_std:
-                            max_stat = stat_here
-                            templ_sh_ind = k
-                            std_stat_max = std_stat
-                            max_stat_to_std = stat_to_std_here
-                            # time_max = klc.times[q][time_index]
-        if templ_sh_ind is not None:  # it can be for example if the expected transit happened between the quarters
-            max_templ = klc.templates_of_indices[templ_sh_ind]
-            max_stats.append(max_stat)
-            std_stat_maxs.append(std_stat_max)
-            max_templs.append(max_templ)
-            # times_max.append(time_max)
-            # max_templs_sh.append(templ_sh_ind)
+    centroids_x = []  # ra if sky_coords is specified
+    centroids_y = []  # dec if sky_coords is specified
+    for q in range(len(target_pixel_fluxes)):
+        target_pixels_flux = target_pixel_fluxes[q]
+        nan_aperture_masks = ~((np.isnan(target_pixels_flux)).all(axis=0))
+        if aperture_masks is None:
+            aperture_mask = nan_aperture_masks
         else:
-            max_stats.append(np.nan)
-            std_stat_maxs.append(np.nan)
-            max_templs.append(np.nan)
-    return max_stats, std_stat_maxs, max_templs
+            aperture_mask = (aperture_masks[q] * nan_aperture_masks).astype(bool)
+
+        nan_mask = ~((np.isnan(target_pixels_flux)).all(axis=(1, 2)))
+        if time_masks is None:
+            time_mask = nan_mask
+        else:
+            time_mask = (time_masks[q] * nan_mask).astype(bool)
+
+        if sky_coords is None:
+            y_coor, x_coor = np.indices(np.shape(target_pixels_flux)[1:3])
+            x_coor = x_coor * np.ones(np.shape(target_pixels_flux), dtype=float)
+            y_coor = y_coor * np.ones(np.shape(target_pixels_flux), dtype=float)
+        else:
+            y_coor, x_coor = sky_coords[q][1], sky_coords[q][0]
+
+        sap_flux = np.zeros(len(target_pixels_flux)) * np.nan
+        centr_x = np.zeros(len(target_pixels_flux)) * np.nan
+        centr_y = np.zeros(len(target_pixels_flux)) * np.nan
+        sap_flux[time_mask] = np.nansum(target_pixels_flux[time_mask][:, aperture_mask], axis=1)
+        centr_x[time_mask] = np.nansum((x_coor[time_mask] * target_pixels_flux[time_mask])[:, aperture_mask], axis=1) / sap_flux[
+            time_mask]
+        centr_y[time_mask] = np.nansum((y_coor[time_mask] * target_pixels_flux[time_mask])[:, aperture_mask], axis=1) / sap_flux[
+            time_mask]
+        # centr_x[time_mask] = np.nansum((aperture_mask * x_coor[time_mask] * target_pixel_fluxes[q][time_mask]),
+        # axis=(1, 2)) / sap_flux[time_mask]
+        # centr_y[time_mask] = np.nansum((aperture_mask * y_coor[time_mask] * target_pixel_fluxes[q][time_mask]),
+        # axis=(1, 2)) / sap_flux[time_mask]
+        centroids_x.append(centr_x)
+        centroids_y.append(centr_y)
+    return centroids_x, centroids_y
+
+
+# def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_times, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,
+#                               max_abs=True, time_mismatch_allowed=3):
+#     """
+#     THIS IS NOT USED BECAUSE WE SWITCHED TO JUST A SHORT PERIODICITY SEARCH IN THE TCE CLASS
+#     TODO: look at nsig
+#     TODO: which template?
+#     TODO: now we have ra, dec, so we can summarize quarters!
+#     TODO: maybe periodicity?
+#     :param signal_quarters:
+#     :type signal_quarters:
+#     :param time_quarters:
+#     :type time_quarters:
+#     :param summed_transit_times:
+#     :type summed_transit_times:
+#     :param nsig_outliers_0_pos:
+#     :type nsig_outliers_0_pos:
+#     :param nsig_outliers_0_neg:
+#     :type nsig_outliers_0_neg:
+#     :param max_abs:
+#     :type max_abs:
+#     :param time_mismatch_allowed: is specified in bins! (very stupid name then!)
+#     :type time_mismatch_allowed: int
+#     :return:
+#     :rtype:
+#     """
+#     pass
+#     # # making the lightcurve out of this whatever data and doing search:
+#     # klc = spip.KeplerLightCurve(target_id=None, get_data=False, times=time_quarters, fluxes=signal_quarters)
+#     # klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
+#     #                    nsig_outliers_0_neg=nsig_outliers_0_neg,
+#     #                    nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
+#     #                    nsig_outliers_w_neg=nsig_outliers_0_neg)
+#     # klc.condition_templates()
+#     # klc.matched_filtering()
+#     # klc.cut_zero_padding_ends()
+#     #
+#     # klc.templates_of_indices = [k for k in range(len(klc.indices_of_templates))
+#     #                             for _ in range(klc.indices_of_templates[k][0], klc.indices_of_templates[k][1])]
+#
+#     # max_stats = []
+#     # std_stat_maxs = []
+#     # max_templs = []
+#     # # max_templs_sh = []
+#     # # times_max = []
+#     # for i, tt in enumerate(summed_transit_times):
+#     #     max_stat_to_std = 0.
+#     #     max_stat = None
+#     #     std_stat_max = None
+#     #     templ_sh_ind = None
+#     #     # max_templ = None
+#     #     for q in klc.quarters:
+#     #         if klc.times[q][~np.isnan(klc.times[q])][0] <= tt <= klc.times[q][~np.isnan(klc.times[q])][-1]:
+#     #             ind_tr = np.nanargmin(np.abs(klc.times[q] - tt))
+#     #             for k in range(len(klc.statistics_snr)):
+#     #                 std_stat = ut.outlier_free_std(klc.statistics_snr[k][q], nsig=3, mask=klc.masks[q], detrend=False, detr_len=128)
+#     #                 ti0 = max(0, ind_tr - time_mismatch_allowed)
+#     #                 if max_abs:
+#     #                     time_index = ti0 + np.nanargmax(np.abs(klc.statistics_snr[k][q][ti0:ind_tr + time_mismatch_allowed]))
+#     #                     # -> allow the actual minimum to be a little shifted
+#     #                     stat_here = klc.statistics_snr[k][q][time_index]
+#     #                     stat_to_std_here = stat_here/std_stat
+#     #                     if np.abs(stat_to_std_here) >= np.abs(max_stat_to_std):
+#     #                         max_stat = stat_here
+#     #                         templ_sh_ind = k
+#     #                         std_stat_max = std_stat
+#     #                         max_stat_to_std = stat_to_std_here
+#     #                         # time_max = klc.times[q][time_index]
+#     #                 else:
+#     #                     time_index = ti0 + np.nanargmin(klc.statistics_snr[k][q][ti0:ind_tr + time_mismatch_allowed])
+#     #                     # -> allow the actual minimum to be a little shifted
+#     #                     stat_here = klc.statistics_snr[k][q][time_index]
+#     #                     stat_to_std_here = stat_here / std_stat
+#     #                     if stat_to_std_here <= max_stat_to_std:
+#     #                         max_stat = stat_here
+#     #                         templ_sh_ind = k
+#     #                         std_stat_max = std_stat
+#     #                         max_stat_to_std = stat_to_std_here
+#     #                         # time_max = klc.times[q][time_index]
+#     #     if templ_sh_ind is not None:  # it can be for example if the expected transit happened between the quarters
+#     #         max_templ = klc.templates_of_indices[templ_sh_ind]
+#     #         max_stats.append(max_stat)
+#     #         std_stat_maxs.append(std_stat_max)
+#     #         max_templs.append(max_templ)
+#     #         # times_max.append(time_max)
+#     #         # max_templs_sh.append(templ_sh_ind)
+#     #     else:
+#     #         max_stats.append(np.nan)
+#     #         std_stat_maxs.append(np.nan)
+#     #         max_templs.append(np.nan)
+#     # return max_stats, std_stat_maxs, max_templs
 
 
 def make_bool_aperture_mask(bit_aperture_mask, bit=1):
@@ -1211,65 +1298,65 @@ def make_bool_aperture_mask(bit_aperture_mask, bit=1):
     return bool_mask
 
 
-def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summed_transit_times, best_temp,
-                            bins_mismatch_allowed=2):
-    # TODO reexamine
-    # Make optimal aperture masks by taking bin 1 value
-    aperture_masks = [make_bool_aperture_mask(msk, bit=1) for msk in bit_aperture_masks]
-
-    target_pixels_flt = []
-    aperture_masks_flt = []
-    for q in range(len(target_pixel_fluxes)):
-        sh0 = target_pixel_fluxes[q].shape
-        target_pixels_flt.append(target_pixel_fluxes[q].reshape((sh0[0], sh0[1] * sh0[2])))
-        aperture_masks_flt.append((aperture_masks[q].reshape((1, sh0[1] * sh0[2])))[0])
-
-    needed_quarters = []
-    times_needed_quarters = []
-    for q in range(len(times)):
-        tms_qrt = []
-        for ii, tt in enumerate(summed_transit_times):
-            if (tt >= times[q][0]) & (tt <= times[q][-1]):
-                tms_qrt.append(tt)
-        if len(tms_qrt) > 0:
-            needed_quarters.append(q)
-            times_needed_quarters.append(tms_qrt)
-
-    target_pixels_stats = []
-    target_pixels_means = []
-    target_pixels_ppms = []
-    target_pixels_stds_of_ppms = []
-    for iq, q in enumerate(needed_quarters):
-        target_pixels_stats_pxl = []
-        target_pixels_means_pxl = []
-        target_pixels_ppms_pxl = []
-        target_pixels_stds_of_ppms_pxl = []
-        for tpf in [target_pixels_flt[q][:, i] for i in range(len(target_pixels_flt[q][0])) if aperture_masks_flt[q][i]]:
-            lcp = spip.KeplerLightCurve(times=[times[q]], fluxes=[tpf], get_data=False)
-            lcp.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BECAUSE WE NEED TO INVERT FAIRLY.
-            lcp.condition_templates(template_index=best_temp)
-            lcp.detect_single_transits(apply_veto=False, gaussianize=False)
-            for tt in times_needed_quarters[iq]:
-                ind_tr = np.nanargmin(np.abs(times[q] - tt))
-                # std_stat = ut.outlier_free_std(lcp.statistics_snr[0][0], nsig=3, mask=lcp.masks[0], detrend=False, detr_len=128)
-                ti0 = max(0, ind_tr - bins_mismatch_allowed)
-                # time_index = ti0 + np.nanargmax(np.abs(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]))
-                # -> allow the actual minimum to be a little shifted
-                stat_snr_here = np.nanmin(
-                    [np.nanmin(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]) for _ in range(len(lcp.statistics_snr))])
-                stat_raw_here = np.nanmin(
-                    [np.nanmin(lcp.statistics_raw[0][0][ti0:ind_tr + bins_mismatch_allowed])
-                     for _ in range(len(lcp.statistics_raw))])
-                ppm_here = (stat_raw_here / lcp.stat_denoms[0][0] / lcp.trends_orig_fluxes[0][ind_tr] * np.max(
-                    np.abs(lcp.tb.templates_shifts[0])) * 1e6)
-                std_of_ppm = (1 / lcp.stat_denoms[0][0] ** 0.5 * np.std(lcp.trends_orig_fluxes[0])
-                              / lcp.trends_orig_fluxes[0][ind_tr] ** 2 * np.max(np.abs(lcp.tb.templates_shifts[0])) * 1e6)
-                target_pixels_stats_pxl.append(stat_snr_here)
-                target_pixels_means_pxl.append(lcp.orig_means[0])
-                target_pixels_ppms_pxl.append(ppm_here)
-                target_pixels_stds_of_ppms_pxl.append(std_of_ppm)
-        target_pixels_stats.append(target_pixels_stats_pxl)
-        target_pixels_means.append(target_pixels_means_pxl)
-        target_pixels_ppms.append(target_pixels_ppms_pxl)
-        target_pixels_stds_of_ppms.append(target_pixels_stds_of_ppms_pxl)
-    return target_pixels_stats, target_pixels_means, target_pixels_ppms, target_pixels_stds_of_ppms
+# def get_single_pixels_stats(times, target_pixel_fluxes, bit_aperture_masks, summed_transit_times, best_temp,
+#                             bins_mismatch_allowed=2):
+#     # I do not remember what I intended to do with this. There was some  veto, but I do not remember what I wanted.
+#     # Make optimal aperture masks by taking bin 1 value
+#     aperture_masks = [make_bool_aperture_mask(msk, bit=1) for msk in bit_aperture_masks]
+#
+#     target_pixels_flt = []
+#     aperture_masks_flt = []
+#     for q in range(len(target_pixel_fluxes)):
+#         sh0 = target_pixel_fluxes[q].shape
+#         target_pixels_flt.append(target_pixel_fluxes[q].reshape((sh0[0], sh0[1] * sh0[2])))
+#         aperture_masks_flt.append((aperture_masks[q].reshape((1, sh0[1] * sh0[2])))[0])
+#
+#     needed_quarters = []
+#     times_needed_quarters = []
+#     for q in range(len(times)):
+#         tms_qrt = []
+#         for ii, tt in enumerate(summed_transit_times):
+#             if (tt >= times[q][0]) & (tt <= times[q][-1]):
+#                 tms_qrt.append(tt)
+#         if len(tms_qrt) > 0:
+#             needed_quarters.append(q)
+#             times_needed_quarters.append(tms_qrt)
+#
+#     target_pixels_stats = []
+#     target_pixels_means = []
+#     target_pixels_ppms = []
+#     target_pixels_stds_of_ppms = []
+#     for iq, q in enumerate(needed_quarters):
+#         target_pixels_stats_pxl = []
+#         target_pixels_means_pxl = []
+#         target_pixels_ppms_pxl = []
+#         target_pixels_stds_of_ppms_pxl = []
+#         for tpf in [target_pixels_flt[q][:, i] for i in range(len(target_pixels_flt[q][0])) if aperture_masks_flt[q][i]]:
+#             lcp = spip.KeplerLightCurve(times=[times[q]], fluxes=[tpf], get_data=False)
+#             lcp.condition_data()  # IN OUTLIERS MASK, THE POSITIVE AND THE NEGATIVE NSIG ARE EQUAL BECAUSE WE NEED TO INVERT FAIRLY.
+#             lcp.condition_templates(template_index=best_temp)
+#             lcp.detect_single_transits(apply_veto=False, gaussianize=False)
+#             for tt in times_needed_quarters[iq]:
+#                 ind_tr = np.nanargmin(np.abs(times[q] - tt))
+#                 # std_stat = ut.outlier_free_std(lcp.statistics_snr[0][0], nsig=3, mask=lcp.masks[0], detrend=False, detr_len=128)
+#                 ti0 = max(0, ind_tr - bins_mismatch_allowed)
+#                 # time_index = ti0 + np.nanargmax(np.abs(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]))
+#                 # -> allow the actual minimum to be a little shifted
+#                 stat_snr_here = np.nanmin(
+#                     [np.nanmin(lcp.statistics_snr[0][0][ti0:ind_tr + bins_mismatch_allowed]) for _ in range(len(lcp.statistics_snr))])
+#                 stat_raw_here = np.nanmin(
+#                     [np.nanmin(lcp.statistics_raw[0][0][ti0:ind_tr + bins_mismatch_allowed])
+#                      for _ in range(len(lcp.statistics_raw))])
+#                 ppm_here = (stat_raw_here / lcp.stat_denoms[0][0] / lcp.trends_orig_fluxes[0][ind_tr] * np.max(
+#                     np.abs(lcp.tb.templates_shifts[0])) * 1e6)
+#                 std_of_ppm = (1 / lcp.stat_denoms[0][0] ** 0.5 * np.std(lcp.trends_orig_fluxes[0])
+#                               / lcp.trends_orig_fluxes[0][ind_tr] ** 2 * np.max(np.abs(lcp.tb.templates_shifts[0])) * 1e6)
+#                 target_pixels_stats_pxl.append(stat_snr_here)
+#                 target_pixels_means_pxl.append(lcp.orig_means[0])
+#                 target_pixels_ppms_pxl.append(ppm_here)
+#                 target_pixels_stds_of_ppms_pxl.append(std_of_ppm)
+#         target_pixels_stats.append(target_pixels_stats_pxl)
+#         target_pixels_means.append(target_pixels_means_pxl)
+#         target_pixels_ppms.append(target_pixels_ppms_pxl)
+#         target_pixels_stds_of_ppms.append(target_pixels_stds_of_ppms_pxl)
+#     return target_pixels_stats, target_pixels_means, target_pixels_ppms, target_pixels_stds_of_ppms

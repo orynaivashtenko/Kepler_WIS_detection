@@ -8,6 +8,7 @@ from scipy.signal import iirnotch, tf2sos, tf2zpk
 from scipy.signal.windows import tukey
 
 from search_pipeline_parameters import *
+from numba import float32
 
 
 def nanargsort(array):
@@ -25,6 +26,7 @@ def safe_div(numerators, denominators, fill_value=0.):
     numerators[non_zero_mask] = numerators[non_zero_mask] / denominators[non_zero_mask]
     numerators[~non_zero_mask] = fill_value
     return numerators
+
 
 def dec_to_bin(num, return_list=False, return_str=False):
     """
@@ -99,15 +101,10 @@ def unb_var(arr):
     Is related to the biased estimation as
     var_u = N/(N-1) * var_b,
     where N is the size of the sample.
-    Parameters
-    ----------
-    arr : numpy.array 1d or list of float, may contain numpy.nan
-        Sample of numbers to calculate their variance
-
-    Returns
-    ---------
-    float
-        Unbiased variance estimate of arr
+    :param arr: Sample of numbers to calculate their variance
+    :type arr: numpy.ndarray 1d or list of float, may contain numpy.nan.
+    :return: Unbiased variance estimate of arr
+    :rtype: float
     """
     arr = np.array(arr[~np.isnan(arr)])
     return 1 / (len(arr) - 1) * np.sum(np.abs(arr - np.mean(arr)) ** 2)
@@ -553,23 +550,18 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
     in the time domain from the covariance vector in time domain (vec).
     If vec is the time domain whitening filter, the result will be
     the INVERSE covariance matrix.
-
-    Parameters
-    ----------
-    vec : np.array
-        A filter which will be convolved with itself in an
+    :param vec: A filter which will be convolved with itself in an
         outer product way to make a covariance matrix
-    pad_by_zeros : bool, optional
-        If true, pads the vector by zeros of the same size
+    :type vec: numpy.ndarray 1d
+    :param pad_by_zeros: If true, pads the vector by zeros of the same size
         in order to omit calculation of covariance with Bins from the other side.
-    trim_zeros : bool, optional
-        Trim after padding the omitted zeros. The default is False.
-    Returns
-    -------
-    np.array two-dimensional
-        The covariance matrix (for the time domain).
+    :type pad_by_zeros: bool
+    :param trim_zeros: Trim after padding the omitted zeros. The default is False.
+    :type trim_zeros: bool
+    :return: The covariance matrix (for the time domain).
         If vec is the time domain whitening filter, the result will be
         the INVERSE covariance matrix.
+    :rtype: numpy.ndarray 2d
     """
     length = len(vec)
     if pad_by_zeros:
@@ -583,7 +575,7 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
     return cov_matr
 
 
-def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32):
+def inpaint_fluxes_unstable(fluxes, masks, wf_tds, dtype=np.float32):
     """
     In `fluxes`, fill holes marked by `masks` with the inpainting filter which makes it so
     that the response of the statistic to the flux in the hole is zero.
@@ -615,24 +607,40 @@ def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32):
     return inpainted_fluxes
 
 
+Inpaint_rand_vec = np.abs(np.random.normal(loc=0, scale=0.001, size=8192).astype(Dtype_r))
+
+
+def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32, rand_vec=Inpaint_rand_vec):
+    length = len(fluxes[0])
+    # I was afraid that wf_tds are fftshifted to the center, but since here we have the inner product, it is not important
+    inpainted_fluxes = np.zeros((len(fluxes), length), dtype=dtype)
+    for q in range(len(fluxes)):
+        # filter2cov_matrix:
+        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])
+        c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)], dtype=dtype)
+        a_t_c_inv = c_inv[~masks[q]]
+        m = a_t_c_inv[:, ~masks[q]]
+        m += np.identity(len(m), dtype=dtype) * rand_vec[:len(m)] * float32(np.mean(np.diag(m)))
+        m_inv_a_t_c_inv = np.linalg.solve(a=m, b=a_t_c_inv)  # ax = b  solution
+        f = np.zeros(shape=(length, length), dtype=dtype)
+        f[~masks[q]] = m_inv_a_t_c_inv
+        inpainted_fluxes[q] = fluxes[q] - np.dot(f, fluxes[q])
+    return inpainted_fluxes
+
+
 def nan_average_filt(ar, kernel_size=3, method='mean'):
     """
     Return moving average of the data with the kernel_size.
     The average is either mean or median, defined by method.
-
-    Parameters
-    ----------
-    ar : np.array
-        the input array to filter.
-    kernel_size : int, optional
-        the size of subarray around each point to find the mean, should be odd. The default is 3.
-    method : str, 'mean' or 'median'
-        the method of how to compute the average
-    Returns
-    -------
-    arfilt : np.array
-        the array where each bin is the mean over kernel_size neighbors with
+    :param ar: The input array to filter.
+    :type ar: numpy.ndarray
+    :param kernel_size: The size of subarray around each point to find the mean, should be odd. The default is 3.
+    :type kernel_size: int
+    :param method: The method of how to compute the average
+    :type method: str, 'mean' or 'median'
+    :return: The array where each bin is the mean over kernel_size neighbors with
         ignoring nans (unless all the subarray is nans)
+    :rtype: numpy.ndarray
     """
     arfilt = np.array([ar[0]])
     if method == 'mean':
@@ -786,7 +794,7 @@ def sinc_interp(f_vec, support, tukey_steps_len=16):
 
 
 def tanhstep(x, center=0., hwhm=1., start_from_zero=False):
-    if type(x) == list or type(x) == np.ndarray:
+    if isinstance(x, list) or isinstance(x, np.ndarray):
         res = (1. + np.tanh((np.array(x) - center) / hwhm * 1 / 2 * np.log(3))) / 2.
         if start_from_zero:
             m = np.nanmax(res)
@@ -1742,6 +1750,7 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     is_good = True
     reason = ''  # if the signal will be vetoed, the reason will be reported
     inds = np.where(~np.isclose(template, 0))[0]  # [[0,-1]]
+    inds = np.array(inds, dtype=int)
     assert len(data) - len(inds) >= 4
     if len(data[0:inds[0]]) + len(data[inds[-1] + 1:]) != len(data) - len(inds):
         warnings.warn('Warning: template indices are not together, template is disconnected')
@@ -1767,9 +1776,11 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     spare_ind_left = 0
     spare_ind_right = 0
     if inds[0] > 0:  # if possible, include some zeros in the ends where the template is zero to ensure that the shape goes to zero
+        # noinspection PyTypeChecker
         spare_ind_left = min(zero_ends_len_abs, inds[0])
         inds = np.concatenate((np.arange(inds[0] - spare_ind_left, inds[0]), inds))
     if inds[-1] < len(template) - 1:
+        # noinspection PyTypeChecker
         spare_ind_right = min(zero_ends_len_abs, len(template) - 1 - inds[-1])
         inds = np.concatenate((inds, np.arange(inds[-1] + 1, inds[-1] + 1 + spare_ind_right)))
 
@@ -1992,6 +2003,7 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
 
 def _split_template_by_snr(template_wh_full, n_parts, min_bins_part=4):
     cs = np.cumsum(template_wh_full ** 2)
+    # noinspection PyTypeChecker
     chi2_temp_indices = [0] + list(np.searchsorted(cs / cs[-1], (np.arange(n_parts) / n_parts)[1:])) + [len(template_wh_full)]
     # # this was len split, I'm removing it because I don't want to fit zeros.
     # nonzero_inds = np.nonzero(template_wh_full)[0]
@@ -2562,7 +2574,7 @@ def pbin_fun(x=None, dx=None, x2=None, x1=None, loc=0, scale=1, distr='norm'):
     elif distr == 'norm_quadr_bins':
         return (norm.cdf(x2**0.5, loc=0, scale=1) - norm.cdf(x1**0.5, loc=loc, scale=scale)) * 2
     else:
-        raise(ValueError('Undefined `distr` value!'))
+        raise ValueError('Undefined `distr` value!')
 
 
 def expected_hist(total_counts, bins, loc=0, scale=1, times_per_bins=1, n_sigma=None, distr='norm_abs', non_integer=False):
@@ -2637,6 +2649,7 @@ def fit_two_gaussian_mix(stats, n_bins=50, snr_0_fit=2.5, beg_min=3):
     # Whether the histogram has significant deviation in relevant bins:
     if total_dev_bins > 0 and np.max(stats) > beg_min:
         cum_more_than_upper = np.cumsum(more_than_upper)
+        # noinspection PyTypeChecker
         ind_dev = np.where((cum_more_than_upper > min(7, cum_more_than_upper[-1] / 3)) & (centr_bins_linear >= beg_min))[0]
         if len(ind_dev) == 0:
             raise (ValueError('Something is very wrong with the distribution'))
@@ -2801,6 +2814,20 @@ def select_connected_component(image, center):
             if safety_counter > safety_counter_max:
                 break
     return included_mask
+
+
+def get_indices_of_influence(vals, per_ind_center, ftt_ind_center, part_snr_2=0.5, abs_diff_snr_2=None):
+    peak_val = vals[per_ind_center, ftt_ind_center]
+    if abs_diff_snr_2 is None:
+        ambient_val = np.nanmedian(vals)
+        inds_sum = (vals > ambient_val + part_snr_2 * (peak_val - ambient_val))
+        ambient_val = np.nanmedian(vals[~inds_sum])  # repetitive median to exclude peak
+        inds_sum = (vals >= ambient_val + part_snr_2 * (peak_val - ambient_val))
+        inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
+    else:
+        inds_sum = (vals >= (peak_val - abs_diff_snr_2))
+        inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
+    return inds_sum
 
 
 def make_periods_array(p_min=Pmin, p_max=Pmax, dp=None, duty_cycle=Duty_cycle, t_mission=1300):

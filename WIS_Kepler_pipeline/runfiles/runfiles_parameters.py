@@ -23,20 +23,27 @@ Star_full_output_filename_postfix = 'full_output.txt'
 Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_list.txt'
 List_of_exited_jobs_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/exited_jobs.txt'
 
-# Queue = 'physics-short'
-Queue = 'risk'
+# Queue_submit = 'physics-short'  # 'risk'
+Queue_submit = '"short medium"'  # dynamic queue submission
+Queues_check = ['all']  # dynamic queue submission, im not sure what it does to the names so i just check all
+# ['short', 'medium']  # check these queues in launch manager
 Mem_per_job_gb = '3.9'
 
-Slides_runfile_filename = 'timeslides_runfile.py'
-Injection_parameters_runfile_filename = 'injection_parameter_generation_runfile.py'
-Injection_detection_runfile_filename = 'injection_detection_runfile.py'
-Main_search_runfile_filename = 'main_search_runfile.py'
-Plotting_runfile_filename = 'plotting_results_runfile.py'
-Target_pixels_veto_runfile_filename = 'target_pixels_veto_runfile.py'
+Slides_runfile_filename = 'runfile_timeslides.py'
+Injection_parameters_runfile_filename = 'runfile_injection_parameter_generation.py'
+Injection_detection_runfile_filename = 'runfile_injection_detection.py'
+Main_search_runfile_filename = 'runfile_main_search.py'
+Short_periodicity_code_filename = 'runfile_short_periodicity_search.py'
+Plotting_runfile_filename = 'runfile_plotting_results.py'
+Target_pixels_veto_runfile_filename = 'runfile_target_pixels_veto.py'
 
 Main_search_job_filename_prefix = 'search'
 Main_search_output_filename_prefix = 'output_search'
 Main_search_error_filename_prefix = 'error_search'
+
+Short_periodicity_job_filename_prefix = 'short_periodicity'
+Short_periodicity_output_filename_prefix = 'output_short_periodicity'
+Short_periodicity_error_filename_prefix = 'error_short_periodicity'
 
 Slides_job_filename_prefix = 'slides'
 Slides_output_filename_prefix = 'output_timeslides'

@@ -10,42 +10,66 @@ import pickle
 from sys import getsizeof
 
 import target_class
-# import pipeline_parameters as pp
+from pipeline_parameters import Limb_darkening_array_file, Problems_folder
 from tce_parameters import *
 import auxiliary_functions as af
+import search_pipeline as spip
+import utils as ut
 
 
 class KeplerTCE(target_class.KeplerTarget):
-    def __init__(self, target_id='003097222', data_location=pp.Data_location, output_location=pp.Output_location,
+    def __init__(self, target_id='003097222',
+                 data_location=pp.Data_location, output_location=pp.Output_location,
                  target_pixels_location=Target_pixels_location,
                  load_pickled_attributes=False,
+                 get_transit_and_binary_info=True,
                  gaia_kepler_file_path=Gaia_kepler_file,
                  koi_dict_file=Koi_dict_file,
                  ttv_dict_file=Ttv_dict_file,
                  villanova_dict_file=Villanova_dict_file,
+                 limb_darkening_array_file=Limb_darkening_array_file,
+                 overwrite_location_parameters_by_unpickle=False,
+                 allow_output_folder_creation=True,
+                 allow_data_folder_creation=True,
+                 problems_folder=Problems_folder,
+                 add_prefix_to_problems_folder=True,
+                 clean_problems_file=False,
                  overwrite_parameters_by_unpickle=False):
-        super().__init__(target_id=target_id, data_location=data_location, output_location=output_location,
-                         load_pickled_attributes=load_pickled_attributes, get_transit_and_binary_info=True,
-                         gaia_kepler_file_path=gaia_kepler_file_path, koi_dict_file=koi_dict_file, ttv_dict_file=ttv_dict_file,
-                         villanova_dict_file=villanova_dict_file,
-                         overwrite_location_parameters_by_unpickle=overwrite_parameters_by_unpickle)
 
-        data_location = af.get_correct_tid_folder(target_id, data_location)
-        output_location = af.get_correct_tid_folder(target_id, output_location)
-        target_pixels_location = af.get_correct_tid_folder(target_id, target_pixels_location)
+        super().__init__(target_id=target_id, data_location=data_location, output_location=output_location,
+                         load_pickled_attributes=load_pickled_attributes,
+                         get_transit_and_binary_info=get_transit_and_binary_info,
+                         gaia_kepler_file_path=gaia_kepler_file_path,
+                         koi_dict_file=koi_dict_file,
+                         ttv_dict_file=ttv_dict_file,
+                         villanova_dict_file=villanova_dict_file,
+                         limb_darkening_array_file=limb_darkening_array_file,
+                         overwrite_location_parameters_by_unpickle=overwrite_location_parameters_by_unpickle,
+                         allow_output_folder_creation=allow_output_folder_creation,
+                         allow_data_folder_creation=allow_data_folder_creation,
+                         problems_folder=problems_folder,
+                         add_prefix_to_problems_folder=add_prefix_to_problems_folder,
+                         clean_problems_file=clean_problems_file)
+
+        data_location = af.get_correct_tid_folder(target_id, data_location, allow_creation=allow_data_folder_creation)
+        output_location = af.get_correct_tid_folder(target_id, output_location, allow_creation=allow_output_folder_creation)
+        target_pixels_location = af.get_correct_tid_folder(target_id, target_pixels_location, allow_creation=allow_data_folder_creation)
 
         self.target_pixels_location = target_pixels_location
-        self.star_part_ppms = None
-        self.star_part_stds_of_ppms = None
-        self.bg_part_ppms = None
-        self.bg_part_stds_of_ppms = None
-        self.centroid_snrs_transits = None
-        self.centroid_stds_transits = None
-        self.centroid_templs_transits = None
+        self.star_pixels_ppms = None
+        self.star_pixels_stds_of_ppms = None
+        self.bg_pixels_ppms = None
+        self.bg_pixels_stds_of_ppms = None
+        self.p_value_mean_bg_pixels = None
+        self.p_value_worst_bg_pixels = None
+        self.is_bad_bg_pixels = None
+        self.centroid_snrs_ra_dec = None
         self.target_pixels_stats = None
         self.target_pixels_means = None
         self.target_pixels_ppms = None
         self.target_pixels_stds_of_ppms = None
+        self.centroid_snr_2 = None
+        self.is_centroid_bad = None
 
         if load_pickled_attributes:
             self.unpickle_small_attributes()
@@ -84,7 +108,8 @@ class KeplerTCE(target_class.KeplerTarget):
         dict_to_pickle = {}
         for key in self.__dict__:
             value = self.__dict__[key]
-            if isinstance(value, (str, float, int, np.float, np.integer, np.ndarray, list, dict)):
+            if isinstance(value, (str, float, int, np.float32, np.float64, np.complex64, np.complex128,
+                                  np.integer, np.ndarray, list, dict)):
                 if (((not hasattr(value, '__len__')) or len(value) < 1000) and getsizeof(value) < 80128) or isinstance(value, str):
                     # size in bytes of array 100*100
                     dict_to_pickle[key] = value
@@ -93,18 +118,43 @@ class KeplerTCE(target_class.KeplerTarget):
             pickle.dump(dict_to_pickle, pickle_file, protocol=pickle.HIGHEST_PROTOCOL)
 
     def unpickle_small_attributes(self, output_location=None,
-                                  pickle_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix,
+                                  pickle_tce_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix,
                                   unpickle_target_attributes=False,
-                                  pickle_target_small_attributes_filename_postfix=pp.Pickle_target_small_attributes_filename_postfix
-                                  ):
-        if unpickle_target_attributes:
-            super().pickle_small_attributes(output_location=output_location,
-                                            pickle_small_attributes_filename_postfix=pickle_target_small_attributes_filename_postfix)
+                                  pickle_target_small_attributes_filename_postfix=pp.Pickle_target_small_attributes_filename_postfix,
+                                  overwrite_location_parameters=False):
         if output_location is None:
             output_location = self.output_location
-        with open(os.path.join(output_location, self.target_id + '_' + pickle_small_attributes_filename_postfix), 'rb') as pickle_file:
-            dict1 = pickle.load(pickle_file)
-            self.__dict__.update(dict1.items())
+
+        old_output_location = self.output_location
+        old_data_location = self.data_location
+        old_target_pixels_location = self.target_pixels_location
+        old_gaia_kepler_file_path = self.gaia_kepler_file
+        old_koi_dict_file = self.koi_dict_file
+        old_ttv_dict_file = self.ttv_dict_file
+        old_villanova_dict_file = self.villanova_dict_file
+        old_limb_darkening_array_file = self.limb_darkening_array_file
+
+        if unpickle_target_attributes:
+            super().unpickle_small_attributes(output_location=output_location,
+                                              pickle_small_attributes_filename_postfix=pickle_target_small_attributes_filename_postfix,
+                                              overwrite_location_parameters=overwrite_location_parameters)
+
+        file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
+                                            filename_postfix=pickle_tce_small_attributes_filename_postfix, file_format='pickle')
+        if os.path.exists(file_path):
+            with open(file_path, 'rb') as pickle_file:
+                dict1 = pickle.load(pickle_file)
+                self.__dict__.update(dict1.items())
+
+        if not overwrite_location_parameters:
+            self.data_location = old_data_location
+            self.output_location = old_output_location
+            self.target_pixels_location = old_target_pixels_location
+            self.gaia_kepler_file = old_gaia_kepler_file_path
+            self.koi_dict_file = old_koi_dict_file
+            self.ttv_dict_file = old_ttv_dict_file
+            self.villanova_dict_file = old_villanova_dict_file
+            self.limb_darkening_array_file = old_limb_darkening_array_file
 
     def pickle_all_attributes(self, output_location=None,
                               pickle_all_attributes_filename_postfix=Pickle_tce_all_attributes_filename_postfix):
@@ -149,9 +199,11 @@ class KeplerTCE(target_class.KeplerTarget):
         dict_to_print = {}
         for key in self.__dict__:
             value = self.__dict__[key]
-            if isinstance(value, (str, float, int, np.float, np.integer, np.ndarray, list, dict)):
+            if isinstance(value, (str, float, int, np.float32, np.float64, np.complex64, np.complex128,
+                                  np.integer, np.ndarray, list, dict)):
                 ok_to_print = True
-                if isinstance(value, (str, float, int, np.float, np.integer, np.ndarray, list, dict)):
+                if isinstance(value, (str, float, int, np.float32, np.float64, np.complex64, np.complex128,
+                                      np.integer, np.ndarray, list, dict)):
                     if hasattr(value, '__len__'):
                         if isinstance(value, dict) and hasattr(value[list(value.keys())[0]], '__len__'):
                             ok_to_print = False  # TODO: maybe make the selection process look at all the dict keys
@@ -167,66 +219,164 @@ class KeplerTCE(target_class.KeplerTarget):
                 print(key, ":", dict_to_print[key], file=fil)
 
     def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
-                                 number_of_pixels_cut=None, part_of_cumsum_2=0.85, part_of_light=None):
+                                 number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
+                                 part_of_light=None,
+                                 period=None, template_index=None, first_transit_time=None,
+                                 nsig_outliers_0_neg=Nsig_outliers_0_neg_tests, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests):
         if target_pixels_folder is None:
             target_pixels_folder = self.target_pixels_location
-        return af.get_trigger_star_bg_ppms(target_id=self.target_id,
-                                           best_first_transit_time=self.best_ftt,
-                                           best_per=self.best_per, best_temp=self.best_temp,
-                                           target_pixels_folder=target_pixels_folder,
-                                           number_of_pixels_cut=number_of_pixels_cut,
-                                           part_of_cumsum_2=part_of_cumsum_2, part_of_light=part_of_light)
+        if period is None:
+            period = self.best_per
+        if template_index is None:
+            template_index = self.best_temp
+        if first_transit_time is None:
+            first_transit_time = self.best_ftt
+        star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = af.get_trigger_star_bg_ppms(
+                                           target_id=self.target_id, first_transit_time=first_transit_time, period=period,
+                                           template_index=template_index, target_pixels_folder=target_pixels_folder,
+                                           number_of_pixels_cut=number_of_pixels_cut, part_of_cumsum_2=part_of_cumsum_2,
+                                           part_of_light=part_of_light,
+                                           nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
+        self.star_pixels_ppms = star_part_ppms
+        self.star_pixels_stds_of_ppms = star_part_stds_of_ppms
+        self.bg_pixels_ppms = bg_part_ppms
+        self.bg_pixels_stds_of_ppms = bg_part_stds_of_ppms
 
-    def test_target_pixels_amplitudes(self):
-        star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = self.get_trigger_star_bg_ppms(
-            target_pixels_folder=self.target_pixels_location,
-            number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix, part_of_light=None)
-        self.star_part_ppms = star_part_ppms
-        self.star_part_stds_of_ppms = star_part_stds_of_ppms
-        self.bg_part_ppms = bg_part_ppms
-        self.bg_part_stds_of_ppms = bg_part_stds_of_ppms
+    def test_target_pixels_amplitudes(self,
+                                      threshold_false_negative_bg_target_pixels_mean=Threshold_false_negative_bg_target_pixels_mean,
+                                      threshold_false_negative_bg_target_pixels_max=Threshold_false_negative_bg_target_pixels_max):
+        if (self.star_pixels_ppms is None or self.star_pixels_stds_of_ppms is None
+                or self.bg_pixels_ppms is None or self.bg_pixels_stds_of_ppms is None):
+            self.get_trigger_star_bg_ppms(
+                target_pixels_folder=self.target_pixels_location,
+                number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix, part_of_light=None)
 
-    def find_centroid_transits_snr(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
-        summed_transit_times = self.summed_transit_times
-        times, target_pixel_fluxes = af.get_target_pixel_data_fun(self.target_id, data_folder=self.target_pixels_location)
-        centroids = af.get_centroid_series(target_pixel_fluxes)
-        centroid_x_quarters = [centroids[q][0] for q in range(len(centroids))]
-        centroid_y_quarters = [centroids[q][1] for q in range(len(centroids))]
+        # diff_mean_ppm = np.nanmean(self.star_pixels_ppms) - np.nanmean(self.bg_pixels_ppms)
+        # var_mean_ppm = (np.nansum(self.star_pixels_stds_of_ppms**2) / len(self.star_pixels_stds_of_ppms)**2
+        #                 + np.nansum(self.bg_pixels_stds_of_ppms**2) / len(self.bg_pixels_stds_of_ppms)**2)
+        diff_ppms = self.star_pixels_ppms - self.bg_pixels_ppms
+        var_diff_ppms = self.star_pixels_stds_of_ppms ** 2 + self.bg_pixels_stds_of_ppms ** 2
+        valid_mask = (~np.isnan(diff_ppms)) & (~np.isnan(var_diff_ppms) & ~np.isclose(var_diff_ppms, 0))
+        test_stat = np.nansum(diff_ppms[valid_mask] / var_diff_ppms[valid_mask]) / np.nansum(1 / var_diff_ppms[valid_mask])**0.5
 
-        cent_stats_x, cent_stds_x, cent_templs_x = af.find_snr_at_transit_times(signal_quarters=centroid_x_quarters, time_quarters=times,
-                                                                                summed_transit_times=summed_transit_times,
-                                                                                nsig_outliers_0_pos=nsig_outliers_0_pos,
-                                                                                nsig_outliers_0_neg=nsig_outliers_0_neg)
-        cent_stats_y, cent_stds_y, cent_templs_y = af.find_snr_at_transit_times(signal_quarters=centroid_y_quarters, time_quarters=times,
-                                                                                summed_transit_times=summed_transit_times,
-                                                                                nsig_outliers_0_pos=nsig_outliers_0_pos,
-                                                                                nsig_outliers_0_neg=nsig_outliers_0_neg)
-        self.centroid_snrs_transits = np.array([[cent_stats_x[i], cent_stats_y[i]] for i in range(len(cent_stats_x))])
-        self.centroid_stds_transits = np.array([[cent_stds_x[i], cent_stds_y[i]] for i in range(len(cent_stds_x))])
-        self.centroid_templs_transits = np.array([[cent_templs_x[i], cent_templs_y[i]] for i in range(len(cent_templs_x))])
+        # sig_big = (np.nanmean(star_part_stds_of_ppms ** 2) + np.nanmean(bg_part_stds_of_ppms ** 2)
+        # + np.nanvar(star_part_ppms) + np.nanvar(bg_part_ppms)) ** 0.5
+        if test_stat > 0:
+            false_neg = ut.get_p_value_gaussian(test_stat, 0, 1)
+            self.p_value_mean_bg_pixels = false_neg
+            if false_neg < threshold_false_negative_bg_target_pixels_mean:
+                self.is_bad_bg_pixels = True
+            else:
+                self.is_bad_bg_pixels = False
+        else:
+            self.is_bad_bg_pixels = False
 
-    def test_single_pixels(self):
-        """
-        Takes every pixel in the optimal aperture and checks the statistics at the transit times
-        :return:
-        :rtype:
-        """
-        pixel_times, target_pixel_fluxes, bit_aperture_masks = af.get_target_pixel_data_fun(target_id=self.target_id,
-                                                                                            data_folder=self.target_pixels_location,
-                                                                                            remove_zeroth_quarter=True,
-                                                                                            remove_quarter_17=True,
-                                                                                            return_aperture_masks=True)
+        # Checking the worst deviation:
+        if (diff_ppms[valid_mask] < 0).any():
+            inds = (diff_ppms < 0) & valid_mask
+            diffs_single_ppm = diff_ppms[inds]
+            stds_single_ppm = var_diff_ppms[inds]**0.5
+            false_neg_singles = [ut.get_p_value_gaussian(diffs_single_ppm[i] / stds_single_ppm[i], 0, 1.)
+                                 for i in range(len(diffs_single_ppm))]
+            worst_false_neg_single = np.nanmin(false_neg_singles)
+            self.p_value_worst_bg_pixels = worst_false_neg_single
 
-        target_pixels_stats, target_pixels_means, \
-            target_pixels_ppms, target_pixels_stds_of_ppms = af.get_single_pixels_stats(times=pixel_times,
-                                                                                        target_pixel_fluxes=target_pixel_fluxes,
-                                                                                        bit_aperture_masks=bit_aperture_masks,
-                                                                                        summed_transit_times=self.summed_transit_times,
-                                                                                        best_temp=self.best_temp)
-        self.target_pixels_stats = target_pixels_stats
-        self.target_pixels_means = target_pixels_means
-        self.target_pixels_ppms = target_pixels_ppms
-        self.target_pixels_stds_of_ppms = target_pixels_stds_of_ppms
+            # look-elsewhere:
+            # 1 - (1 - p1)**n = p:
+            # 1 - p1 = (1 - p)**(1/n)
+            false_neg_1 = 1 - (1 - threshold_false_negative_bg_target_pixels_max)**(1 / len(np.where(valid_mask)[0]))
+            if worst_false_neg_single < false_neg_1:
+                self.is_bad_bg_pixels = True
+
+    def test_centroid_transits_snr(self, threshold_snr_2=Threshold_centroid_snr_2):
+        max_coords_deviation_periodic = self.find_centroid_transits_snr(period=self.best_per, ftt=self.best_ftt,
+                                                                        nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
+                                                                        nsig_outliers_0_neg=Nsig_outliers_0_neg_tests)
+        self.centroid_snrs_ra_dec = max_coords_deviation_periodic
+        self.centroid_snr_2 = max_coords_deviation_periodic[0]**2 + max_coords_deviation_periodic[1]**2
+        if self.centroid_snr_2 > threshold_snr_2:
+            self.is_centroid_bad = True
+        else:
+            self.is_centroid_bad = False
+
+    # noinspection PyProtectedMember
+    def find_centroid_transits_snr(self, period=None, ftt=None, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
+                                   nsig_outliers_0_neg=Nsig_outliers_0_neg_tests):
+        if period is None:
+            period = self.best_per
+        if ftt is None:
+            ftt = self.best_ftt
+        # times, target_pixel_fluxes = af.get_target_pixel_data_fun(self.target_id, data_folder=self.target_pixels_location)
+        times, target_pixel_fluxes, sky_coords, time_masks, aperture_masks = af.get_target_pixel_sky_coords_fun(
+            target_id=self.target_id, data_location=self.target_pixels_location,
+            remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
+        centroid_x_quarters, centroid_y_quarters = af.get_centroid_series(target_pixel_fluxes=target_pixel_fluxes,
+                                                                          sky_coords=sky_coords,
+                                                                          time_masks=time_masks, aperture_masks=aperture_masks)
+
+        max_coords_deviation_periodic = []
+        for fluxes in [centroid_x_quarters, centroid_y_quarters]:
+            # making the lightcurve out of this whatever data and doing search:
+            klc = spip.get_minimal_processed_folded_klc(target_id=None, get_data=False, times=times, fluxes=fluxes,
+                                                        period=period, template_index='all',
+                                                        nsig_outliers_0_neg=nsig_outliers_0_neg,
+                                                        nsig_outliers_0_pos=nsig_outliers_0_pos)
+
+            # Finding  correlation size:
+            part_snr_2 = 0.5  # define this as the end of correlation
+            d_per = klc.periods[1] - klc.periods[0]
+            dur_max_templ = klc.tb.durations[-1]
+            # n_transits = int(np.round(klc.t_mission / period))
+            delta_per_bins = int(np.round((period * 2 * dur_max_templ / klc.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
+            close_period_ind = np.nanargmin(np.abs(klc.periods - period))
+            per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
+            per_ind_right = min(len(klc.periods), close_period_ind + delta_per_bins)
+
+            max_deviation = []
+            for phases, stats_periodic in [[klc._phases_interleaved, klc.statistics_periodic_interleaved],
+                                           [klc._phases_not_interleaved, klc.statistics_periodic_not_interleaved]]:
+                d_ftt = phases[1] - phases[0]
+                delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
+                close_phase_ind = np.nanargmin(np.abs(phases + klc.tmin - ftt))
+                phase_ind_left = max(0, close_phase_ind - delta_ftt_bins)  # we do not divide delta_ftt_bins by 2 on purpose
+                phase_ind_right = min(len(phases), close_phase_ind + delta_ftt_bins)
+                max_pos_dev = np.nanmax(stats_periodic[per_ind_left:per_ind_right,
+                                        :, phase_ind_left:phase_ind_right])
+                max_neg_dev = np.nanmin(stats_periodic[per_ind_left:per_ind_right,
+                                        :, phase_ind_left:phase_ind_right])
+                if np.abs(max_pos_dev) > np.abs(max_neg_dev):
+                    max_deviation.append(max_pos_dev)
+                else:
+                    max_deviation.append(max_neg_dev)
+
+            if np.abs(max_deviation[0]) > np.abs(max_deviation[1]):
+                max_coords_deviation_periodic.append(max_deviation[0])
+            else:
+                max_coords_deviation_periodic.append(max_deviation[1])
+        return max_coords_deviation_periodic
+
+    # def test_single_pixels(self):
+    #     """
+    #     Takes every pixel in the optimal aperture and checks the statistics at the transit times
+    #     :return:
+    #     :rtype:
+    #     """
+    #     pixel_times, target_pixel_fluxes, bit_aperture_masks = af.get_target_pixel_data_fun(target_id=self.target_id,
+    #                                                                                         data_folder=self.target_pixels_location,
+    #                                                                                         remove_zeroth_quarter=True,
+    #                                                                                         remove_quarter_17=True,
+    #                                                                                         return_aperture_masks=True)
+    #
+    #     target_pixels_stats, target_pixels_means, \
+    #         target_pixels_ppms, target_pixels_stds_of_ppms = af.get_single_pixels_stats(times=pixel_times,
+    #                                                                                     target_pixel_fluxes=target_pixel_fluxes,
+    #                                                                                     bit_aperture_masks=bit_aperture_masks,
+    #                                                                                     summed_transit_times=self.summed_transit_times,
+    #                                                                                     best_temp=self.best_temp)
+    #     self.target_pixels_stats = target_pixels_stats
+    #     self.target_pixels_means = target_pixels_means
+    #     self.target_pixels_ppms = target_pixels_ppms
+    #     self.target_pixels_stds_of_ppms = target_pixels_stds_of_ppms
 
     def check_quality_flags(self):
         """

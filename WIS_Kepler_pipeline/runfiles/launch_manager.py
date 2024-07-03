@@ -21,8 +21,7 @@ Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
 
-# queues = ['physics-short', 'new-short']
-queues = ['risk']
+queues = Queues_check
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
 timeout_start = time.time()

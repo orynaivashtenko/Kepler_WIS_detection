@@ -19,7 +19,7 @@ force_data_output_locations_creation = False
 Working_place = None  # On which machine it is running: my office Mac ('Home'), Marvin or WEXAC
 # Working_place = 'Home' # 'Marvin'  # 'WEXAC'
 if Working_place is None:
-    if '/Users/orynaivashtenko/Work/Kepler_Project' in Pipeline_folder:
+    if '/Users/orynai/Work/Kepler_Project' in Pipeline_folder:
         Working_place = 'Home'
     elif '/SMALLDATA' in Pipeline_folder or '/home/orynai/' in Pipeline_folder:
         Working_place = 'Marvin'
@@ -153,7 +153,7 @@ Mask_kepler_false_positives = False
 
 # TARGET CLASS PARAMETERS
 
-Min_quarters_to_process = 4  # If there are less quarters in the data, the search will not run
+Min_quarters_to_process = 4  # If there are fewer quarters in the data, the search will not run
 # Bad fft check:
 Amp_max_bad_fft = 300.  # Limit amplitude of the fft maximum (above it the maximum is bad)
 Dif_max_bad_fft = 11.  # Maximal difference between the value at point and the surrounding. Bigger is bad.
@@ -161,6 +161,7 @@ Dif_max_bad_fft = 11.  # Maximal difference between the value at point and the s
 # Search
 P_min_search = 30  # days
 P_max_search = 500  # days
+Baseline_rate_period = P_min_search
 Rp_re_max = 11  # this number of earth radii we search for now. 11 is Jupiter
 Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune to Sun
 # this one is used for the main search
@@ -174,6 +175,14 @@ Per_phases_per_chunk = 1300000  # With 1500000 some jobs got killed
 # N_periods_per_chunk = 80  # Now I run for the full bank
 # I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
 Stat_candidate_search = 40.  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
+# The following `close` parameters are for the maximal score selection. Sometimes the maximal integral corresponds
+# to the chunk that does not capture the true peak. But the integral does capture the true peak because of the
+# period overlapping. We check whether there is a score which is no less
+# than the maximum minus `Delta_integral_close` and gives the gain in statistic more than `Delta_stat_close`. If
+# there is such a score, it is selected as a maximum.
+Delta_integral_close = 0.2
+Delta_stat_close = 1.
+
 N_slides_total = 50000  # for one template and narrow periods for all the runs
 # I thought to make chunk 50000 for one template and narrow periods per one run (about 14 hours) (rough 1 sec per one periodicity search)
 # But there was a timeout, so
@@ -204,15 +213,16 @@ Run_root_folder = os.path.join(os.getcwd(), 'outputs')
 Problems_folder = None
 Run_name = 'run_11'
 
-Kepler_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/KeplerFiles'
+# Kepler_files_folder = '/Users/orynai/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
+Kepler_files_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'KeplerFiles')
 
 if Working_place == 'Home':
-    Kepler_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/KeplerFiles'
+    pass
+    # Kepler_files_folder = '/Users/orynai/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
 
 if Working_place == 'Marvin':
     Data_location = '/SMALLDATA/KeplerData/Kepler'
     Output_location = '/SMALLDATA/orynai/' + str(Run_name) + '_output'
-    Kepler_files_folder = '/Collaboration-Kepler/KeplerFiles'
     Threshold_crossing_lists_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Run_root_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
@@ -220,17 +230,23 @@ if Working_place == 'Marvin':
 if Working_place == 'WEXAC':
     Data_location = '/home/labs/barakz/Collaboration-Kepler/KeplerData'
     Output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/output_' + str(Run_name)
-    Kepler_files_folder = '/home/labs/barakz/Collaboration-Kepler/KeplerFiles'
+    # Kepler_files_folder = '/home/labs/barakz/Collaboration-Kepler/KeplerFiles'
     Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
     Problems_folder = '/home/labs/barakz/orynai/' + str(Run_name) + '/problems_stars'
 
-Koi_dict_file = os.path.join(Kepler_files_folder, 'KOI_catalog_dict.pickle')
-Ttv_dict_file = os.path.join(Kepler_files_folder, 'TTV_catalog_dict.pickle')
-Gaia_kepler_file = os.path.join(Kepler_files_folder, 'kepler_dr3_good.fits')
-Villanova_dict_file = os.path.join(Kepler_files_folder, 'villanova_catalog_dict.pickle')
-Limb_darkening_array_file = os.path.join(Kepler_files_folder, 'limb_darkening_kepler_array.npy')
+Koi_dict_filename = 'KOI_catalog_dict.pickle'
+Ttv_dict_filename = 'TTV_catalog_dict.pickle'
+Gaia_kepler_filename = 'kepler_dr3_good.fits'
+Villanova_dict_filename = 'villanova_catalog_dict.pickle'
+Limb_darkening_array_filename = 'limb_darkening_kepler_array.npy'
+
+Koi_dict_file = os.path.join(Kepler_files_folder, Koi_dict_filename)
+Ttv_dict_file = os.path.join(Kepler_files_folder, Ttv_dict_filename)
+Gaia_kepler_file = os.path.join(Kepler_files_folder, Gaia_kepler_filename)
+Villanova_dict_file = os.path.join(Kepler_files_folder, Villanova_dict_filename)
+Limb_darkening_array_file = os.path.join(Kepler_files_folder, Limb_darkening_array_filename)
 
 # Gaia_kepler_file = '/home/orynai/Kepler_Notebooks/kepler_dr3_good.fits'
 # Default_koi_file = '/home/orynai/Kepler_Notebooks/cumulative_2022.05.30_11.44.28.csv'
@@ -247,8 +263,15 @@ if force_data_output_locations_creation:
         os.mkdir(Output_location)
 
 Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'
+Threshold_g_crossing_list_filename = 'threshold_g_crossing_kid_info.txt'
 Threshold_crossing_list_multiple_triggers_filename = 'threshold_crossing_list_multiple.txt'
 Threshold_g_crossing_list_multiple_triggers_filename = 'threshold_g_crossing_list_multiple.txt'
+Triggers_for_slides_injections_filename = 'triggers_for_slides_injections.txt'
+Triggers_g_for_slides_injections_filename = 'triggers_g_for_slides_injections.txt'
+Tids_that_did_not_run_filename = 'Tids_that_did_not_run.txt'
+
+Triggers_for_slides_injections_file = os.path.join(Threshold_crossing_lists_folder, Triggers_for_slides_injections_filename)
+Triggers_g_for_slides_injections_file = os.path.join(Threshold_crossing_lists_folder, Triggers_g_for_slides_injections_filename)
 
 Summary_target_txt_filename_postfix = 'target_summary.txt'
 Problems_target_txt_filename_postfix = 'problems.txt'

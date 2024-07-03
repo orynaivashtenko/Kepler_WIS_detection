@@ -23,25 +23,26 @@ Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
 
-# queues = ['physics-short', 'new-short']
-queues = ['risk']
+queues = Queues_check
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
+minutes_between_checks = 10.
 timeout_start = time.time()
-time_last = timeout_start - 10.01 * 60  # I want it to start immediately
+time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to start immediately
 while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):
-    if time.time() - time_last > 10 * 60:  # check every 10 min
+    if time.time() - time_last > minutes_between_checks * 60:  # check every 10 min
         time_last = time.time()
         # wc = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder)
-        wcs = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder, queues=queues)
+        wcs = check_number_of_submitted_jobs(output_dir=Threshold_crossing_lists_folder, queues=queues, running=False)
         if hasattr(wcs, '__len__'):
             wc = sum(wcs)
         else:
             wc = wcs
-        for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-            os.system('bsub < '+os.path.join(Job_files_folder, ff))
-            time.sleep(2.)
-            os.remove(os.path.join(Job_files_folder, ff))
+        if wc < Max_jobs_submitted:
+            for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
+                os.system('bsub < ' + os.path.join(Job_files_folder, ff))
+                time.sleep(0.1)
+                os.remove(os.path.join(Job_files_folder, ff))
     else:
         time.sleep(30)  # sleep 30 seconds if the time to check did not yet come
 
@@ -159,8 +160,8 @@ while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_file
 # # generate a random number and name the output file accordingly
 # # if "Successfully completed." in the output, then delete it
 #
-# # queues = ['physics-short', 'new-short']
-# queues = ['risk']
+# # queues = ['short', 'medium']
+
 # # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 #
 # timeout_start = time.time()
@@ -228,8 +229,8 @@ while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_file
 #             #     os.remove(os.path.join(Running_jobs_folder, job_filename))  # remove the file which finished
 #
 #
-# # bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py
-# # bsub -q long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager.py
+# # bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_2.py
+# # bsub -q long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_2.py
 #
 #
 #
