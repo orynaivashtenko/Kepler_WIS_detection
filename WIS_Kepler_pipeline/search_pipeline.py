@@ -4322,6 +4322,16 @@ class KeplerLightCurve(object):
         self.best_periodic_scores_data = best_periodic_scores_data
 
     def get_influence_period_indices(self, period, part_snr_2=0.5):
+        """
+
+        :param period: Period of the peak
+        :type period: float
+        :param part_snr_2: Define this as the end of correlation that we search around the trigger.
+            That is return the indices around the given peak where snr squared drops to that part,
+        :type part_snr_2:
+        :return: per_ind_left, per_ind_right
+        :rtype: tuple of int
+        """
         d_per = self.periods[1] - self.periods[0]
         dur_max_templ = self.tb.durations[-1]
         # n_transits = int(np.round(klc.t_mission / period))
@@ -4330,6 +4340,19 @@ class KeplerLightCurve(object):
         per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
         per_ind_right = min(len(self.periods), close_period_ind + delta_per_bins)
         return per_ind_left, per_ind_right
+
+    def get_influence_phase_indices(self, first_transit_time, in_interleaved=True, part_snr_2=0.5):
+        if in_interleaved:
+            phases, stats_periodic = self._phases_interleaved, self.statistics_periodic_interleaved
+        else:
+            phases, stats_periodic = self._phases_not_interleaved, self.statistics_periodic_not_interleaved
+        d_ftt = phases[1] - phases[0]
+        dur_max_templ = self.tb.durations[-1]
+        delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
+        close_phase_ind = np.nanargmin(np.abs(phases + self.tmin - first_transit_time))
+        phase_ind_left = max(0, close_phase_ind - delta_ftt_bins)  # we do not divide delta_ftt_bins by 2 on purpose
+        phase_ind_right = min(len(phases), close_phase_ind + delta_ftt_bins)
+        return phase_ind_left, phase_ind_right
 
 
 def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statistics_by_trends_gaussianized,

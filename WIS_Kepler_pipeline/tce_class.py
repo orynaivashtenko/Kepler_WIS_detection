@@ -1,3 +1,4 @@
+import copy
 import os
 core_num = "1"
 os.environ["OMP_NUM_THREADS"] = core_num
@@ -63,6 +64,8 @@ class KeplerTCE(target_class.KeplerTarget):
         self.p_value_mean_bg_pixels = None
         self.p_value_worst_bg_pixels = None
         self.is_bad_bg_pixels = None
+        self.klc_star_pixels = None
+        self.klc_bg_pixels = None
         self.centroid_snrs_ra_dec = None
         self.target_pixels_stats = None
         self.target_pixels_means = None
@@ -218,11 +221,36 @@ class KeplerTCE(target_class.KeplerTarget):
             for key in dict_to_print:
                 print(key, ":", dict_to_print[key], file=fil)
 
+    # def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
+    #                              number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
+    #                              part_of_light=None,
+    #                              period=None, template_index=None, first_transit_time=None,
+    #                              nsig_outliers_0_neg=Nsig_outliers_0_neg_tests, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests):
+    #     if target_pixels_folder is None:
+    #         target_pixels_folder = self.target_pixels_location
+    #     if period is None:
+    #         period = self.best_per
+    #     if template_index is None:
+    #         template_index = self.best_temp
+    #     if first_transit_time is None:
+    #         first_transit_time = self.best_ftt
+    #     star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = af.get_trigger_star_bg_ppms(
+    #                                        target_id=self.target_id, first_transit_time=first_transit_time, period=period,
+    #                                        template_index=template_index, target_pixels_folder=target_pixels_folder,
+    #                                        number_of_pixels_cut=number_of_pixels_cut, part_of_cumsum_2=part_of_cumsum_2,
+    #                                        part_of_light=part_of_light,
+    #                                        nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
+    #     self.star_pixels_ppms = star_part_ppms
+    #     self.star_pixels_stds_of_ppms = star_part_stds_of_ppms
+    #     self.bg_pixels_ppms = bg_part_ppms
+    #     self.bg_pixels_stds_of_ppms = bg_part_stds_of_ppms
+
     def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
                                  number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
                                  part_of_light=None,
                                  period=None, template_index=None, first_transit_time=None,
-                                 nsig_outliers_0_neg=Nsig_outliers_0_neg_tests, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests):
+                                 nsig_outliers_0_neg=Nsig_outliers_0_neg_tests, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
+                                 save_klcs=False):
         if target_pixels_folder is None:
             target_pixels_folder = self.target_pixels_location
         if period is None:
@@ -231,25 +259,100 @@ class KeplerTCE(target_class.KeplerTarget):
             template_index = self.best_temp
         if first_transit_time is None:
             first_transit_time = self.best_ftt
-        star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = af.get_trigger_star_bg_ppms(
-                                           target_id=self.target_id, first_transit_time=first_transit_time, period=period,
-                                           template_index=template_index, target_pixels_folder=target_pixels_folder,
-                                           number_of_pixels_cut=number_of_pixels_cut, part_of_cumsum_2=part_of_cumsum_2,
-                                           part_of_light=part_of_light,
-                                           nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
-        self.star_pixels_ppms = star_part_ppms
-        self.star_pixels_stds_of_ppms = star_part_stds_of_ppms
-        self.bg_pixels_ppms = bg_part_ppms
-        self.bg_pixels_stds_of_ppms = bg_part_stds_of_ppms
+
+        target_pixels_folder = af.get_correct_tid_folder(target_id=self.target_id, location=target_pixels_folder)
+        pixel_times, target_pixel_fluxes = af.get_target_pixel_data_fun(self.target_id, data_folder=target_pixels_folder,
+                                                                        remove_zeroth_quarter=True,
+                                                                        remove_quarter_17=True)
+        star_part_sap_fluxes, bg_part_sap_fluxes = af.get_splitted_saps_from_pixels(target_pixel_fluxes,
+                                                                                    number_of_pixels_cut=number_of_pixels_cut,
+                                                                                    part_of_cumsum_2=part_of_cumsum_2,
+                                                                                    part_of_light=part_of_light)
+        ppms_and_stds_star_and_bg = []
+        if save_klcs:
+            klcs = []
+        for fluxes in [star_part_sap_fluxes, bg_part_sap_fluxes]:
+            # making the lightcurve out of this whatever data and doing search:
+            klc = spip.get_minimal_processed_folded_klc(target_id=None, get_data=False, times=pixel_times, fluxes=copy.deepcopy(fluxes),
+                                                        period=period, template_index=template_index,
+                                                        nsig_outliers_0_neg=nsig_outliers_0_neg,
+                                                        nsig_outliers_0_pos=nsig_outliers_0_pos)
+            # -> we do not marginalize, so statistics are still not in units of snr squared
+
+            # determine the depth in the needed position:
+            ti = 0  # we have only one template initialized, and we
+            ti_sh = klc.indices_of_templates[ti][0]
+            if klc.indices_of_templates[ti][-1] - klc.indices_of_templates[ti][0] > 1:
+                is_interleaved = True
+                phases = klc._phases_interleaved
+                time = klc.time_interleaved
+                statistics_periodic = klc.statistics_periodic_interleaved
+                statistics = klc.statistics_interleaved
+                stat_vars = klc.stat_vars_interleaved
+            else:
+                is_interleaved = False
+                phases = klc._phases_not_interleaved
+                time = klc.time_not_interleaved
+                statistics_periodic = klc.statistics_not_interleaved
+                statistics = klc.statistics_not_interleaved
+                stat_vars = klc.stat_vars_not_interleaved
+
+            # Finding  correlation size:
+            period_index_left, period_index_right = klc.get_influence_period_indices(period=period, part_snr_2=0.5)
+            phase_index_left, phase_index_right = klc.get_influence_phase_indices(first_transit_time=first_transit_time,
+                                                                                  in_interleaved=is_interleaved, part_snr_2=0.5)
+
+            # Allow the actual minimum to be a little bit shifted:
+            # redefining the best period index with a small freedom:
+            period_index = period_index_left + np.argmin(np.nanmin(statistics_periodic[period_index_left:period_index_right, 0,
+                                                                   phase_index_left:phase_index_right], axis=-1))
+            # redefining the best phase index with a small freedom:
+            phase_index = phase_index_left + np.argmin(statistics_periodic[period_index][0][
+                                                       phase_index_left:phase_index_right])
+            # -> allow the actual minimum to be a little bit shifted
+            period_new = klc.periods[period_index]
+            first_transit_time_new = phases[phase_index] + klc.tmin
+            expected_transit_times = [first_transit_time_new + i * period_new  # I am not sure tmin does not miss some nan in the beginning
+                                      for i in range(int(np.ceil((klc.tmax - first_transit_time_new) / period_new)))]
+            summed_transit_points = [np.nanargmin(np.abs(time - expected_transit_times[i])) for i in range(len(expected_transit_times))]
+            # summed_transit_times = np.array(time[summed_transit_points])
+            summed_raw_stats = statistics[ti][summed_transit_points]
+            summed_vars = stat_vars[ti][summed_transit_points]
+
+            (ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds,
+             ppms, ppms_stds) = af.estimate_ampls_ppms_from_stats(summed_raw_stats=summed_raw_stats, summed_stat_vars=summed_vars,
+                                                                  templ_max=np.max(np.abs(klc.tb.templates_shifts[ti_sh])),
+                                                                  flux_trend=klc.mean_total, trends_std=None)
+            ppms_and_stds_star_and_bg.append([ppms, ppms_stds])
+            if save_klcs:
+                klcs.append(copy.deepcopy(klc))
+
+        #
+        # ############################################################
+        #
+        # star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = af.get_trigger_star_bg_ppms(
+        #                                    target_id=self.target_id, first_transit_time=first_transit_time, period=period,
+        #                                    template_index=template_index, target_pixels_folder=target_pixels_folder,
+        #                                    number_of_pixels_cut=number_of_pixels_cut, part_of_cumsum_2=part_of_cumsum_2,
+        #                                    part_of_light=part_of_light,
+        #                                    nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
+        self.star_pixels_ppms = ppms_and_stds_star_and_bg[0][0]
+        self.star_pixels_stds_of_ppms = ppms_and_stds_star_and_bg[0][1]
+        self.bg_pixels_ppms = ppms_and_stds_star_and_bg[1][0]
+        self.bg_pixels_stds_of_ppms = ppms_and_stds_star_and_bg[1][1]
+        if save_klcs:
+            self.klc_star_pixels = klcs[0]
+            self.klc_bg_pixels = klcs[1]
 
     def test_target_pixels_amplitudes(self,
                                       threshold_false_negative_bg_target_pixels_mean=Threshold_false_negative_bg_target_pixels_mean,
-                                      threshold_false_negative_bg_target_pixels_max=Threshold_false_negative_bg_target_pixels_max):
+                                      threshold_false_negative_bg_target_pixels_max=Threshold_false_negative_bg_target_pixels_max,
+                                      part_of_cumsum_2=Part_of_cumsum_2_targ_pix):
         if (self.star_pixels_ppms is None or self.star_pixels_stds_of_ppms is None
                 or self.bg_pixels_ppms is None or self.bg_pixels_stds_of_ppms is None):
             self.get_trigger_star_bg_ppms(
                 target_pixels_folder=self.target_pixels_location,
-                number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix, part_of_light=None)
+                number_of_pixels_cut=None, part_of_cumsum_2=part_of_cumsum_2, part_of_light=None)
 
         # diff_mean_ppm = np.nanmean(self.star_pixels_ppms) - np.nanmean(self.bg_pixels_ppms)
         # var_mean_ppm = (np.nansum(self.star_pixels_stds_of_ppms**2) / len(self.star_pixels_stds_of_ppms)**2
@@ -272,8 +375,8 @@ class KeplerTCE(target_class.KeplerTarget):
             self.is_bad_bg_pixels = False
 
         # Checking the worst deviation:
-        if (diff_ppms[valid_mask] < 0).any():
-            inds = (diff_ppms < 0) & valid_mask
+        if (diff_ppms[valid_mask] > 0).any():
+            inds = (diff_ppms > 0) & valid_mask
             diffs_single_ppm = diff_ppms[inds]
             stds_single_ppm = var_diff_ppms[inds]**0.5
             false_neg_singles = [ut.get_p_value_gaussian(diffs_single_ppm[i] / stds_single_ppm[i], 0, 1.)
@@ -323,23 +426,26 @@ class KeplerTCE(target_class.KeplerTarget):
                                                         nsig_outliers_0_pos=nsig_outliers_0_pos)
 
             # Finding  correlation size:
-            part_snr_2 = 0.5  # define this as the end of correlation
-            d_per = klc.periods[1] - klc.periods[0]
-            dur_max_templ = klc.tb.durations[-1]
-            # n_transits = int(np.round(klc.t_mission / period))
-            delta_per_bins = int(np.round((period * 2 * dur_max_templ / klc.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
-            close_period_ind = np.nanargmin(np.abs(klc.periods - period))
-            per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
-            per_ind_right = min(len(klc.periods), close_period_ind + delta_per_bins)
+            per_ind_left, per_ind_right = klc.get_influence_period_indices(period=period, part_snr_2=0.5)
+            # part_snr_2 = 0.5  # define this as the end of correlation
+            # d_per = klc.periods[1] - klc.periods[0]
+            # dur_max_templ = klc.tb.durations[-1]
+            # # n_transits = int(np.round(klc.t_mission / period))
+            # delta_per_bins = int(np.round((period * 2 * dur_max_templ / klc.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
+            # close_period_ind = np.nanargmin(np.abs(klc.periods - period))
+            # per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
+            # per_ind_right = min(len(klc.periods), close_period_ind + delta_per_bins)
 
             max_deviation = []
-            for phases, stats_periodic in [[klc._phases_interleaved, klc.statistics_periodic_interleaved],
-                                           [klc._phases_not_interleaved, klc.statistics_periodic_not_interleaved]]:
-                d_ftt = phases[1] - phases[0]
-                delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
-                close_phase_ind = np.nanargmin(np.abs(phases + klc.tmin - ftt))
-                phase_ind_left = max(0, close_phase_ind - delta_ftt_bins)  # we do not divide delta_ftt_bins by 2 on purpose
-                phase_ind_right = min(len(phases), close_phase_ind + delta_ftt_bins)
+            for in_interl, phases, stats_periodic in [[True, klc._phases_interleaved, klc.statistics_periodic_interleaved],
+                                                      [False, klc._phases_not_interleaved, klc.statistics_periodic_not_interleaved]]:
+                phase_ind_left, phase_ind_right = klc.get_influence_phase_indices(first_transit_time=ftt, in_interleaved=in_interl,
+                                                                                  part_snr_2=0.5)
+                # d_ftt = phases[1] - phases[0]
+                # delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
+                # close_phase_ind = np.nanargmin(np.abs(phases + klc.tmin - ftt))
+                # phase_ind_left = max(0, close_phase_ind - delta_ftt_bins)  # we do not divide delta_ftt_bins by 2 on purpose
+                # phase_ind_right = min(len(phases), close_phase_ind + delta_ftt_bins)
                 max_pos_dev = np.nanmax(stats_periodic[per_ind_left:per_ind_right,
                                         :, phase_ind_left:phase_ind_right])
                 max_neg_dev = np.nanmin(stats_periodic[per_ind_left:per_ind_right,
