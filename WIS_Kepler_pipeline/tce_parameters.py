@@ -6,6 +6,8 @@ os.environ["MKL_NUM_THREADS"] = "1"  #
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+import numpy as np
+
 import pipeline_parameters as pp
 
 Gaia_kepler_file = pp.Gaia_kepler_file
@@ -47,3 +49,98 @@ Nsig_outliers_0_neg_tests = 15.
 Threshold_centroid_snr_2 = 45.
 Threshold_false_negative_bg_target_pixels_mean = 0.01
 Threshold_false_negative_bg_target_pixels_max = 0.01
+
+# ################################################################################################
+# CONSTANTS AND ARGUMENTS
+Quarter_16_end = 1557.9589375032883
+# Kepler time is measured in BJD - 2454833
+# Villanova phases are in BJD - 2400000
+# And we corrected for this
+# ################################################################################################
+# DEFINING HOW CLOSE TO KNOWN PERIODICITIES THE SIGNALS ARE ALLOWED TO BE
+# there are some harmonics which are fast:
+# exposure time 29.424 min
+# reaction wheels 3.03 days, 0.133 days
+Period_year = 370.  # 365.25 #year
+Period_quarter = 93.  # quarter
+# 30., #monthly downlink is very irregular and will be considered separately
+
+Period_error_year = 10.  # duty cycles as estimation for year period error
+Period_error_year_harm = 2.
+Period_error_quarter = 2.  # let it be for quarter
+Period_error_quarter_harm = 1.
+
+Period_error = 0.03  # days
+Phase_error = 0.07  # around 3 lc
+
+Dict_bad_periodicity_reason_names = {
+    'y': 'year',
+    'q': 'quarter',
+    'v': 'villanova',
+    'd': 'downlink',
+    'k': 'koi',
+    'yh': 'year_harmonics',
+    'qh': 'quarter_harmonics',
+    'vh': 'villanova_harmonics',
+    '': '',
+}
+
+# ################################################################################################
+# ERRORS AROUND SPECIFIC TIMES
+Timing_error_quarter_edge = 2.  # days. contamination from quarter edge can last. just a random estimate
+Timing_error_earth_downlink = 1.  # days. contamination from earth pointing and downlink can last. just a random estimate
+
+
+Min_fraction_valid_transits = 0.3  # this part of transits maximally can be at the quarter edges
+
+
+# ################################################################################################
+# LOADING SUSPICIOUS TIMES
+
+def get_earth_pointing_times(earth_pointing_times_file=Earth_pointing_times_file):
+    with open(earth_pointing_times_file, 'r') as fil1:
+        earth_pointing_times = np.array(fil1.read().split()).astype(float)
+    return earth_pointing_times
+
+
+def get_quarter_start_end_times(quarter_start_times_file=Quarter_start_times_file):
+    with open(quarter_start_times_file, 'r') as fil1:
+        quarter_start_times = np.array(fil1.read().split()).astype(float)
+
+    with open(Quarter_end_times_file, 'r') as fil1:
+        quarter_end_times = np.array(fil1.read().split()).astype(float)
+    return quarter_start_times, quarter_end_times
+
+
+def get_villanova_relevant_periods_phases_kmags(villanova_periods_phases_kmags_relevant_file=Villanova_periods_phases_kmags_relevant_file):
+    """
+
+    :param villanova_periods_phases_kmags_relevant_file:
+    :type villanova_periods_phases_kmags_relevant_file:
+    :return: vil_periods, vil_phases, vil_kmags
+    :rtype: numpy.ndarray of float, numpy.ndarray of float, numpy.ndarray of float
+    """
+    vil_periods, vil_phases, vil_kmags = np.load(villanova_periods_phases_kmags_relevant_file, allow_pickle=True)
+    return vil_periods, vil_phases, vil_kmags
+
+
+def get_strong_koi_periodicities(koi_table_file=Table_koi_file):
+    # KNOWN PLANETS
+    with open(koi_table_file, 'r') as table_koi_file:
+        lines = table_koi_file.readlines()
+    lines = [line for line in lines if line[0] != '#']
+    line_descriptions = (lines[0].strip()).split(',')
+    koi_model_snr_index = line_descriptions.index('koi_model_snr')
+    koi_period_index = line_descriptions.index('koi_period')
+    koi_time0bk_index = line_descriptions.index('koi_time0bk')
+    koi_kepid_index = line_descriptions.index('kepid')
+
+    lines = lines[1:]  # remove header
+    lines = [(line.strip()).split(',') for line in lines]
+    lines = [line for line in lines if (len(line[koi_model_snr_index]) > 0)]  # select known snr
+    lines = [line for line in lines if (float(line[koi_model_snr_index]) > 40.)]  # select big snr
+
+    periods_koi = np.array([float(line[koi_period_index]) for line in lines])
+    ftts_koi = np.array([float(line[koi_time0bk_index]) for line in lines])
+    kid_kois = np.array([line[koi_kepid_index].rjust(9, '0') for line in lines])
+    return periods_koi, ftts_koi, kid_kois

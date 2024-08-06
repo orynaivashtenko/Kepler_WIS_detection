@@ -9,7 +9,7 @@ import numpy as np
 import os
 import pickle
 import time
-
+import datetime
 
 def is_int(string):
     assert type(string) == str, 'Input must be string!'
@@ -278,9 +278,6 @@ def read_csv_file(file, location=None, to_type=None):
     return res
 
 
-
-
-
 def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobname='job_noname',
                    job_file=None, job_filename='job_test.bsub', job_file_dir=None, env_name='',
                    queue='"short"', mem_per_job_gb='3.9', array_indices=None,
@@ -488,7 +485,6 @@ def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_outp
 def report_exception(exception, file_to_append, title='', info=''):
     import sys
     import traceback
-    import datetime
     tb = sys.exc_info()
     list_str_exc = traceback.format_exception(exception, value=tb[1], tb=tb[2])
     with open(file_to_append, 'a') as err_list_fil:
@@ -505,6 +501,16 @@ def report_exception(exception, file_to_append, title='', info=''):
         print(str(exception), file=err_list_fil)
         print('END', file=err_list_fil)
         print('', file=err_list_fil)
+
+
+def print_problem(text, file=None, add_time=True):
+    res = ''
+    if add_time:
+        res += str(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')) + ' : '
+    res += text
+    with open(file, 'a') as fil1:
+        print(text, file=fil1)
+        print('----------------------------------------------------------', file=fil1)
 
 
 # ####################################################################################################################
@@ -573,6 +579,7 @@ class Locker:
         #   https://stackoverflow.com/questions/17708885/flock-removing-locked-file-without-race-condition
         fcntl.flock(self.locker_file_fd, fcntl.LOCK_UN)
         os.close(self.locker_file_fd)
+        # os.chmod(self.locker_file_fd, 777)  # when I added this, i got Bad file descriptor error
         return None
 
 

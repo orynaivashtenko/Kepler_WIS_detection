@@ -268,6 +268,23 @@ def get_saving_file_path(output_location, target_id, filename_postfix, file_form
     return file_dir
 
 
+def check_dict_keyword(target_id, output_folder, keyword='is_good_for_processing', dict_postfix=pp.Dict_target_txt_filename_postfix):
+    """
+    In the target_dict file, finds the keyword and returns the value of it.
+    """
+    output_folder = get_correct_tid_folder(target_id=target_id, location=output_folder, allow_creation=False)
+    checked_file = os.path.join(output_folder, target_id + '_' + dict_postfix)
+    with open(checked_file, 'r') as fil:
+        lines = fil.readlines()
+    lines = [line.strip().split(':') for line in lines if (len(line.strip()) > 0 and ':' in line)]
+    lines = [[line[0].strip(), line[1].strip()] for line in lines]
+    res = [line[1] for line in lines if line[0] == keyword]
+    if len(res) == 0:
+        raise ValueError('Keyword not found')
+    else:
+        return res[0]
+
+
 def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 * 3,
                 time_fold=400 * 0.0204336, dt=0.0204336, means=None, template=None, return_std=False):
     if not hasattr(times[0], "__len__"):
@@ -341,6 +358,84 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std
         else:
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped
+
+
+def mask_ephemeris(times, quarters, masks, big_hole_masks, dt_days,
+                   period=None, durations=None, transit_times=None, absolute_phase=None, time_edges_to_mask=None):
+    """
+    Adds `False` to the mask where there are transits.
+    :param times:
+    :type times:
+    :param quarters:
+    :type quarters:
+    :param masks:
+    :type masks:
+    :param big_hole_masks:
+    :type big_hole_masks:
+    :param dt_days:
+    :type dt_days:
+    :param period: Period in days of transits that should be masked. Used only if `time_edges_to_mask`
+        is None and `transit_times` is None. This is useful when there are no TTVs or TDVs.
+    :type period: float
+    :param durations: Duration or durations in days of transits that should be masked. Used only if
+        `time_edges_to_mask` is None. If `float`, then it is used as constant duration for all transits.
+        If `list`, then its length should coincide with the length of `transit_times` if it is also a list.
+        This is useful when there are TDVs.
+    :type durations: float or list[float]
+    :param transit_times: Middle-time of the transit or transits in days. If `float`, it is counted as
+        middle-time of one transit, and all the rest are assumed to pe periodic with `period`.
+        If `list`, will be counted as all the mid-times that should be masked. Should coincide in length
+        with `durations` if it is also a list. This is useful when there are TTVs.
+        Is overriden by time_edges_to_mask.
+    :type transit_times: list[float] or float or ndarray
+    :param absolute_phase: Phase of one of the transits with respect to the beginning of the Kepler time
+        in days. Used only if `time_edges_to_mask` is None and `transit_times` is None.
+        This is useful when there are no TTVs or TDVs.
+    :type absolute_phase: float
+    :param time_edges_to_mask: list of tuples marking the beginning and the end of the things that should
+        be masked in days. Overriding all the other parameters which are used if it is None.
+        This is useful when there are TTVs and TDVs.
+    :type time_edges_to_mask: list[list[float]] or ndarray
+    """
+    if time_edges_to_mask is not None:
+        assert hasattr(time_edges_to_mask, '__len__'), 'Variable time_edges_to_mask should have type list[list[float]]!'
+        assert hasattr(time_edges_to_mask[0], '__len__'), 'Variable time_edges_to_mask should have type list[list[float]]!'
+        for j in range(len(time_edges_to_mask)):
+            ind1 = np.nan
+            ind2 = np.nan
+            for q in quarters:
+                if (time_edges_to_mask[j][0] >= np.nanmin(times[q])) and (time_edges_to_mask[j][0] <= np.nanmax(times[q])):
+                    ind1 = np.argmin(np.abs(times[q] - time_edges_to_mask[j][0]))
+                if (time_edges_to_mask[j][1] >= np.nanmin(times[q])) and (time_edges_to_mask[j][1] <= np.nanmax(times[q])):
+                    ind2 = np.argmin(np.abs(times[q] - time_edges_to_mask[j][1]))
+                if (not np.isnan(ind1)) or (not np.isnan(ind2)):
+                    masks[q][np.nanmax([0, ind1]):np.nanmin([0, len(times[q])])] = False
+                    big_hole_masks[q][np.nanmax([0, ind1]):np.nanmin([0, len(times[q])])] = False
+    else:
+        if not hasattr(transit_times, '__len__'):  # then it has to be float, and we will produce array now
+            min_time = np.nanmin(times[0])
+            max_time = np.nanmax(times[-1])
+            if transit_times is not None:  # it should be float then
+                absolute_phase = transit_times % period
+            assert (period is not None) and (absolute_phase is not None), 'At least some parameters should be not None!'
+            n_min = np.ceil(min_time / period - absolute_phase / period)
+            n_max = np.floor(max_time / period - absolute_phase / period)
+            transit_times = np.array([absolute_phase + n * period for n in np.arange(n_min, n_max + 1)])
+        if hasattr(durations, '__len__'):
+            assert len(transit_times) == len(durations), 'Variables `transit_times` and `durations` should either have equal length ' \
+                                                         'or `durations` should be float! '
+        else:
+            durations = np.ones(len(transit_times)) * durations
+
+        for j in range(len(transit_times)):
+            half_dur_bins = int(np.ceil(durations[j] / dt_days / 2))
+            # -> we will mask this to the left and to the right from the midpoint
+            for q in quarters:
+                if (transit_times[j] >= np.nanmin(times[q])) and (transit_times[j] <= np.nanmax(times[q])):
+                    ind1 = np.nanargmin(np.abs(times[q] - transit_times[j]))
+                    masks[q][max(0, ind1 - half_dur_bins): min(len(times[q]), ind1 + half_dur_bins + 1)] = False
+                    big_hole_masks[q][max(0, ind1 - half_dur_bins): min(len(times[q]), ind1 + half_dur_bins + 1)] = False
+    return masks, big_hole_masks
 
 
 def get_histogram_extrapolation_coefs_in_log(counts, bins, min_counts_to_include=3, right_from_max_to_left=1.5, counts_are_log=False):
@@ -432,79 +527,6 @@ def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
         return flag
     else:
         raise AssertionError('Please finish the code for rfft=False !')
-
-
-def mask_ephemeris(times, fluxes, period=None, durations=None, transit_times=None, absolute_phase=None, time_edges_to_mask=None):
-    """
-    Adds `False` to the mask where there are transits.
-    :param times:
-    :type times:
-    :param fluxes:
-    :type fluxes:
-    :param period: Period in days of transits that should be masked. Used only if `time_edges_to_mask` is None
-    and `transit_times` is None. This is useful when there are no TTVs or TDVs.
-    :type period: float
-    :param durations: Duration or durations in days of transits that should be masked. Used only if `time_edges_to_mask` is None.
-    If `float`, then it is used as constant duration for all transits. If `list`, then its length should coincide with the length
-    of `transit_times` if it is also a list. This is useful when there are TDVs.
-    :type durations: float or list[float]
-    :param transit_times: Middle-time of the transit or transits in days. If `float`, it is counted as middle-time of one transit,
-    and all the rest are assumed to pe periodic with `period`. If `list`, will be counted as all the mid-times that should be masked.
-    Should coincide in length with `durations` if it is also a list. This is useful when there are TTVs.
-    Is overriden by time_edges_to_mask.
-    :type transit_times: list[float] or float
-    :param absolute_phase: Phase of one of the transits with respect to the beginning of the Kepler time in days.
-    Used only if `time_edges_to_mask` is None and `transit_times` is None. This is useful when there are no TTVs or TDVs.
-    :type absolute_phase: float
-    :param time_edges_to_mask: list of tuples marking the beginning and the end of the things that should be masked in days.
-    Overriding all the other parameters which are used if it is None. This is useful when there are TTVs and TDVs.
-    :type time_edges_to_mask: list[list[float]]
-    :return: None
-    :rtype:
-    """
-    masks = [np.ones(len(fluxes[q])) for q in range(len(fluxes))]
-    dts = []
-    for q in range(len(times)):
-        dts.append(np.nanmean((times[q] - np.roll(times[q], 1))[1:]))
-    dt_days = np.nanmean(dts)
-
-    if time_edges_to_mask is not None:
-        assert hasattr(time_edges_to_mask, '__len__'), 'Variable time_edges_to_mask should have type list[list[float]]!'
-        assert hasattr(time_edges_to_mask[0], '__len__'), 'Variable time_edges_to_mask should have type list[list[float]]!'
-        for j in range(len(time_edges_to_mask)):
-            ind1 = np.nan
-            ind2 = np.nan
-            for q in range(len(fluxes)):
-                if (time_edges_to_mask[j][0] >= np.nanmin(times[q])) and (time_edges_to_mask[j][0] <= np.nanmax(times[q])):
-                    ind1 = np.argmin(np.abs(times[q] - time_edges_to_mask[j][0]))
-                if (time_edges_to_mask[j][1] >= np.nanmin(times[q])) and (time_edges_to_mask[j][1] <= np.nanmax(times[q])):
-                    ind2 = np.argmin(np.abs(times[q] - time_edges_to_mask[j][1]))
-                if (not np.isnan(ind1)) or (not np.isnan(ind2)):
-                    masks[q][np.nanmax([0, ind1]):np.nanmin([0, len(times[q])])] = False
-    else:
-        if not hasattr(transit_times, '__len__'):  # then it has to be float, and we will produce array now
-            min_time = np.nanmin(times[0])
-            max_time = np.nanmax(times[-1])
-            if transit_times is not None:  # it should be float then
-                absolute_phase = transit_times % period
-            assert period is not None and absolute_phase is not None, 'At least some parameters should be not None!'
-            n_min = np.ceil(min_time / period - absolute_phase / period)
-            n_max = np.floor(max_time / period - absolute_phase / period)
-            transit_times = np.array([absolute_phase + n * period for n in np.arange(n_min, n_max + 1)])
-        if hasattr(durations, '__len__'):
-            assert len(transit_times) == len(durations), 'Variables `transit_times` and `durations` should either have equal length ' \
-                                                         'or `durations` should be float! '
-        else:
-            durations = np.ones(len(transit_times)) * durations
-
-        for j in range(len(transit_times)):
-            half_dur_bins = int(np.ceil(
-                durations[j] / dt_days / 2))  # we will mask this to the left and to the right from the midpoint
-            for q in range(len(fluxes)):
-                if (transit_times[j] >= np.nanmin(times[q])) and (transit_times[j] <= np.nanmax(times[q])):
-                    ind1 = np.nanargmin(np.abs(times[q] - transit_times[j]))
-                    masks[q][max(0, ind1 - half_dur_bins): min(len(times[q]), ind1 + half_dur_bins + 1)] = False
-    return
 
 
 def plot_many(list_times, list_values=None, first_index=0, prefix='quarter',
@@ -739,7 +761,8 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
         return times, target_pixels, aperture_masks
 
 
-def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
+def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True,
+                                    dtype=np.float32):
     """
 
     ra and dec are in decimal degrees
@@ -763,15 +786,21 @@ def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quar
     aperture_masks = []
     sky_coords = []
     for tp_fits_filename in tp_fits_filenames:
-        tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
-        time_tpf = tpf1.time.value
-        flux_tpf = tpf1.flux.value
-        ra, dec = tpf1.get_coordinates(cadence='all')
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
+            time_tpf = np.array(tpf1.time.value, dtype=dtype)
+            flux_tpf = np.array(tpf1.flux.value, dtype=dtype)
+            ra, dec = tpf1.get_coordinates(cadence='all')
+            ra = np.array(ra, dtype=dtype)
+            dec = np.array(dec, dtype=dtype)
+            mask = np.array(tpf1.quality_mask)
+            aperture_mask = tpf1.pipeline_mask
+            del tpf1
 
-        mask = np.array(tpf1.quality_mask)
-        time = np.zeros(len(mask)) * np.nan
-        flux = np.zeros((len(mask), flux_tpf.shape[1], flux_tpf.shape[2])) * np.nan
-        coords = np.zeros((2, len(mask), flux_tpf.shape[1], flux_tpf.shape[2])) * np.nan
+        time = np.zeros(len(mask), dtype=dtype) * np.nan
+        flux = np.zeros((len(mask), flux_tpf.shape[1], flux_tpf.shape[2]), dtype=dtype) * np.nan
+        coords = np.zeros((2, len(mask), flux_tpf.shape[1], flux_tpf.shape[2]), dtype=dtype) * np.nan
 
         time[mask] = time_tpf
         flux[mask] = flux_tpf
@@ -782,7 +811,7 @@ def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quar
         fluxes.append(flux)
         time_masks.append(mask)
         sky_coords.append(coords)
-        aperture_masks.append(tpf1.pipeline_mask)
+        aperture_masks.append(aperture_mask)
 
     # noinspection DuplicatedCode
     reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
@@ -823,6 +852,70 @@ def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quar
 
     # times, fluxes, sky_coords, time_masks, aperture_masks
     return times, fluxes, sky_coords, time_masks, aperture_masks
+
+
+def get_kepler_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
+    """
+
+    ra and dec are in decimal degrees
+    """
+    # import lightkurve as lk
+    from lightkurve import targetpixelfile as tpf
+
+    target_id = str(target_id).rjust(9, "0")
+    data_folder = get_correct_tid_folder(target_id=target_id, location=data_location)
+
+    # noinspection DuplicatedCode
+    if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
+        download_target_pixel_files(target_id, data_folder)
+
+    tp_fits_filenames = [ff for ff in os.listdir(data_folder) if '.fits' in ff]
+    assert len(tp_fits_filenames) >= 1, 'There are no files!'
+
+    times = []
+    time_masks = []
+    for tp_fits_filename in tp_fits_filenames:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
+            time_tpf = tpf1.time.value
+
+        mask = np.array(tpf1.quality_mask)
+        time = np.zeros(len(mask)) * np.nan
+
+        time[mask] = time_tpf
+
+        times.append(time)
+        time_masks.append(mask)
+
+    # noinspection DuplicatedCode
+    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
+    argsort = np.argsort(reference_times)
+    times = [times[ind] for ind in argsort]
+    time_masks = [time_masks[ind] for ind in argsort]
+
+    if remove_zeroth_quarter:
+        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
+            times = times[1:]
+            time_masks = time_masks[1:]
+
+    if len(times) < 1:
+        raise AssertionError('There is no data to process!')
+
+    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
+        if ((1570 >= np.nanmin(times[-1])) & (
+                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
+            times = times[:-1]
+            time_masks = time_masks[:-1]
+
+    if cut_edge_nans:
+        for q in range(len(times)):
+            non_nans = np.where(~np.isnan(times[q]))[0]
+            times[q] = times[q][non_nans[0]: non_nans[-1] + 1]
+            time_masks[q] = time_masks[q][non_nans[0]: non_nans[-1] + 1]
+
+    # times, fluxes, sky_coords, time_masks, aperture_masks
+    return times, time_masks
 
 
 def download_target_pixel_files(target_id, saving_folder):
@@ -956,9 +1049,9 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
     return star_part_sap_fluxes, bg_part_sap_fluxes
 
 
-def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max, flux_trend, trends_std=None):
+def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max, flux_trend, trends_std=None,
+                                   valid_transit_mask=None):
     """
-
     :param summed_raw_stats:
     :type summed_raw_stats:
     :param flux_trend:
@@ -969,11 +1062,17 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
     :type templ_max:
     :param trends_std:
     :type trends_std:
+    :param valid_transit_mask:
+    :type valid_transit_mask:
     :return:
     :rtype:
     """
-    templ_max = templ_max / np.linalg.norm(templ_max)
-    templ_max = np.abs(templ_max)
+    if hasattr(templ_max, '__len__'):
+        templ_max = templ_max / np.linalg.norm(templ_max)
+        templ_max = np.abs(templ_max)
+        templ_max = np.nanmax(templ_max)
+    else:
+        templ_max = np.abs(templ_max)
 
     # with warnings.catch_warnings():
     #     warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -985,6 +1084,8 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
         trends_std = np.zeros(len(summed_raw_stats))
 
     not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (flux_trend > 0.) & (summed_raw_stats != 0.) & (summed_stat_vars > 0.)
+    if valid_transit_mask is not None:
+        not_missed_transit_mask = not_missed_transit_mask & valid_transit_mask
 
     mean_trend = np.nanmean(flux_trend[not_missed_transit_mask])
     mean_trend_std = (np.nanmean(trends_std[not_missed_transit_mask] ** 2) + np.nanvar(flux_trend[not_missed_transit_mask])) ** 0.5

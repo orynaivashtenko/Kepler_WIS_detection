@@ -11,11 +11,12 @@ import pickle
 from sys import getsizeof
 
 import target_class
-from pipeline_parameters import Limb_darkening_array_file, Problems_folder
+from pipeline_parameters import Limb_darkening_array_file, Problems_folder, R_sun_R_e
 from tce_parameters import *
 import auxiliary_functions as af
 import search_pipeline as spip
 import utils as ut
+import template_bank.template_module as tm
 
 
 class KeplerTCE(target_class.KeplerTarget):
@@ -23,6 +24,7 @@ class KeplerTCE(target_class.KeplerTarget):
                  data_location=pp.Data_location, output_location=pp.Output_location,
                  target_pixels_location=Target_pixels_location,
                  load_pickled_attributes=False,
+                 unpickle_target_attributes=True,
                  get_transit_and_binary_info=True,
                  gaia_kepler_file_path=Gaia_kepler_file,
                  koi_dict_file=Koi_dict_file,
@@ -38,7 +40,7 @@ class KeplerTCE(target_class.KeplerTarget):
                  overwrite_parameters_by_unpickle=False):
 
         super().__init__(target_id=target_id, data_location=data_location, output_location=output_location,
-                         load_pickled_attributes=load_pickled_attributes,
+                         load_pickled_attributes=False,
                          get_transit_and_binary_info=get_transit_and_binary_info,
                          gaia_kepler_file_path=gaia_kepler_file_path,
                          koi_dict_file=koi_dict_file,
@@ -66,16 +68,38 @@ class KeplerTCE(target_class.KeplerTarget):
         self.is_bad_bg_pixels = None
         self.klc_star_pixels = None
         self.klc_bg_pixels = None
+        self.star_valid_transit_mask = None
+        self.bg_valid_transit_mask = None
         self.centroid_snrs_ra_dec = None
-        self.target_pixels_stats = None
-        self.target_pixels_means = None
-        self.target_pixels_ppms = None
-        self.target_pixels_stds_of_ppms = None
         self.centroid_snr_2 = None
         self.is_centroid_bad = None
+        self.klc_centroid_x = None
+        self.klc_centroid_y = None
+
+        self.badness_of_transits = None
+        self.valid_transit_mask = None
+        self.n_valid_transits = None
+        self.n_transits = None
+        self.too_few_valid_transits = None
+        self.is_bad_periodicity = None
+        self.bad_periodicity_reasons = None
+        self.is_good_pre_filtering = None
+
+        self.mean_transit_amplitude = None
+        self.mean_transit_ppm = None
+        self.mean_transit_ppm_std = None
+        self.transit_amplitudes = None
+        self.transit_amplitude_stds = None
+        self.transit_normalized_amplitudes = None
+        self.transit_normalized_amplitude_stds = None
+        self.transit_ppms = None
+        self.transit_ppm_stds = None
+        self.mean_two_noises_model_ppm_std = None
+        self.rp_to_rs_std_from_mean_ppm = None
+        self.rp_to_rs_std_conservative = None
 
         if load_pickled_attributes:
-            self.unpickle_small_attributes()
+            self.unpickle_small_attributes(unpickle_target_attributes=unpickle_target_attributes)
             if not overwrite_parameters_by_unpickle:
                 self.data_location = data_location
                 self.output_location = output_location
@@ -84,6 +108,34 @@ class KeplerTCE(target_class.KeplerTarget):
                 self.ttv_dict_file = ttv_dict_file
                 self.villanova_dict_file = villanova_dict_file
                 self.target_pixels_location = target_pixels_location
+
+    def get_transit_times_info(self, period=None, first_transit_time=None, template=None, from_real_klc=True, max_time=Quarter_16_end,
+                               data_location=None, output_location=None):
+        if period is None:
+            period = self.best_per
+        if first_transit_time is None:
+            first_transit_time = self.best_ftt
+        if template is None:
+            template = self.best_temp
+        if data_location is None:
+            data_location = self.data_location
+        if output_location is None:
+            output_location = self.output_location
+        if from_real_klc:
+            klc = spip.get_fold_quickly(target_id=self.target_id, data_location=data_location,
+                                        output_location=output_location, period=period,
+                                        overlap_period_bins=0)
+            klc.get_summed_values(first_transit_time=first_transit_time, period=period, template=template)
+            self.summed_transit_times = klc.summed_times
+            self.summed_raw_stats = klc.summed_stats_raw
+            self.summed_vars = klc.summed_vars
+            self.summed_corrections = klc.summed_corrections
+            self.summed_gauss_stats = klc.summed_stats_raw_gauss
+            self.mean_flux = klc.mean_total
+            self.valid_transit_mask = (~np.isnan(self.summed_raw_stats)) & (~np.isnan(self.summed_vars)) & (self.summed_vars > 0)
+        else:
+            self.summed_transit_times = np.array([first_transit_time + i * period
+                                                  for i in range(int(np.ceil((max_time - first_transit_time) / period)))])
 
     def pickle_small_attributes(self, output_location=None,
                                 pickle_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix,
@@ -196,54 +248,38 @@ class KeplerTCE(target_class.KeplerTarget):
         :return:
         :rtype:
         """
+        fields_not_to_print = ['gaia_kepler_file',
+                               'koi_dict_file',
+                               'ttv_dict_file',
+                               'villanova_dict_file',
+                               'limb_darkening_array_file']
+
         # numpy.savetxt()
         if output_location is None:
             output_location = self.output_location
         dict_to_print = {}
         for key in self.__dict__:
-            value = self.__dict__[key]
-            if isinstance(value, (str, float, int, np.float32, np.float64, np.complex64, np.complex128,
-                                  np.integer, np.ndarray, list, dict)):
-                ok_to_print = True
+            if key not in fields_not_to_print:
+                value = self.__dict__[key]
                 if isinstance(value, (str, float, int, np.float32, np.float64, np.complex64, np.complex128,
-                                      np.integer, np.ndarray, list, dict)):
-                    if hasattr(value, '__len__'):
-                        if isinstance(value, dict) and hasattr(value[list(value.keys())[0]], '__len__'):
-                            ok_to_print = False  # TODO: maybe make the selection process look at all the dict keys
-                        elif (not isinstance(value, dict)) and (len(value) > 0 and hasattr(value[0], '__len__')):
-                            ok_to_print = False  # not printing nested lists
-                        elif (not isinstance(value, str)) and len(value) > 50:
-                            # roughly to be able to set summed values for planets with period 30
-                            ok_to_print = False
-                if ok_to_print:
-                    dict_to_print[key] = value
+                                      np.integer, np.ndarray, list, dict)) or value is None:
+                    ok_to_print = True
+                    if isinstance(value, (str, float, int, np.float32, np.float64, np.complex64, np.complex128,
+                                          np.integer, np.ndarray, list, dict)):
+                        if hasattr(value, '__len__'):
+                            if isinstance(value, dict) and len(list(value.keys())) > 0 and hasattr(value[list(value.keys())[0]], '__len__'):
+                                ok_to_print = False  # TODO: maybe make the selection process look at all the dict keys
+                            elif ((not isinstance(value, dict))
+                                  and (len(value) > 0 and (not isinstance(value[0], str)) and hasattr(value[0], '__len__'))):
+                                ok_to_print = False  # not printing nested lists
+                            elif (not isinstance(value, str)) and len(value) > 50:
+                                # roughly to be able to set summed values for planets with period 30
+                                ok_to_print = False
+                    if ok_to_print:
+                        dict_to_print[key] = value
         with open(os.path.join(output_location, self.target_id + '_' + dict_txt_filename_postfix), 'w') as fil:
             for key in dict_to_print:
                 print(key, ":", dict_to_print[key], file=fil)
-
-    # def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
-    #                              number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
-    #                              part_of_light=None,
-    #                              period=None, template_index=None, first_transit_time=None,
-    #                              nsig_outliers_0_neg=Nsig_outliers_0_neg_tests, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests):
-    #     if target_pixels_folder is None:
-    #         target_pixels_folder = self.target_pixels_location
-    #     if period is None:
-    #         period = self.best_per
-    #     if template_index is None:
-    #         template_index = self.best_temp
-    #     if first_transit_time is None:
-    #         first_transit_time = self.best_ftt
-    #     star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = af.get_trigger_star_bg_ppms(
-    #                                        target_id=self.target_id, first_transit_time=first_transit_time, period=period,
-    #                                        template_index=template_index, target_pixels_folder=target_pixels_folder,
-    #                                        number_of_pixels_cut=number_of_pixels_cut, part_of_cumsum_2=part_of_cumsum_2,
-    #                                        part_of_light=part_of_light,
-    #                                        nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
-    #     self.star_pixels_ppms = star_part_ppms
-    #     self.star_pixels_stds_of_ppms = star_part_stds_of_ppms
-    #     self.bg_pixels_ppms = bg_part_ppms
-    #     self.bg_pixels_stds_of_ppms = bg_part_stds_of_ppms
 
     def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
                                  number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
@@ -269,14 +305,14 @@ class KeplerTCE(target_class.KeplerTarget):
                                                                                     part_of_cumsum_2=part_of_cumsum_2,
                                                                                     part_of_light=part_of_light)
         ppms_and_stds_star_and_bg = []
-        if save_klcs:
-            klcs = []
+        klcs = []
         for fluxes in [star_part_sap_fluxes, bg_part_sap_fluxes]:
             # making the lightcurve out of this whatever data and doing search:
             klc = spip.get_minimal_processed_folded_klc(target_id=None, get_data=False, times=pixel_times, fluxes=copy.deepcopy(fluxes),
-                                                        period=period, template_index=template_index,
+                                                        period=period, template_index=template_index, cut_edge_nans=False,
                                                         nsig_outliers_0_neg=nsig_outliers_0_neg,
-                                                        nsig_outliers_0_pos=nsig_outliers_0_pos)
+                                                        nsig_outliers_0_pos=nsig_outliers_0_pos,
+                                                        data_location=self.data_location, output_location=self.output_location)
             # -> we do not marginalize, so statistics are still not in units of snr squared
 
             # determine the depth in the needed position:
@@ -293,7 +329,7 @@ class KeplerTCE(target_class.KeplerTarget):
                 is_interleaved = False
                 phases = klc._phases_not_interleaved
                 time = klc.time_not_interleaved
-                statistics_periodic = klc.statistics_not_interleaved
+                statistics_periodic = klc.statistics_periodic_not_interleaved
                 statistics = klc.statistics_not_interleaved
                 stat_vars = klc.stat_vars_not_interleaved
 
@@ -302,7 +338,7 @@ class KeplerTCE(target_class.KeplerTarget):
             phase_index_left, phase_index_right = klc.get_influence_phase_indices(first_transit_time=first_transit_time,
                                                                                   in_interleaved=is_interleaved, part_snr_2=0.5)
 
-            # Allow the actual minimum to be a little bit shifted:
+            # Allow the actual minimum to be a little bit shifted: ## TODO is it okay that it is independent in star and bg?
             # redefining the best period index with a small freedom:
             period_index = period_index_left + np.argmin(np.nanmin(statistics_periodic[period_index_left:period_index_right, 0,
                                                                    phase_index_left:phase_index_right], axis=-1))
@@ -327,15 +363,6 @@ class KeplerTCE(target_class.KeplerTarget):
             if save_klcs:
                 klcs.append(copy.deepcopy(klc))
 
-        #
-        # ############################################################
-        #
-        # star_part_ppms, star_part_stds_of_ppms, bg_part_ppms, bg_part_stds_of_ppms = af.get_trigger_star_bg_ppms(
-        #                                    target_id=self.target_id, first_transit_time=first_transit_time, period=period,
-        #                                    template_index=template_index, target_pixels_folder=target_pixels_folder,
-        #                                    number_of_pixels_cut=number_of_pixels_cut, part_of_cumsum_2=part_of_cumsum_2,
-        #                                    part_of_light=part_of_light,
-        #                                    nsig_outliers_0_neg=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos)
         self.star_pixels_ppms = ppms_and_stds_star_and_bg[0][0]
         self.star_pixels_stds_of_ppms = ppms_and_stds_star_and_bg[0][1]
         self.bg_pixels_ppms = ppms_and_stds_star_and_bg[1][0]
@@ -354,49 +381,57 @@ class KeplerTCE(target_class.KeplerTarget):
                 target_pixels_folder=self.target_pixels_location,
                 number_of_pixels_cut=None, part_of_cumsum_2=part_of_cumsum_2, part_of_light=None)
 
-        # diff_mean_ppm = np.nanmean(self.star_pixels_ppms) - np.nanmean(self.bg_pixels_ppms)
-        # var_mean_ppm = (np.nansum(self.star_pixels_stds_of_ppms**2) / len(self.star_pixels_stds_of_ppms)**2
-        #                 + np.nansum(self.bg_pixels_stds_of_ppms**2) / len(self.bg_pixels_stds_of_ppms)**2)
-        diff_ppms = self.star_pixels_ppms - self.bg_pixels_ppms
-        var_diff_ppms = self.star_pixels_stds_of_ppms ** 2 + self.bg_pixels_stds_of_ppms ** 2
-        valid_mask = (~np.isnan(diff_ppms)) & (~np.isnan(var_diff_ppms) & ~np.isclose(var_diff_ppms, 0))
-        test_stat = np.nansum(diff_ppms[valid_mask] / var_diff_ppms[valid_mask]) / np.nansum(1 / var_diff_ppms[valid_mask])**0.5
+        # First, see what happened in the transits because they can happen to be nans if the transit in one of them is too deep:
+        self.star_valid_transit_mask = (~np.isnan(self.star_pixels_ppms)) & (~np.isnan(self.star_pixels_stds_of_ppms)
+                                                                        & (self.star_pixels_stds_of_ppms > 0))
+        self.bg_valid_transit_mask = (~np.isnan(self.bg_pixels_ppms)) & (~np.isnan(self.bg_pixels_stds_of_ppms)
+                                                                    & (self.bg_pixels_stds_of_ppms > 0))
+        valid_star_bg_transit_mask = self.star_valid_transit_mask & self.bg_valid_transit_mask
+        if len(np.where(valid_star_bg_transit_mask)[0]) < 3:
+            self.is_bad_bg_pixels = True
+        else:
+            # If everything is fine, then look at the ppm difference of the star and the background pixels:
+            diff_ppms = self.star_pixels_ppms - self.bg_pixels_ppms
+            var_diff_ppms = self.star_pixels_stds_of_ppms ** 2 + self.bg_pixels_stds_of_ppms ** 2
+            valid_mask = (~np.isnan(diff_ppms)) & (~np.isnan(var_diff_ppms) & ~np.isclose(var_diff_ppms, 0))
+            test_stat = np.nansum(diff_ppms[valid_mask] / var_diff_ppms[valid_mask]) / np.nansum(1 / var_diff_ppms[valid_mask])**0.5
 
-        # sig_big = (np.nanmean(star_part_stds_of_ppms ** 2) + np.nanmean(bg_part_stds_of_ppms ** 2)
-        # + np.nanvar(star_part_ppms) + np.nanvar(bg_part_ppms)) ** 0.5
-        if test_stat > 0:
             false_neg = ut.get_p_value_gaussian(test_stat, 0, 1)
             self.p_value_mean_bg_pixels = false_neg
-            if false_neg < threshold_false_negative_bg_target_pixels_mean:
-                self.is_bad_bg_pixels = True
+            if test_stat > 0:
+                if false_neg < threshold_false_negative_bg_target_pixels_mean:
+                    self.is_bad_bg_pixels = True
+                else:
+                    self.is_bad_bg_pixels = False
             else:
                 self.is_bad_bg_pixels = False
-        else:
-            self.is_bad_bg_pixels = False
 
-        # Checking the worst deviation:
-        if (diff_ppms[valid_mask] > 0).any():
-            inds = (diff_ppms > 0) & valid_mask
-            diffs_single_ppm = diff_ppms[inds]
-            stds_single_ppm = var_diff_ppms[inds]**0.5
-            false_neg_singles = [ut.get_p_value_gaussian(diffs_single_ppm[i] / stds_single_ppm[i], 0, 1.)
-                                 for i in range(len(diffs_single_ppm))]
-            worst_false_neg_single = np.nanmin(false_neg_singles)
-            self.p_value_worst_bg_pixels = worst_false_neg_single
+            # Checking the worst deviation:
+            if (diff_ppms[valid_mask] > 0).any():
+                inds = (diff_ppms > 0) & valid_mask
+                diffs_single_ppm = diff_ppms[inds]
+                stds_single_ppm = var_diff_ppms[inds]**0.5
+                false_neg_singles = [ut.get_p_value_gaussian(diffs_single_ppm[i] / stds_single_ppm[i], 0, 1.)
+                                     for i in range(len(diffs_single_ppm))]
+                worst_false_neg_single = np.nanmin(false_neg_singles)
+                self.p_value_worst_bg_pixels = worst_false_neg_single
 
-            # look-elsewhere:
-            # 1 - (1 - p1)**n = p:
-            # 1 - p1 = (1 - p)**(1/n)
-            false_neg_1 = 1 - (1 - threshold_false_negative_bg_target_pixels_max)**(1 / len(np.where(valid_mask)[0]))
-            if worst_false_neg_single < false_neg_1:
-                self.is_bad_bg_pixels = True
+                # look-elsewhere:
+                # 1 - (1 - p1)**n = p:
+                # 1 - p1 = (1 - p)**(1/n)
+                false_neg_1 = 1 - (1 - threshold_false_negative_bg_target_pixels_max)**(1 / len(np.where(valid_mask)[0]))
+                if worst_false_neg_single < false_neg_1:
+                    self.is_bad_bg_pixels = True
 
     def test_centroid_transits_snr(self, threshold_snr_2=Threshold_centroid_snr_2):
-        max_coords_deviation_periodic = self.find_centroid_transits_snr(period=self.best_per, ftt=self.best_ftt,
-                                                                        nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
-                                                                        nsig_outliers_0_neg=Nsig_outliers_0_neg_tests)
-        self.centroid_snrs_ra_dec = max_coords_deviation_periodic
-        self.centroid_snr_2 = max_coords_deviation_periodic[0]**2 + max_coords_deviation_periodic[1]**2
+        if not hasattr(self, 'self.centroid_snrs_ra_dec') or self.centroid_snrs_ra_dec is None:
+            self.find_centroid_transits_snr(period=self.best_per, ftt=self.best_ftt,
+                                            nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
+                                            nsig_outliers_0_neg=Nsig_outliers_0_neg_tests)
+        self.centroid_snr_2 = self.centroid_snrs_ra_dec[0]**2 + self.centroid_snrs_ra_dec[1]**2
+        # this is statistically not really correct, but we at least know what are the snrs we are talking about.
+        # we expect the centroid to deviate even if the planet is real. if it deviates in the incorrect direction wrt
+        # the neighboring stars, then it is bad.
         if self.centroid_snr_2 > threshold_snr_2:
             self.is_centroid_bad = True
         else:
@@ -404,7 +439,8 @@ class KeplerTCE(target_class.KeplerTarget):
 
     # noinspection PyProtectedMember
     def find_centroid_transits_snr(self, period=None, ftt=None, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
-                                   nsig_outliers_0_neg=Nsig_outliers_0_neg_tests):
+                                   nsig_outliers_0_neg=Nsig_outliers_0_neg_tests,
+                                   save_klcs=False):
         if period is None:
             period = self.best_per
         if ftt is None:
@@ -418,34 +454,23 @@ class KeplerTCE(target_class.KeplerTarget):
                                                                           time_masks=time_masks, aperture_masks=aperture_masks)
 
         max_coords_deviation_periodic = []
+        klcs = []
         for fluxes in [centroid_x_quarters, centroid_y_quarters]:
             # making the lightcurve out of this whatever data and doing search:
             klc = spip.get_minimal_processed_folded_klc(target_id=None, get_data=False, times=times, fluxes=fluxes,
                                                         period=period, template_index='all',
                                                         nsig_outliers_0_neg=nsig_outliers_0_neg,
-                                                        nsig_outliers_0_pos=nsig_outliers_0_pos)
+                                                        nsig_outliers_0_pos=nsig_outliers_0_pos,
+                                                        data_location=self.data_location, output_location=self.output_location)
 
             # Finding  correlation size:
             per_ind_left, per_ind_right = klc.get_influence_period_indices(period=period, part_snr_2=0.5)
-            # part_snr_2 = 0.5  # define this as the end of correlation
-            # d_per = klc.periods[1] - klc.periods[0]
-            # dur_max_templ = klc.tb.durations[-1]
-            # # n_transits = int(np.round(klc.t_mission / period))
-            # delta_per_bins = int(np.round((period * 2 * dur_max_templ / klc.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
-            # close_period_ind = np.nanargmin(np.abs(klc.periods - period))
-            # per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
-            # per_ind_right = min(len(klc.periods), close_period_ind + delta_per_bins)
 
             max_deviation = []
             for in_interl, phases, stats_periodic in [[True, klc._phases_interleaved, klc.statistics_periodic_interleaved],
                                                       [False, klc._phases_not_interleaved, klc.statistics_periodic_not_interleaved]]:
                 phase_ind_left, phase_ind_right = klc.get_influence_phase_indices(first_transit_time=ftt, in_interleaved=in_interl,
                                                                                   part_snr_2=0.5)
-                # d_ftt = phases[1] - phases[0]
-                # delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
-                # close_phase_ind = np.nanargmin(np.abs(phases + klc.tmin - ftt))
-                # phase_ind_left = max(0, close_phase_ind - delta_ftt_bins)  # we do not divide delta_ftt_bins by 2 on purpose
-                # phase_ind_right = min(len(phases), close_phase_ind + delta_ftt_bins)
                 max_pos_dev = np.nanmax(stats_periodic[per_ind_left:per_ind_right,
                                         :, phase_ind_left:phase_ind_right])
                 max_neg_dev = np.nanmin(stats_periodic[per_ind_left:per_ind_right,
@@ -459,36 +484,285 @@ class KeplerTCE(target_class.KeplerTarget):
                 max_coords_deviation_periodic.append(max_deviation[0])
             else:
                 max_coords_deviation_periodic.append(max_deviation[1])
-        return max_coords_deviation_periodic
+            if save_klcs:
+                klcs.append(copy.deepcopy(klc))
+        if save_klcs:
+            self.klc_centroid_x = klcs[0]
+            self.klc_centroid_y = klcs[1]
+        self.centroid_snrs_ra_dec = max_coords_deviation_periodic
 
-    # def test_single_pixels(self):
-    #     """
-    #     Takes every pixel in the optimal aperture and checks the statistics at the transit times
-    #     :return:
-    #     :rtype:
-    #     """
-    #     pixel_times, target_pixel_fluxes, bit_aperture_masks = af.get_target_pixel_data_fun(target_id=self.target_id,
-    #                                                                                         data_folder=self.target_pixels_location,
-    #                                                                                         remove_zeroth_quarter=True,
-    #                                                                                         remove_quarter_17=True,
-    #                                                                                         return_aperture_masks=True)
-    #
-    #     target_pixels_stats, target_pixels_means, \
-    #         target_pixels_ppms, target_pixels_stds_of_ppms = af.get_single_pixels_stats(times=pixel_times,
-    #                                                                                     target_pixel_fluxes=target_pixel_fluxes,
-    #                                                                                     bit_aperture_masks=bit_aperture_masks,
-    #                                                                                     summed_transit_times=self.summed_transit_times,
-    #                                                                                     best_temp=self.best_temp)
-    #     self.target_pixels_stats = target_pixels_stats
-    #     self.target_pixels_means = target_pixels_means
-    #     self.target_pixels_ppms = target_pixels_ppms
-    #     self.target_pixels_stds_of_ppms = target_pixels_stds_of_ppms
-
-    def check_quality_flags(self):
+    def check_transit_times_quality_flags(self):
         """
         Opens the fits data and accesses the quality flag series. looks in the vicinity of every summed transit point
         and records all that was there.
         :return:
         :rtype:
         """
-        pass
+        self.get_transit_times_info(from_real_klc=True, data_location=self.data_location, output_location=self.output_location)
+        # times, _, _, kepler_quality_masks, _ = af.get_target_pixel_sky_coords_fun(
+        #     target_id=self.target_id, data_location=self.target_pixels_location,
+        #     remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
+        times, kepler_quality_masks = af.get_kepler_quality_masks(
+            target_id=self.target_id, data_location=self.target_pixels_location,
+            remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
+        # times = res[0]
+        # kepler_quality_masks = res[3]
+
+        concatenated_time = np.concatenate(times)
+        concatenated_kepler_quality_mask = np.concatenate(kepler_quality_masks).astype(bool)
+
+        earth_pointing_times = get_earth_pointing_times()
+        quarter_start_times, quarter_end_times = get_quarter_start_end_times()
+
+        badness_of_transits = ['' for _ in range(len(self.summed_transit_times))]
+        valid_transit_mask = np.ones(len(self.summed_transit_times), dtype=bool)
+        valid_transit_mask[np.isnan(self.summed_raw_stats) | np.isnan(self.summed_vars) | np.isclose(self.summed_vars, 0)] = False
+        for i in range(len(valid_transit_mask)):
+            if not valid_transit_mask[i]:
+                badness_of_transits[i] += 'nan '
+
+        for i, transit_time in enumerate(self.summed_transit_times):
+            between_quarters = np.array([((transit_time > quarter_end_times[j] - Timing_error_quarter_edge)
+                                          & (transit_time < quarter_start_times[j + 1] + Timing_error_quarter_edge))
+                                         for j in range(len(quarter_start_times) - 1)]).any()
+            if between_quarters:
+                badness_of_transits[i] += 'between_quarters '
+                valid_transit_mask[i] = False
+
+            index_in_times = np.searchsorted(concatenated_time, transit_time)
+            if ((not concatenated_kepler_quality_mask[index_in_times])
+                    or (not concatenated_kepler_quality_mask[max(0, index_in_times - 1)])):
+                badness_of_transits[i] += 'kepler_quality '
+                valid_transit_mask[i] = False
+
+            if np.min(np.abs(earth_pointing_times - transit_time)) < Timing_error_earth_downlink:
+                badness_of_transits[i] += 'downlink '
+                valid_transit_mask[i] = False
+
+        self.badness_of_transits = badness_of_transits
+        self.valid_transit_mask = valid_transit_mask
+        self.n_valid_transits = len(np.where(valid_transit_mask)[0])
+        self.n_transits = len(self.summed_raw_stats)
+        if self.n_valid_transits < 3 or self.n_valid_transits / self.n_transits < Min_fraction_valid_transits:
+            self.too_few_valid_transits = True
+        else:
+            self.too_few_valid_transits = False
+
+    # noinspection DuplicatedCode
+    def check_periodicity_contaminants(self, period_error=Period_error, phase_error=Phase_error,
+                                       period_year=Period_year, period_quarter=Period_quarter,
+                                       period_error_year=Period_error_year,
+                                       period_error_quarter=Period_error_quarter,
+                                       period_error_year_harm=Period_error_year_harm,
+                                       period_error_quarter_harm=Period_error_quarter_harm):
+        # Loading known Kepler periodicities of potentially bright contaminants:
+        vil_periods, vil_phases, vil_kmags = get_villanova_relevant_periods_phases_kmags()
+        periods_koi, ftts_koi, kid_kois = get_strong_koi_periodicities()
+        vil_periods = np.array(vil_periods, dtype=float)
+        vil_phases = np.array(vil_phases, dtype=float)
+        periods_koi = np.array(periods_koi, dtype=float)
+        ftts_koi = np.array(ftts_koi, dtype=float)
+
+        # ################################################################################################
+        # FILTERING ALL THE BAD PERIODICITIES
+        self.bad_periodicity_reasons = ''
+
+        bad_vil = ((vil_periods > self.best_per - period_error) &
+                   (vil_periods < self.best_per + period_error) &
+                   (((vil_phases > self.best_ftt - phase_error) &
+                     (vil_phases < self.best_ftt + phase_error)) |
+                    ((vil_phases + vil_periods > self.best_ftt - phase_error) &  # maybe one transit to the left or to the right was missing
+                     (vil_phases + vil_periods < self.best_ftt + phase_error)) |
+                    ((vil_phases - vil_periods > self.best_ftt - phase_error) &
+                     (vil_phases - vil_periods < self.best_ftt + phase_error))
+                    ))
+        if bad_vil.any():
+            self.bad_periodicity_reasons += 'v '
+            self.is_bad_periodicity = True
+
+        bad_kois = ((periods_koi > self.best_per - period_error) &
+                    (periods_koi < self.best_per + period_error) &
+                    (((ftts_koi > self.best_ftt - phase_error) &
+                      (ftts_koi < self.best_ftt + phase_error)) |
+                     ((ftts_koi + periods_koi > self.best_ftt - phase_error) &  # maybe one transit to the left or to the right was missing
+                      (ftts_koi + periods_koi < self.best_ftt + phase_error)) |
+                     ((ftts_koi - periods_koi > self.best_ftt - phase_error) &
+                      (ftts_koi - periods_koi < self.best_ftt + phase_error))
+                     ))
+        if bad_kois.any():
+            self.bad_periodicity_reasons += 'k '
+            self.is_bad_periodicity = True
+
+        bad_year = (np.abs(period_year - self.best_per) < period_error_year)  # check that period is close to year
+        if bad_year:
+            self.bad_periodicity_reasons += 'y '
+            self.is_bad_periodicity = True
+
+        bad_quarter = ((period_quarter > self.best_per - period_error_quarter) &
+                       (period_quarter < self.best_per + period_error_quarter))  # check that period is close to quarter
+        if bad_quarter:
+            self.bad_periodicity_reasons += 'q '
+            self.is_bad_periodicity = True
+
+        # ################################################################################################
+        # HARMONICS
+        if self.is_bad_periodicity is None:
+            bad_vil = False
+            bad_year = False
+            bad_quarter = False
+            bad_harms_vil = ''
+            bad_harms_year = ''
+            bad_harms_quarter = ''
+            for harm in [1 / 4, 1 / 3, 1 / 2, 4/3, 2., 3., 4., 5., 6., 7., 8.]:  # warning, 4/3 was not there before
+                bad_vil_1 = ((vil_periods / harm > self.best_per - period_error) &
+                             (vil_periods / harm < self.best_per + period_error) &
+                             (((vil_phases > self.best_ftt - phase_error) &
+                               (vil_phases < self.best_ftt + phase_error)) |
+                              ((vil_phases + vil_periods > self.best_ftt - phase_error) &  # maybe one transit was missing
+                               (vil_phases + vil_periods < self.best_ftt + phase_error)) |
+                              ((vil_phases - vil_periods > self.best_ftt - phase_error) &  # maybe one transit was missing
+                               (vil_phases - vil_periods < self.best_ftt + phase_error))
+                              )).any()
+
+                bad_vil = bad_vil | bad_vil_1
+                if bad_vil_1:
+                    bad_harms_vil = bad_harms_vil + '' + str(np.round(harm, 2))
+                # Check that period is close to harmonics of year
+                bad_year_1 = ((period_year / harm > self.best_per - period_error_year_harm) &
+                              (period_year / harm < self.best_per + period_error_year_harm))
+                bad_year = bad_year | bad_year_1
+                if bad_year_1:
+                    bad_harms_year = bad_harms_year + '' + str(np.round(harm, 2))
+                # Check that period is close to harmonics of quarter
+                bad_quarter_1 = ((period_quarter / harm > self.best_per - period_error_quarter_harm) &
+                                 (period_quarter / harm < self.best_per + period_error_quarter_harm))
+
+                bad_quarter = bad_quarter | bad_quarter_1
+                if bad_quarter_1:
+                    bad_harms_quarter = bad_harms_quarter + '' + str(np.round(harm, 2))
+
+            if bad_vil:
+                self.bad_periodicity_reasons += ' vh' + str(bad_harms_vil) + ' '
+                self.is_bad_periodicity = True
+            if bad_year:
+                self.bad_periodicity_reasons += ' yh' + str(bad_harms_year) + ' '
+                self.is_bad_periodicity = True
+            if bad_quarter:
+                self.bad_periodicity_reasons += ' qh' + str(bad_harms_quarter)
+                # This one we do not want to make the periodicity bad, but we want to still know if it is there
+
+        if self.is_bad_periodicity is None:
+            self.is_bad_periodicity = False
+
+
+    def check_harmonic_coincidence(self, period_check, ftt_check, periods_reference, phases_reference,
+                                   period_error=Period_error, phase_error=Phase_error,
+                                   harmonics_list=(1., 1./4, 1./3, 1./2, 4./3, 2., 3., 4., 5., 6., 7., 8.),
+                                   harmonics_nums=
+                                   (1, 1, 1, 1, 4, 2, 3, 4, 5, 6, 7, 8),
+                                   harmonics_denoms=
+                                   (1, 4, 3, 2, 3, 1, 1, 1, 1, 1, 1, 1)):
+
+        # min_per =
+        #
+        #
+        # periods_reference = np.array(periods_reference)
+        # phases_reference = np.array(phases_reference)
+        # ###
+        # bad_vil = ((vil_periods > self.best_per - period_error) &
+        #            (vil_periods < self.best_per + period_error) &
+        #            (((vil_phases > self.best_ftt - phase_error) &
+        #              (vil_phases < self.best_ftt + phase_error)) |
+        #             ((vil_phases + vil_periods > self.best_ftt - phase_error) &  # maybe one transit to the left or to the right was missing
+        #              (vil_phases + vil_periods < self.best_ftt + phase_error)) |
+        #             ((vil_phases - vil_periods > self.best_ftt - phase_error) &
+        #              (vil_phases - vil_periods < self.best_ftt + phase_error))
+        #             ))
+        # ###
+
+        bad = False
+        bad_harms = ''
+        for harm in harmonics_list:  # warning, 4/3 was not there before
+
+            bad_1 = ((periods_reference / harm > period_check - period_error) &
+                     (periods_reference / harm < period_check + period_error) &
+                     (((phases_reference > ftt_check - phase_error) &
+                       (phases_reference < ftt_check + phase_error)) |
+                      ((phases_reference + periods_reference > ftt_check - phase_error) &  # maybe one transit was missing
+                       (phases_reference + periods_reference < ftt_check + phase_error)) |
+                      ((phases_reference - periods_reference > ftt_check - phase_error) &  # maybe one transit was missing
+                       (phases_reference - periods_reference < ftt_check + phase_error))
+                      )).any()
+
+            bad = bad | bad_1
+            if bad_1:
+                bad_harms = bad_harms + ' ' + str(np.round(harm, 2))
+
+
+
+    def estimate_biased_rp(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
+        if self.summed_raw_stats is None or self.summed_vars is None or self.mean_flux is None:
+            self.get_transit_times_info()
+        # ATTENTION! It uses the raw statistics after the SES veto, so some transits may be missed, and the estimate may be biased.
+        # if self.best_ppms_no_filt is None or self.best_ppm_no_filt is None or self.best_ppms_stds_no_filt is None:
+        #     self.get_summed_values_no_filters(nsig_outliers_0_pos=nsig_outliers_0_pos,
+        #                                       nsig_outliers_0_neg=nsig_outliers_0_neg)
+        if len(np.where(self.valid_transit_mask)[0]) == 0:
+            self.mean_transit_amplitude = np.nan
+            self.mean_transit_ppm = np.nan
+            self.mean_transit_ppm_std = np.nan
+            self.transit_amplitudes = np.nan
+            self.transit_amplitude_stds = np.nan
+            self.transit_normalized_amplitudes = np.nan
+            self.transit_normalized_amplitude_stds = np.nan
+            self.transit_ppms = np.nan
+            self.transit_ppm_stds = np.nan
+
+            self.rp_to_rs = np.nan
+            self.rp_to_rs_std = np.nan
+            self.rp_to_r_earth = np.nan
+            self.rp_to_r_earth_std = np.nan
+        else:
+            tb = tm.TemplateBank(templates=None, shifts=None, template_index='all', load_essentials=True)
+            ti_sh = tb.indices_of_templates[self.best_temp][0]
+            templ_max = np.max(np.abs(tb.templates_shifts[ti_sh]))
+            (self.mean_transit_amplitude, self.mean_transit_ppm, self.transit_amplitudes, self.transit_amplitude_stds,
+             self.transit_normalized_amplitudes, self.transit_normalized_amplitude_stds, self.transit_ppms,
+             self.transit_ppm_stds) = af.estimate_ampls_ppms_from_stats(summed_raw_stats=self.summed_raw_stats,
+                                                                        summed_stat_vars=self.summed_vars, templ_max=templ_max,
+                                                                        flux_trend=self.mean_flux, trends_std=None,
+                                                                        valid_transit_mask=self.valid_transit_mask)
+            self.mean_transit_ppm_std = (np.nansum(self.transit_ppm_stds[self.valid_transit_mask] ** 2
+                                                   ) / len(self.transit_ppm_stds[self.valid_transit_mask]) ** 2) ** 0.5
+            self.mean_two_noises_model_ppm_std = ut.get_std_of_mean_two_sigmas_model(self.transit_ppm_stds[self.valid_transit_mask])
+
+        ppm_factor = 1e3
+        self.rp_to_rs = - np.sign(self.mean_transit_ppm) * (np.abs(self.mean_transit_ppm)) ** 0.5 / ppm_factor
+        # -> Radius estimation is subjected to big error and bias! The template contains depth factor at least,
+        # and the depth factor can be different even if the same template triggered. And of course, all the
+        # templates have different depth factors for their parameters.
+        n_samp = len(self.transit_ppm_stds[self.valid_transit_mask])
+        sum_ppm = np.sum(self.transit_ppm_stds[self.valid_transit_mask])
+        sum_var_ppm = np.sum(self.transit_ppm_stds[self.valid_transit_mask] ** 2)
+        self.rp_to_rs_std = (1 / (4 * n_samp) * 1 / sum_ppm * sum_var_ppm) ** 0.5 / ppm_factor
+        self.rp_to_rs_std_from_mean_ppm = self.mean_transit_ppm_std / (2 * np.abs(self.mean_transit_ppm)**0.5) / ppm_factor
+        self.rp_to_rs_std_conservative = self.mean_two_noises_model_ppm_std / (2 * np.abs(self.mean_transit_ppm) ** 0.5) / ppm_factor
+        # self.rp_to_rs_std = 1 / (2 * self.rp_to_rs) * (np.sum(self.transit_ppm_stds[self.valid_transit_mask] ** 2)
+        #                                                / len(self.transit_ppm_stds[self.valid_transit_mask])) ** 0.5 / 1e3 ???
+        self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
+        self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
+
+    def run_all_checks_exclusive(self):
+        self.get_transit_times_info()
+        self.check_transit_times_quality_flags()
+        self.check_periodicity_contaminants()
+        if (not self.too_few_valid_transits) and (not self.is_bad_periodicity):
+            self.test_target_pixels_amplitudes()
+            if not self.is_bad_bg_pixels:
+                self.test_centroid_transits_snr()
+                if not self.is_centroid_bad:
+                    self.estimate_biased_rp()
+                    self.is_good_pre_filtering = True
+        if self.is_good_pre_filtering is not True:
+            self.is_good_pre_filtering = False
+

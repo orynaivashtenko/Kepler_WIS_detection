@@ -92,12 +92,12 @@ def trigger_fields_from_line(line, sep=' '):
 
 def trigger_fields_from_list(list1):
     target_id = list1[Index_tid]
-    integral_score = float(list1[Index_integral])
-    stat = float(list1[Index_stat])
-    per = float(list1[Index_per])
-    ftt = float(list1[Index_ftt])
-    gauss_stat = float(list1[Index_stat_gauss])
-    template = int(list1[Index_template])
+    integral_score = float(list1[Index_integral]) if list1[Index_integral] != 'None' else np.nan
+    stat = float(list1[Index_stat]) if list1[Index_stat] != 'None' else np.nan
+    per = float(list1[Index_per]) if list1[Index_per] != 'None' else np.nan
+    ftt = float(list1[Index_ftt]) if list1[Index_ftt] != 'None' else np.nan
+    gauss_stat = float(list1[Index_stat_gauss]) if list1[Index_stat_gauss] != 'None' else np.nan
+    template = int(list1[Index_template]) if (list1[Index_template] != 'None' and list1[Index_template] != 'nan') else np.nan
     return target_id, integral_score, stat, per, ftt, gauss_stat, template
 
 

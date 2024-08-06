@@ -44,4 +44,6 @@ for tid in trig_ids:
 
 
 # bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers_prefiltered.txt
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py --trigger_list_file /home/labs/barakz/orynai/run_11/not_run_tids.txt
 

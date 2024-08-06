@@ -10,6 +10,7 @@ import numpy as np
 from auxiliary_functions import fold_fluxes
 import utils as ut
 import pickle
+import pipeline_parameters as pp
 # from astropy.io import fits
 # import sys
 import copy
@@ -303,12 +304,20 @@ def plot_folded_stat_snr(self, temp_number=None, ax=None, plot_twice=False):
 
     # MAKING TEMPLATE
     n_time_templ = int(np.round(self.best_per / self.klc.dt_days))
-    temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
-    for q in range(len(temps)):
-        if len(temps[q]) < n_time_templ:
-            temps[q] = ut.pad_by_zeros(temps[q], n_time_templ, in_the_center=True)
+    iot = self.klc.indices_of_templates[self.best_temp]
+    if iot[1] - iot[0] > 1:
+        temps = [np.nanmean([self.klc.whitened_templates_td[i][q] for i in range(iot[0], iot[1])], axis=0)
+                 for q in range(len(self.klc.whitened_templates_td[0]))]
+    else:
+        temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
+        temps = [np.array(t) for t in temps]
+
+    # temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
+    # for q in range(len(temps)):
+    #     if len(temps[q]) < n_time_templ:
+    #         temps[q] = ut.pad_by_zeros(temps[q], n_time_templ, in_the_center=True)
     temp_best_1 = np.array(np.mean([temps[q][:n_time_templ // 2] for q in self.klc.quarters], axis=0))
-    temp_best_2 = np.array(np.mean([temps[q][-n_time_templ // 2:] for q in self.klc.quarters], axis=0))
+    temp_best_2 = np.array(np.mean([temps[q][n_time_templ // 2:] for q in self.klc.quarters], axis=0))
     temp_best = np.concatenate((temp_best_1, temp_best_2))  # the maximum is supposed to be at zero
     temp_best = temp_best / np.linalg.norm(temp_best)
     temp_best = np.roll(temp_best, -np.argmax(temp_best))  # although the maximum is supposed to be at zero from before
@@ -372,14 +381,21 @@ def plot_folded_whitened_flux(self, ax=None, plot_twice=False):
         dt=self.klc.dt_days, means=None,
         template=None, return_std=True)  # np.array(self.klc.templates[self.klc.indices_of_templates[self.best_temp][0]]))
     n_time_templ = int(np.round(self.best_per / self.klc.dt_days))
-    temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
+    iot = self.klc.indices_of_templates[self.best_temp]
+    if iot[1] - iot[0] > 1:
+        temps = [np.nanmean([self.klc.whitened_templates_td[i][q] for i in range(iot[0], iot[1])], axis=0)
+                 for q in range(len(self.klc.whitened_templates_td[0]))]
+    else:
+        temps = self.klc.whitened_templates_td[self.klc.indices_of_templates[self.best_temp][0]]
+        temps = [np.array(t) for t in temps]
     for q in range(len(temps)):
         if len(temps[q]) < n_time_templ:
             temps[q] = ut.pad_by_zeros(temps[q], n_time_templ, in_the_center=True)
     temp_best_1 = np.array(np.mean([temps[q][:n_time_templ // 2] for q in self.klc.quarters], axis=0))
-    temp_best_2 = np.array(np.mean([temps[q][-n_time_templ // 2:] for q in self.klc.quarters], axis=0))
+    temp_best_2 = np.array(np.mean([temps[q][n_time_templ // 2:] for q in self.klc.quarters], axis=0))
     time_template_1 = np.arange(len(temp_best_1)) * self.klc.dt_days
     time_template_2 = (np.arange(len(temp_best_2)) * self.klc.dt_days * (-1))[::-1]
+    time_template_2 = time_template_2 - (time_template_2[1] - time_template_2[0])
     temp_best = np.concatenate((temp_best_2, temp_best_1))
     time_template = np.concatenate((time_template_2, time_template_1))
     # tem_center = np.nanargmax(np.abs(temp_best))
@@ -428,3 +444,81 @@ def plot_folded_whitened_flux(self, ax=None, plot_twice=False):
     title = get_target_title(self)
     ax.set_title(title)
     ax.legend(loc='upper right')
+
+
+def plot_histograms(self, ax=None, figsize=(10, 5), fixed_limits=False, limits=None, plot_extrapolation=True,
+                    fontsize_legend=None, linewidth=2):
+    # PLOT BACKGROUND AND INJECTION-RECOVERY
+    if self.prob_density_planet_not_noise is None:
+        self.analyze_injections_and_background()
+    bins = self.bins_stat_histogram
+    if fixed_limits:
+        if limits is not None:
+            min_plot_mes2 = limits[0]
+            max_plot_mes2 = limits[1]
+        else:
+            min_plot_mes2 = pp.Default_min_plot_stat
+            max_plot_mes2 = pp.Default_max_plot_stat
+    else:
+        min_plot_mes2 = 0.9 * bins[0]
+        max_plot_mes2 = 1.1 * bins[-1]
+    # UNIFORMLY FORMATTED PLOT
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax = fig.gca()
+
+    if self.distr_stat_inj_all is not None:
+        ax.stairs(self.distr_stat_inj_all, bins, label='all injections', linewidth=linewidth, color=def_cols[0],
+                  linestyle='--')  # after density correction factor, get per one star
+        ax.stairs(self.distr_stat_inj_success, bins, label='success injections',
+                  linewidth=linewidth, color=def_cols[0], linestyle='-')  # after density correction factor, get per one star
+    # Divide by the number of the timeslides, get effectively per one star:
+    ax.stairs(self.distr_stat_h0, bins, label='background slides', linewidth=linewidth, color=def_cols[1])
+
+    ax.axvline(self.best_stat, color='k', label='trigger: \nsnr2=' + str(np.round(np.abs(self.best_stat), 1)) +
+                                                '\nperiod=' + str(int(np.round(self.best_per, 0))) + ' d'
+                                                + '\nduration=' + str(
+        int(np.round(self.templates_durations_hours[self.best_temp], 0))) + ' h')
+
+    if plot_extrapolation:
+        # MAKE EXTRAPOLATION
+        if not hasattr(self, 'extrapolation_coefs_stat_h0_hist') or self.extrapolation_coefs_stat_h0_hist is None:
+            from auxiliary_functions import get_histogram_extrapolation_coefs_in_log
+            self.extrapolation_coefs_stat_h0_hist = get_histogram_extrapolation_coefs_in_log(
+                    self.distr_stat_h0, self.bins_stat_histogram)
+        coefs = self.extrapolation_coefs_stat_h0_hist
+        # determine intersection with horizontal axis in log scale:
+        bin_extra_max = (np.log(np.nanmin(self.distr_stat_h0[self.distr_stat_h0 != 0])) - coefs[0]) / coefs[1]
+        bin_extra_max = np.nanmax([self.best_stat + 1, bin_extra_max + 1])
+        bin_extra_min = bins[np.nanargmax(self.distr_stat_h0) + 1]
+        bin_min_distr = bins[:-1][((~np.isnan(self.distr_stat_h0)) & (self.distr_stat_h0 > 0))][0]
+        # bin_extra_min = int((bin_extra_min + bin_extra_max) / 2)
+        bin_extra_min = bin_extra_min + int(np.abs(bin_extra_min - bin_min_distr) / 2)
+        bins_extra = np.linspace(bin_extra_min, bin_extra_max, 10)
+        label = 'extrapolation'
+        if self.false_alarm_prob_trigger is not None:
+            label += ', FAP=' + f"{self.false_alarm_prob_trigger:.2e}"
+        ax.plot(bins_extra, np.exp(bins_extra * coefs[1] + coefs[0]), '--', label=label, color=def_cols[1])
+    if fontsize_legend is not None:
+        ax.legend(loc='upper right', fontsize=fontsize_legend)
+    else:
+        ax.legend(loc='upper right')
+
+
+    title = 'KID' + self.target_id
+    if self.injections_period_range is not None:
+        title = (title + ', periods ['
+                 + str(np.round(self.injections_period_range[0], 1)) + '-'
+                 + str(np.round(self.injections_period_range[1], 1)) + ']'
+                 + '] days')
+
+    ax.set_title(title, fontsize=13)
+    ax.set_xlabel('Recovered MES [$SNR^2$]')
+    ax.set_ylabel('Counts per effective one star \n per period bin per template')
+    ax.set_yscale('log')
+    ax.set_xlim(min_plot_mes2, max_plot_mes2)
+
+    if fontsize_legend is not None:
+        ax.legend(loc='upper right', fontsize=fontsize_legend)
+    else:
+        ax.legend(loc='upper right')

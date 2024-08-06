@@ -46,7 +46,7 @@ for tid in trig_ids:
 #     # if len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid)) if Injections_filename_postfix in ff]) > 0:
 #     #     # noinspection DuplicatedCode
 #     #     fop.write_job_file(code_file=None,
-#     #                        code_filename=Target_pixels_veto_runfile_filename,
+#     #                        code_filename=Pre_slides_tce_veto_code_filename,
 #     #                        code_file_dir=Run_files_folder,
 #     #                        jobname=Target_pixels_veto_job_filename_prefix+'_'+tid+'.bsub',
 #     #                        job_file=None,

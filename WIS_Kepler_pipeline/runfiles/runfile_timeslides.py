@@ -28,4 +28,4 @@ targ.unpickle_small_attributes()
 npr.seed(None)
 rt = npr.rand() * 10.  # make it sleep random number of seconds because maybe many jobs will want to access the same file...
 time.sleep(rt)
-targ.run_timeslides(central_period=Period, use_period_chunks=True, use_shuffling_pieces=True)
+targ.run_timeslides(central_period=Period, use_period_chunks=True, use_shuffling_pieces=True, clean_trigger=False)

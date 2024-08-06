@@ -38,7 +38,7 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
             wc = wcs
         for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
             os.system('bsub < '+os.path.join(Job_files_folder, ff))
-            time.sleep(2.)
+            time.sleep(0.1)
             os.remove(os.path.join(Job_files_folder, ff))
 
 

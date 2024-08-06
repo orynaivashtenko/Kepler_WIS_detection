@@ -15,7 +15,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--trigger_list_file", type=str, nargs=1, help="path to file where to take triggers",
                     default=Triggers_for_slides_injections_file)
 args = parser.parse_args()
-trigger_list_file = args.trigger_list_file[Index_tid]
+trigger_list_file = args.trigger_list_file
+if isinstance(trigger_list_file, list):
+    trigger_list_file = trigger_list_file[0]
 
 with open(trigger_list_file, 'r') as tlf:
     trig_ids = tlf.readlines()
@@ -35,10 +37,10 @@ for tid in trig_ids:
                            mem_per_job_gb=Mem_per_job_gb,
                            array_indices=None,
                            output_file=None,
-                           output_filename=Injection_detection_output_filename_prefix+'_'+tid+'_'+str(i)+'.out',
+                           output_filename=Injection_detection_output_filename_prefix+'_'+tid+'.out',  # +'_'+str(i)
                            output_file_dir=Output_files_folder,
                            error_file=None,
-                           error_filename=Injection_detection_error_filename_prefix+'_'+tid+'_'+str(i)+'.out',
+                           error_filename=Injection_detection_error_filename_prefix+'_'+tid+'.out',  # +'_'+str(i)
                            error_file_dir=Error_files_folder,
                            output_error_overwrite=False,
                            arg_jobind=False,

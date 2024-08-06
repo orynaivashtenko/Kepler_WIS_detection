@@ -8,10 +8,25 @@ from pipeline_parameters import *
 from runfiles.runfiles_parameters import *
 import file_operations as fop
 
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument("--runfile", type=str, nargs=1, help="whether main or scrambled runfile",
+                    default="main")
+# Runfile can be main or scrambled
+args = parser.parse_args()
+runfile = args.runfile
+if isinstance(runfile, list):
+    runfile = runfile[0]
+
+if runfile == 'main':
+    search_runfile_filename = Main_search_runfile_filename
+else:
+    search_runfile_filename = Main_search_scramble_runfile_filename
+
 for prefix in os.listdir(Data_location):
     for target_id in os.listdir(os.path.join(Data_location, prefix)):
         fop.write_job_file(code_file=None,
-                           code_filename=Main_search_runfile_filename,
+                           code_filename=search_runfile_filename,
                            code_file_dir=Run_files_folder,
                            jobname=target_id + '_' + Main_search_job_filename_prefix + '.bsub',
                            job_file=None,
@@ -31,4 +46,5 @@ for prefix in os.listdir(Data_location):
                            other_args=[['target_id', target_id]])
 
 # bsub -q physics-short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_all_stars.py
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_all_stars.py
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_all_stars.py --runfile main
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_all_stars.py --runfile scrambled

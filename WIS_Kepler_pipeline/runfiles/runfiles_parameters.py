@@ -24,18 +24,20 @@ Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_
 List_of_exited_jobs_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/exited_jobs.txt'
 
 # Queue_submit = 'physics-short'  # 'risk'
-Queue_submit = '"short medium"'  # dynamic queue submission
+Queue_submit = 'risk'  # '"short medium risk"'  # dynamic queue submission
 Queues_check = ['all']  # dynamic queue submission, im not sure what it does to the names so i just check all
 # ['short', 'medium']  # check these queues in launch manager
 Mem_per_job_gb = '3.9'
 
 Slides_runfile_filename = 'runfile_timeslides.py'
+Slides_clean_runfile_filename = 'runfile_timeslides_clean.py'
 Injection_parameters_runfile_filename = 'runfile_injection_parameter_generation.py'
 Injection_detection_runfile_filename = 'runfile_injection_detection.py'
 Main_search_runfile_filename = 'runfile_main_search.py'
+Main_search_scramble_runfile_filename = 'runfile_main_search_scramble.py'
 Short_periodicity_code_filename = 'runfile_short_periodicity_search.py'
 Plotting_runfile_filename = 'runfile_plotting_results.py'
-Target_pixels_veto_runfile_filename = 'runfile_target_pixels_veto.py'
+Pre_slides_tce_veto_code_filename = 'runfile_pre_slides_tce_veto.py'
 
 Main_search_job_filename_prefix = 'search'
 Main_search_output_filename_prefix = 'output_search'
@@ -49,6 +51,10 @@ Slides_job_filename_prefix = 'slides'
 Slides_output_filename_prefix = 'output_timeslides'
 Slides_error_filename_prefix = 'error_timeslides'
 
+Slides_clean_job_filename_prefix = 'slides_clean'
+Slides_clean_output_filename_prefix = 'output_timeslides_clean'
+Slides_clean_error_filename_prefix = 'error_timeslides_clean'
+
 Injection_parameters_job_filename_prefix = 'injection_parameters'
 Injection_parameters_output_filename_prefix = 'output_injection_parameters'
 Injection_parameters_error_filename_prefix = 'error_injection_parameters'
@@ -61,6 +67,6 @@ Plotting_job_filename_prefix = 'plotting'
 Plotting_output_filename_prefix = 'output_plotting'
 Plotting_error_filename_prefix = 'error_plotting'
 
-Target_pixels_veto_job_filename_prefix = 'targ_pix_veto'
-Target_pixels_veto_output_filename_prefix = 'output_targ_pix_veto'
-Target_pixels_veto_error_filename_prefix = 'error_targ_pix_veto'
+Pre_slides_tce_veto_job_filename_prefix = 'pre_slides_tce_veto'
+Pre_slides_tce_veto_output_filename_prefix = 'pre_slides_tce_veto'
+Pre_slides_tce_veto_error_filename_prefix = 'pre_slides_tce_veto'

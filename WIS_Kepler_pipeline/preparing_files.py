@@ -10,20 +10,21 @@ import os
 import pickle
 import time
 
+import pipeline_parameters
 ############################################################################################################################################
 # MAKING SOME DICTIONARIES AND OTHER FILES USED IN THE PIPELINE
 ############################################################################################################################################
 
 from pipeline_parameters import (Koi_dict_filename, Ttv_dict_filename, Villanova_dict_filename,
-                                 Limb_darkening_array_filename)
+                                 Limb_darkening_array_filename, Flares_file)
 
 from tce_parameters import (Earth_pointing_times_file, Quarter_start_times_file, Quarter_end_times_file,
                             Villanova_catalog_file, Table_koi_file, Suspicious_frequency_reasons_triggers_file,
                             Initial_trigger_list_file, Suspicious_frequency_filtered_triggers_file,
                             Villanova_periods_phases_kmags_relevant_filename)
 
-Default_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/'
-Default_koi_catalog_filename = 'cumulative_2022.10.18_03.41.17.csv'  # TODO replace by the new one
+Default_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
+Default_koi_catalog_filename = 'KOI_table_2024.csv'  # 'cumulative_2022.10.18_03.41.17.csv'  # TODO replace by the new one
 # TODO make the quality mask thing
 # TODO include here the earth pointing times etc
 # TODO prepare handy villanova and koi for postprocess check
@@ -160,6 +161,18 @@ def make_ttv_dict(koi_catalog_dict_path=os.path.join(Default_files_folder, Defau
 
 def make_villanova_dict(villanova_catalog_path=os.path.join(Default_files_folder, Default_villanova_catalog_filename),
                         pickling_dict_path=os.path.join(Default_files_folder, Default_villanova_dict_filename)):
+    """
+    Beware:
+    Kepler time is measured in BJD - 2454833
+    Villanova phases are in BJD - 2400000
+    We corrected for this in `make_villanova_periods_phases_kmags_for_relevant_periods_postprocessing`
+    :param villanova_catalog_path:
+    :type villanova_catalog_path:
+    :param pickling_dict_path:
+    :type pickling_dict_path:
+    :return:
+    :rtype:
+    """
     # villanova_catalog_timings.txt
     if pickling_dict_path[-7:] != '.pickle':
         pickling_dict_path = pickling_dict_path + '.pickle'
@@ -234,3 +247,73 @@ def make_limb_darkening_coefficients_array(limb_darkening_table_file, save_file=
     if save_file:
         np.save(os.path.join(os.path.dirname(limb_darkening_table_file)), 'limb_darkening_kepler_array.npy')
     return lines
+
+
+def get_flares_table(file_flares_table=Flares_file):
+    """
+    'Title: Stellar Flares Observed in Long Cadence Data From the Kepler Mission\n',
+    'Authors: Van Doorsselaere T., Shariati H., Debosscher J. \n',
+    'Table: Catalog of Kepler flare stars\n',
+    '================================================================================\n',
+    'Byte-by-byte Description of file: apjsaa8f9at1_mrt.txt\n',
+    '--------------------------------------------------------------------------------\n',
+    '   Bytes Format Units   Label   Explanations\n',
+    '--------------------------------------------------------------------------------\n',
+    '   1-  8 I8     ---     KIC     Kepler Input Catalog identifier\n',
+    '  10- 20 F11.6  d       Date    Kepler mission time of flare (1)\n',
+    '  22- 35 F14.6  ---     a       Amplitude in flux units\n',
+    '  37- 46 F10.6  d-1     k       Flare decay \n',
+    '  48- 54 F7.1   K       Teff    Effective temperature\n',
+    '  56- 62 F7.3   solRad  Radius  Radius\n',
+    '  64- 68 F5.3   [cm/s2] log(g)  log surface gravity\n',
+    '--------------------------------------------------------------------------------\n',
+    'Note (1): BJD-2454833.\n',
+    '--------------------------------------------------------------------------------\n',
+    """
+    with open(file_flares_table, 'r') as fil1:
+        flare_data = fil1.readlines()
+    ind_first = 1 + len(flare_data) - [i for i in range(len(flare_data)) if flare_data[-i].strip()[0] == '-'][
+        0]  # finding where the headers end
+    flare_data = flare_data[ind_first:]
+    flare_data = [line.strip().split() for line in flare_data if len(line) > 5]
+    flare_data = [[e[0].rjust(9, '0'), float(e[1]), float(e[2]), float(e[3]), float(e[4]), float(e[5]), float(e[6])] for e in flare_data]
+    return flare_data
+
+
+def get_flares_data_for_target(target_id, file_flares_table=Flares_file):
+    """
+    '   Bytes Format Units   Label   Explanations\n',
+    '--------------------------------------------------------------------------------\n',
+    '  10- 20 F11.6  d       Date    Kepler mission time of flare, BJD-2454833.\n',
+    '  22- 35 F14.6  ---     a       Amplitude in flux units\n',
+    '  37- 46 F10.6  d-1     k       Flare decay \n',
+    '  48- 54 F7.1   K       Teff    Effective temperature\n',
+    '  56- 62 F7.3   solRad  Radius  Radius\n',
+    '  64- 68 F5.3   [cm/s2] log(g)  log surface gravity\n',
+    :param target_id:
+    :type target_id:
+    :param file_flares_table:
+    :type file_flares_table:
+    :return:
+    :rtype:
+    """
+    flare_data = get_flares_table(file_flares_table=file_flares_table)
+    flare_data_tids = np.array([e[0] for e in flare_data])
+    target_id_inds = np.where(flare_data_tids == target_id)[0]
+    flare_data_target = np.array([flare_data[index][1:] for index in target_id_inds])
+    return flare_data_target
+
+
+def prepare_simulated_star(reference_target_id='009833034', input_folder=pipeline_parameters.Data_location, output_folder=pipeline_parameters.Output_location,):
+    from search_pipeline import KeplerLightCurve
+    from utils import interpolate_time
+    klc = KeplerLightCurve(target_id=reference_target_id, data_location=input_folder,
+                           output_location=output_folder,
+                           remove_zeroth_quarter=False, remove_quarter_17=False, cut_edge_nans=True)
+    klc.interpolate_fluxes()
+    times = [interpolate_time(np.array(klc.times[q]), mask=None) for q in range(len(klc.fluxes))]
+    fluxes = [10000. * np.random.normal(1, 1e-4, len(klc.fluxes[q])) for q in range(len(klc.fluxes))]
+    sim_star_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'simulations', 'simulated_white_star.npy')
+    np.save(sim_star_file, np.array([times, fluxes], dtype=object), allow_pickle=True)
+
+

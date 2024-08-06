@@ -21,8 +21,8 @@ parser.add_argument("--target_id", type=str, nargs=1, help="KOI number", default
 args = parser.parse_args()
 Target_id = args.target_id[0]
 
-Saving_maximal_scores_file = '/home/labs/barakz/orynai/run_11/short_periods_veto_maximal_triggers.txt'
-Saving_maximal_g_scores_file = '/home/labs/barakz/orynai/run_11/short_periods_veto_maximal_g_triggers.txt'
+Saving_maximal_scores_file = pp.Maximal_short_periodicity_triggers_file
+Saving_maximal_g_scores_file = pp.Maximal_short_periodicity_g_triggers_file
 P_short_min = 10
 P_short_max = 30
 

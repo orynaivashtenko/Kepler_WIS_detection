@@ -1045,7 +1045,7 @@ def load_template_prior(
     return log_template_prior, m13r_bin_edges, period_edges
 
 
-def calculate_depth_factor(params):
+def calculate_depth_factor(params=None):
     """
     Calculates how deep is the transit wrt the area part (due to limb darkening and inclination)
     For the search it is not important because we are pnly looking at cosines. For these templates
@@ -1055,6 +1055,8 @@ def calculate_depth_factor(params):
     :return:
     :rtype:
     """
+    if params is None:
+        params = get_default_templates_params()
     was_many_params = True
     if not hasattr(params[0], '__len__'):
         params = [params]

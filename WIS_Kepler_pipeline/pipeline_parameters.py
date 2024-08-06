@@ -194,7 +194,6 @@ N_injections_chunk = 40  # the previous one was perhaps run_8, but now we have f
 Per_wing_injection_and_slides_relative = 2 / 50  # Range to the left and to the right of the best period in units of period. Will be used
 # to generate injections and time slides with variable periods around the best one
 Per_wing_injection_and_slides_absolute = 2 / 50  # Range to the left and to the right of the best period in days. Will be used
-N_best_saving_slides = 3  # how many best candidates per template to save when doing the time slides
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 # Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
 Max_phase_mismatch_to_dur = 1.5  # Maximal phase difference in units of template duration for defining successful injections
@@ -221,8 +220,8 @@ if Working_place == 'Home':
     # Kepler_files_folder = '/Users/orynai/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
 
 if Working_place == 'Marvin':
-    Data_location = '/SMALLDATA/KeplerData/Kepler'
-    Output_location = '/SMALLDATA/orynai/' + str(Run_name) + '_output'
+    Data_location = '/Collaboration-Kepler/KeplerData'
+    Output_location = '/Collaboration-Kepler/orynai/output_' + str(Run_name)
     Threshold_crossing_lists_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Run_root_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
@@ -241,12 +240,14 @@ Ttv_dict_filename = 'TTV_catalog_dict.pickle'
 Gaia_kepler_filename = 'kepler_dr3_good.fits'
 Villanova_dict_filename = 'villanova_catalog_dict.pickle'
 Limb_darkening_array_filename = 'limb_darkening_kepler_array.npy'
+Flares_filename = 'Flares_Kepler.txt'
 
 Koi_dict_file = os.path.join(Kepler_files_folder, Koi_dict_filename)
 Ttv_dict_file = os.path.join(Kepler_files_folder, Ttv_dict_filename)
 Gaia_kepler_file = os.path.join(Kepler_files_folder, Gaia_kepler_filename)
 Villanova_dict_file = os.path.join(Kepler_files_folder, Villanova_dict_filename)
 Limb_darkening_array_file = os.path.join(Kepler_files_folder, Limb_darkening_array_filename)
+Flares_file = os.path.join(Kepler_files_folder, Flares_filename)
 
 # Gaia_kepler_file = '/home/orynai/Kepler_Notebooks/kepler_dr3_good.fits'
 # Default_koi_file = '/home/orynai/Kepler_Notebooks/cumulative_2022.05.30_11.44.28.csv'
@@ -266,12 +267,37 @@ Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'
 Threshold_g_crossing_list_filename = 'threshold_g_crossing_kid_info.txt'
 Threshold_crossing_list_multiple_triggers_filename = 'threshold_crossing_list_multiple.txt'
 Threshold_g_crossing_list_multiple_triggers_filename = 'threshold_g_crossing_list_multiple.txt'
+Target_ids_prefiltered_filename = 'triggers_prefiltered.txt'
+Target_ids_g_prefiltered_filename = 'triggers_g_prefiltered.txt'
+Maximal_short_periodicity_triggers_filename = 'short_periods_veto_maximal_triggers.txt'
+Maximal_short_periodicity_g_triggers_filename = 'short_periods_veto_maximal_g_triggers.txt'
+Triggers_short_periodicity_filtered_filename = 'triggers_short_periodicity_filtered.txt'
+Triggers_g_short_periodicity_filtered_filename = 'triggers_g_short_periodicity_filtered.txt'
 Triggers_for_slides_injections_filename = 'triggers_for_slides_injections.txt'
 Triggers_g_for_slides_injections_filename = 'triggers_g_for_slides_injections.txt'
 Tids_that_did_not_run_filename = 'Tids_that_did_not_run.txt'
+Non_slidable_tids_short_period_filename = 'non_slidable_tids__having_10_30_trigger.txt'
+Seeds_scrambling_run_filename = 'seeds_scrambling_run.txt'
+Threshold_crossing_scrambled_list_filename = 'threshold_crossing_scrambled_kid_info.txt'
+Threshold_g_crossing_scrambled_list_filename = 'threshold_g_crossing_scrambled_kid_info.txt'
+Threshold_crossing_scrambled_list_multiple_triggers_filename = 'threshold_crossing_scrambled_list_multiple.txt'
+Threshold_g_crossing_scrambled_list_multiple_triggers_filename = 'threshold_g_crossing_scrambled_list_multiple.txt'
 
+Threshold_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_list_filename)
+Threshold_g_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_g_crossing_list_filename)
 Triggers_for_slides_injections_file = os.path.join(Threshold_crossing_lists_folder, Triggers_for_slides_injections_filename)
 Triggers_g_for_slides_injections_file = os.path.join(Threshold_crossing_lists_folder, Triggers_g_for_slides_injections_filename)
+Target_ids_prefiltered_file = os.path.join(Threshold_crossing_lists_folder, Target_ids_prefiltered_filename)
+Target_ids_g_prefiltered_file = os.path.join(Threshold_crossing_lists_folder, Target_ids_g_prefiltered_filename)
+Maximal_short_periodicity_triggers_file = os.path.join(Threshold_crossing_lists_folder, Maximal_short_periodicity_triggers_filename)
+Maximal_short_periodicity_g_triggers_file = os.path.join(Threshold_crossing_lists_folder, Maximal_short_periodicity_g_triggers_filename)
+Triggers_short_periodicity_filtered_file = os.path.join(Threshold_crossing_lists_folder, Triggers_short_periodicity_filtered_filename)
+Triggers_g_short_periodicity_filtered_file = os.path.join(Threshold_crossing_lists_folder, Triggers_g_short_periodicity_filtered_filename)
+Non_slidable_tids_short_period_file = os.path.join(Threshold_crossing_lists_folder, Non_slidable_tids_short_period_filename)
+Seeds_scrambling_run_file = os.path.join(Threshold_crossing_lists_folder, Seeds_scrambling_run_filename)
+Threshold_crossing_scrambled_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_scrambled_list_filename)
+Threshold_g_crossing_scrambled_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_g_crossing_scrambled_list_filename)
+
 
 Summary_target_txt_filename_postfix = 'target_summary.txt'
 Problems_target_txt_filename_postfix = 'problems.txt'
@@ -281,11 +307,13 @@ Conditioned_data_filename_postfix = 'conditioned_data'
 No_veto_no_score_cor_stats_filename_postfix = 'no_veto_no_cor_stats'
 Connected_statistic_data_filename_postfix = 'connected_stats'
 Best_periodic_scores_filename_postfix = 'best_periodic_scores_all_p'
+Best_scrambled_periodic_scores_filename_postfix = 'best_scrambled_periodic_scores_all_p'
 Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
 All_injection_parameters_filename_postfix = 'all_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'
 # these stupid names are because of the search which checks `in`, and I need one file not to be in another one
 Slides_res_filename_postfix = 'scramble_res_scramble'
+Slides_clean_res_filename_postfix = 'scramble_res_clean'
 
 Histogram_stats_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
 

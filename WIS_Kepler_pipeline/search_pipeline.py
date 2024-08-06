@@ -85,7 +85,8 @@ class KeplerLightCurve(object):
     def __init__(self, target_id=None, times=None, fluxes=None, get_data=True,
                  data_location=Default_data_location, output_location=Default_output_location,
                  remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True,
-                 m_1_3_r_s=Default_m_1_3_r_s):
+                 m_1_3_r_s=Default_m_1_3_r_s, allow_data_folder_creation=True, allow_output_folder_creation=True,
+                 simulated_star=False):
         """
         Initializes a kepler light curve object. See the description in the attribute comments in the __init__.
         :param target_id: Kepler ID of the target. A 9-digit number, where some first digits may be zero.
@@ -126,12 +127,23 @@ class KeplerLightCurve(object):
         # INITIALIZING THE STAR
         if target_id is not None:
             target_id = str(target_id).rjust(9, "0")  # Convert Kepler ID to string of appropriate length
+        else:
+            target_id = '0'.rjust(9, "0")
+
+        if data_location is not None:
+            data_location = af.get_correct_tid_folder(target_id, data_location,
+                                                      allow_creation=allow_data_folder_creation)
+        if output_location is not None:
+            output_location = af.get_correct_tid_folder(target_id, output_location,
+                                                        allow_creation=allow_output_folder_creation)
+        self.data_location = data_location
+        """Local path where the data is saved"""
         self.output_location = output_location
         """Local path where the output will be saved"""
         self.target_id = target_id
         """Kepler ID of the target"""
         self.m_1_3_r_s = m_1_3_r_s
-        """Mass of the star in usits of solar mass divided by the radius of the star to
+        """Mass of the star in units of solar mass divided by the radius of the star to
             the power 1/3. Characterizes stellar density"""
 
         # ########################################################################################################
@@ -141,7 +153,12 @@ class KeplerLightCurve(object):
         """Initial time arrays of quarters provided by user input or downloaded from location"""
         self.orig_fluxes = None
         """Initial flux arrays of quarters provided by user input or downloaded from location"""
-        if not get_data:
+        if simulated_star:
+            sim_star_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'simulations', 'simulated_white_star.npy')
+            times, fluxes = np.load(sim_star_file, allow_pickle=True)
+            self.orig_times = [np.array(times[q]) for q in range(len(times))]
+            self.orig_fluxes = [np.array(fluxes[q]) for q in range(len(fluxes))]
+        elif not get_data:
             if not hasattr(times[0], '__len__'):
                 times = [times]
             if not hasattr(fluxes[0], '__len__'):
@@ -200,7 +217,12 @@ class KeplerLightCurve(object):
         self.psd_masks = copy.deepcopy(self.masks)  # clean_masks with maybe only big holes to have enough slices for PSD
         """Masks for quarters of data suitable for PSD measurement (some small holed may be ignored to increase 
                     slices size). True where data is good, False where data is bad"""
-        self.big_hole_masks = [np.ones(len(self.masks[q])).astype(bool) for q in self.quarters]
+        # self.big_hole_masks = [np.ones(len(self.masks[q])).astype(bool) for q in self.quarters]
+        self.big_hole_masks = []
+        for q in self.quarters:
+            big_mask = ut.clean_small_holes(np.array(self.masks[q]), max_hole=Max_small_hole)
+            big_mask = np.array(~ut.clean_small_holes(np.array(~big_mask), max_hole=1))
+            self.big_hole_masks.append(big_mask)
         """List of flux mask arrays for quarters where very small holes are omitted. The small holes 
                     can be interpolated without damage. True where data is good, False where data is bad"""
 
@@ -978,6 +1000,7 @@ class KeplerLightCurve(object):
                 path = self.output_location
             file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
                                                 filename_postfix=filename_postfix, file_format='npy')
+        assert os.path.getsize(file_path) > 0, f"File {file_path} is empty"
         connected_data = np.load(file_path, allow_pickle=True)
 
         num_temp_shifts = (len(connected_data) - 3) // 5  # int(connected_data[0, 0])
@@ -1433,44 +1456,41 @@ class KeplerLightCurve(object):
         :return: None
         :rtype: None
         """
-        if time_edges_to_mask is not None:
-            assert hasattr(time_edges_to_mask, '__len__'), 'Variable time_edges_to_mask should have type list[list[float]]!'
-            assert hasattr(time_edges_to_mask[0], '__len__'), 'Variable time_edges_to_mask should have type list[list[float]]!'
-            for j in range(len(time_edges_to_mask)):
-                ind1 = np.nan
-                ind2 = np.nan
-                for q in self.quarters:
-                    if (time_edges_to_mask[j][0] >= np.nanmin(self.times[q])) and (time_edges_to_mask[j][0] <= np.nanmax(self.times[q])):
-                        ind1 = np.argmin(np.abs(self.times[q] - time_edges_to_mask[j][0]))
-                    if (time_edges_to_mask[j][1] >= np.nanmin(self.times[q])) and (time_edges_to_mask[j][1] <= np.nanmax(self.times[q])):
-                        ind2 = np.argmin(np.abs(self.times[q] - time_edges_to_mask[j][1]))
-                    if (not np.isnan(ind1)) or (not np.isnan(ind2)):
-                        self.masks[q][np.nanmax([0, ind1]):np.nanmin([0, len(self.times[q])])] = False
-                        self.big_hole_masks[q][np.nanmax([0, ind1]):np.nanmin([0, len(self.times[q])])] = False
-        else:
-            if not hasattr(transit_times, '__len__'):  # then it has to be float, and we will produce array now
-                min_time = np.nanmin(self.times[0])
-                max_time = np.nanmax(self.times[-1])
-                if transit_times is not None:  # it should be float then
-                    absolute_phase = transit_times % period
-                assert period is not None and absolute_phase is not None, 'At least some parameters should be not None!'
-                n_min = np.ceil(min_time / period - absolute_phase / period)
-                n_max = np.floor(max_time / period - absolute_phase / period)
-                transit_times = np.array([absolute_phase + n * period for n in np.arange(n_min, n_max + 1)])
-            if hasattr(durations, '__len__'):
-                assert len(transit_times) == len(durations), 'Variables `transit_times` and `durations` should either have equal length ' \
-                                                             'or `durations` should be float! '
-            else:
-                durations = np.ones(len(transit_times)) * durations
+        self.masks, self.big_hole_masks = af.mask_ephemeris(times=self.times, quarters=self.quarters, masks=self.masks,
+                                                            big_hole_masks=self.big_hole_masks, dt_days=self.dt_days,
+                                                            period=period, durations=durations, transit_times=transit_times,
+                                                            absolute_phase=absolute_phase,
+                                                            time_edges_to_mask=time_edges_to_mask)
 
-            for j in range(len(transit_times)):
-                half_dur_bins = int(np.ceil(durations[j] / self.dt_days / 2))
-                # -> we will mask this to the left and to the right from the midpoint
-                for q in self.quarters:
-                    if (transit_times[j] >= np.nanmin(self.times[q])) and (transit_times[j] <= np.nanmax(self.times[q])):
-                        ind1 = np.nanargmin(np.abs(self.times[q] - transit_times[j]))
-                        self.masks[q][max(0, ind1 - half_dur_bins): min(len(self.times[q]), ind1 + half_dur_bins + 1)] = False
-                        self.big_hole_masks[q][max(0, ind1 - half_dur_bins): min(len(self.times[q]), ind1 + half_dur_bins + 1)] = False
+    def mask_ephemeris_connected_quarters(self, period=None, durations=None, transit_times=None, absolute_phase=None,
+                                          time_edges_to_mask=None):
+        """
+        Same as `mask_ephemeris` but for the connected quarters.
+        :param period:
+        :type period:
+        :param durations:
+        :type durations:
+        :param transit_times:
+        :type transit_times:
+        :param absolute_phase:
+        :type absolute_phase:
+        :param time_edges_to_mask:
+        :type time_edges_to_mask:
+        :return:
+        :rtype:
+        """
+        big_hole_mask, _ = af.mask_ephemeris(times=[np.array(self.time_full)], quarters=[0], masks=[np.array(self.big_hole_masks_full)],
+                                             big_hole_masks=[np.array(self.big_hole_masks_full)], dt_days=self.dt_days,
+                                             period=period, durations=durations, transit_times=transit_times,
+                                             absolute_phase=absolute_phase, time_edges_to_mask=time_edges_to_mask)
+        big_hole_mask = big_hole_mask[0]
+        self.big_hole_masks_full = big_hole_mask
+        self.stat_masks_full &= big_hole_mask
+        for k in range(len(self.stat_masks_full)):
+            self.statistics_full[k][~self.stat_masks_full[k]] = 0.
+            self.stat_vars_full[k][~self.stat_masks_full[k]] = 0.
+            self.corrections_full[k][~self.stat_masks_full[k]] = 0.
+            self.statistics_gaussianized_full[k][~self.stat_masks_full[k]] = 0.
 
     def prepare_for_psd(self, nperseg=None, noverlap=Noverlap_psd, npsdsmin=Npsdsmin,
                         max_small_hole=Max_small_hole):
@@ -3284,7 +3304,8 @@ class KeplerLightCurve(object):
             self.pmax = periods[-1]
 
         self.period_overlap_bins = safety_bins
-        periods = ut.add_safety_overlap(periods, safety_bins=safety_bins)
+        if safety_bins > 0:
+            periods = ut.add_safety_overlap(periods, safety_bins=safety_bins)
         self.periods = periods
         if not self.is_shifts_interleaved:
             self.interleave_shifts()
@@ -3345,11 +3366,11 @@ class KeplerLightCurve(object):
             # Pad by zeros to avoid extra if statements in the summation:
             trends_sq_by_vars = np.array(self.stat_vars_not_interleaved, dtype=Dtype_r)  # * self.trend_orig_flux_not_interleaved ** 2
             trends_sq_by_vars = np.hstack((trends_sq_by_vars, np.zeros((len(trends_sq_by_vars), len_pad))))
-            corrections = np.array(self.corrections_not_interleaved)
-            corrections = np.hstack((corrections, np.zeros((len(corrections), len_pad))))
+            corrections = np.array(self.corrections_not_interleaved, dtype=Dtype_r)
+            corrections = np.hstack((corrections, np.zeros((len(corrections), len_pad)))).astype(Dtype_r)
             statistics_by_trends_gaussianized = np.array(self.statistics_gaussianized_not_interleaved, dtype=Dtype_r)
             statistics_by_trends_gaussianized = np.hstack((statistics_by_trends_gaussianized, np.zeros(
-                (len(statistics_by_trends_gaussianized), len_pad))))
+                (len(statistics_by_trends_gaussianized), len_pad)))).astype(Dtype_r)
             self.statistics_periodic_not_interleaved, denomsq, self.corrections_periodic_not_interleaved, \
                 self.stats_gaussianized_periodic_not_interleaved = self.sum_periods_fast(
                     statistics_by_trends, trends_sq_by_vars, corrections, statistics_by_trends_gaussianized,
@@ -3383,13 +3404,13 @@ class KeplerLightCurve(object):
         self.statistics_periodic = np.zeros((np.shape(self.statistics_periodic_not_interleaved)[0],
                                              n_interl + np.shape(self.statistics_periodic_not_interleaved)[1],
                                              np.shape(self.statistics_periodic_not_interleaved)[2]), dtype=Dtype_r)
-        self.stats_gaussianized_periodic = np.zeros_like(self.statistics_periodic)
-        self.corrections_periodic = np.zeros_like(self.statistics_periodic)
+        self.stats_gaussianized_periodic = np.zeros_like(self.statistics_periodic, dtype=Dtype_r)
+        self.corrections_periodic = np.zeros_like(self.statistics_periodic, dtype=Dtype_r)
 
         not_interl_inds = n_interl + np.arange(np.shape(self.statistics_periodic_not_interleaved)[1])
-        self.statistics_periodic[:, not_interl_inds, :] = np.array(self.statistics_periodic_not_interleaved)
-        self.stats_gaussianized_periodic[:, not_interl_inds, :] = np.array(self.stats_gaussianized_periodic_not_interleaved)
-        self.corrections_periodic[:, not_interl_inds, :] = np.array(self.corrections_periodic_not_interleaved)
+        self.statistics_periodic[:, not_interl_inds, :] = np.array(self.statistics_periodic_not_interleaved, dtype=Dtype_r)
+        self.stats_gaussianized_periodic[:, not_interl_inds, :] = np.array(self.stats_gaussianized_periodic_not_interleaved, dtype=Dtype_r)
+        self.corrections_periodic[:, not_interl_inds, :] = np.array(self.corrections_periodic_not_interleaved, dtype=Dtype_r)
         self._phases = np.array(self._phases_not_interleaved)
 
         n_shifts = int(np.round(len(self._phases_interleaved) / len(self._phases_not_interleaved)))
@@ -3452,13 +3473,13 @@ class KeplerLightCurve(object):
         n_interl = np.shape(self.statistics_periodic_interleaved)[1]
         self.statistics_periodic = np.zeros((np.shape(self.statistics_periodic_interleaved)[0],
                                              n_interl + np.shape(self.statistics_periodic_not_interleaved)[1],
-                                             np.shape(self.statistics_periodic_interleaved)[2]))
-        self.stats_gaussianized_periodic = np.zeros_like(self.statistics_periodic)
-        self.corrections_periodic = np.zeros_like(self.statistics_periodic)
+                                             np.shape(self.statistics_periodic_interleaved)[2]), dtype=Dtype_r)
+        self.stats_gaussianized_periodic = np.zeros_like(self.statistics_periodic, dtype=Dtype_r)
+        self.corrections_periodic = np.zeros_like(self.statistics_periodic, dtype=Dtype_r)
 
-        self.statistics_periodic[:, range(n_interl), :] = np.array(self.statistics_periodic_interleaved)
-        self.stats_gaussianized_periodic[:, range(n_interl), :] = np.array(self.stats_gaussianized_periodic_interleaved)
-        self.corrections_periodic[:, range(n_interl), :] = np.array(self.corrections_periodic_interleaved)
+        self.statistics_periodic[:, range(n_interl), :] = np.array(self.statistics_periodic_interleaved, dtype=Dtype_r)
+        self.stats_gaussianized_periodic[:, range(n_interl), :] = np.array(self.stats_gaussianized_periodic_interleaved, dtype=Dtype_r)
+        self.corrections_periodic[:, range(n_interl), :] = np.array(self.corrections_periodic_interleaved, dtype=Dtype_r)
         self._phases = np.array(self._phases_interleaved)
 
         for vals_interpolated, vals_not_interl in [[self.statistics_periodic, self.statistics_periodic_not_interleaved],
@@ -3610,8 +3631,9 @@ class KeplerLightCurve(object):
         log_template_prior, m13r_bin_edges, period_edges = tm.load_template_prior()
         m_1_3_r_s_bin = min(max(0, np.searchsorted(m13r_bin_edges, m_1_3_r_s) - 1), len(m13r_bin_edges) - 2)
 
-        self.stats_periodic_mar_temp = np.zeros((np.shape(self.statistics_periodic)[0], np.shape(self.statistics_periodic)[2]))
-        self.stats_gaussianized_periodic_mar_temp = np.zeros_like(self.stats_periodic_mar_temp)
+        self.stats_periodic_mar_temp = np.zeros((np.shape(self.statistics_periodic)[0], np.shape(self.statistics_periodic)[2]),
+                                                dtype=Dtype_r)
+        self.stats_gaussianized_periodic_mar_temp = np.zeros_like(self.stats_periodic_mar_temp, dtype=Dtype_r)
 
         for marg_stats, stats in [[self.stats_periodic_mar_temp, self.statistics_periodic],
                                   [self.stats_gaussianized_periodic_mar_temp, self.stats_gaussianized_periodic]]:
@@ -3650,10 +3672,10 @@ class KeplerLightCurve(object):
         best_phase_inds = np.array([np.nanargmax(self.stats_periodic_mar_temp[pp]) for pp in range(len(self.stats_periodic_mar_temp))])
         self.best_phase_inds = best_phase_inds
         self.stats_periodic_mar_temp_best_ph = np.array([np.nanmax(self.stats_periodic_mar_temp[pp])
-                                                         for pp in range(len(self.stats_periodic_mar_temp))])
-        phases_best_ph = np.array([self._phases[best_phase_inds[pp]] for pp in range(len(self.stats_periodic_mar_temp))])
+                                                         for pp in range(len(self.stats_periodic_mar_temp))], dtype=Dtype_r)
+        phases_best_ph = np.array([self._phases[best_phase_inds[pp]] for pp in range(len(self.stats_periodic_mar_temp))], dtype=Dtype_r)
         self.stats_gaussianized_periodic_mar_temp_best_ph = np.array([self.stats_gaussianized_periodic_mar_temp[pp][best_phase_inds[pp]]
-                                                                      for pp in range(len(self.stats_periodic_mar_temp))])
+                                                                      for pp in range(len(self.stats_periodic_mar_temp))], dtype=Dtype_r)
         self.first_transit_times_best_ph = self.tmin + phases_best_ph
 
         # Same for gaussianized
@@ -3664,7 +3686,8 @@ class KeplerLightCurve(object):
                                                            for pp in range(len(self.stats_gaussianized_periodic_mar_temp))])
         phases_best_g_ph = np.array([self._phases[best_g_phase_inds[pp]] for pp in range(len(self.stats_gaussianized_periodic_mar_temp))])
         self.stats_gaussianized_periodic_mar_temp_best_g_ph = np.array([self.stats_gaussianized_periodic_mar_temp[pp][best_g_phase_inds[pp]]
-                                                                        for pp in range(len(self.stats_gaussianized_periodic_mar_temp))])
+                                                                        for pp in range(len(self.stats_gaussianized_periodic_mar_temp))],
+                                                                       dtype=Dtype_r)
         self.first_transit_times_best_g_ph = self.tmin + phases_best_g_ph
 
         if delete_non_maximized:
@@ -3902,7 +3925,7 @@ class KeplerLightCurve(object):
                          min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
                          min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction,
                          log_baseline_integral_score_rate=0,
-                         minimal_trackable_score=25, d_snr_2_tail=10,
+                         minimal_trackable_score=20.25, d_snr_2_tail=10,
                          dpi=D_period_integral_score, dphi=D_phase_integral_score):
         """
         TODO: write
@@ -3974,21 +3997,25 @@ class KeplerLightCurve(object):
         # We will avoid safety overlap regions later on
         flat_inds = ut.nanargsort(stats_periodic_mar_temp.flatten())
         sorting_inds = np.array([flat_inds // shap_x, flat_inds % shap_x]).T[::-1]
-        if max_trials is not None:
-            max_trials = min(max_trials, len(sorting_inds))
-        else:
+        if max_trials is None:
             max_trials = len(sorting_inds)
+        if minimal_trackable_score is not None:
+            stats_sorting_inds = np.array([stats_periodic_mar_temp[int(sorting_inds[index_counter][0]), int(sorting_inds[index_counter][1])]
+                                           for index_counter in range(len(sorting_inds))])
+            sorting_inds = sorting_inds[stats_sorting_inds >= minimal_trackable_score]
+            max_trials = min(max_trials, len(sorting_inds))
 
         if apply_veto_mes:
-            veto_mes_masks = np.ones_like(stats_periodic_mar_temp).astype(bool)
-            influence_matrix = np.zeros_like(stats_periodic_mar_temp)
+            if save_veto_masks:
+                veto_mes_masks = np.ones_like(stats_periodic_mar_temp).astype(bool)
+            influence_matrix = np.zeros_like(stats_periodic_mar_temp, dtype=np.float32)
             assert statistics_periodic is not None, 'self.statistics_periodic needed for finding the best template'
             best_per_index = None
             best_phase_index = None
             trigger_accepted = False
             index_counter = 0
             while (not trigger_accepted) and (index_counter < max_trials):
-                #  and (best_stat >= minimal_trackable_score or minimal_trackable_score is None or best_stat is None)):
+                # and (best_stat is None or best_stat >= minimal_trackable_score or minimal_trackable_score is None):
                 to_mark_influence = False
                 best_per_index = int(sorting_inds[index_counter][0])
                 best_phase_index = int(sorting_inds[index_counter][1])
@@ -4022,7 +4049,8 @@ class KeplerLightCurve(object):
                         is_good = False
                         to_mark_influence = True
                 if not is_good:
-                    veto_mes_masks[best_per_index, best_phase_index] = False
+                    if save_veto_masks:
+                        veto_mes_masks[best_per_index, best_phase_index] = False
                     # WARNING: we are zeroing the statistic which did not pass the veto for
                     # this statistic not to impact the integral score
 
@@ -4071,7 +4099,7 @@ class KeplerLightCurve(object):
                         # Updating the influence matrix with the new trigger:
                         influence_matrix[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right] = np.max([
                             influence_matrix[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right],
-                            influence_matrix_selected.astype(float) * peak_val], axis=0)
+                            influence_matrix_selected.astype(float) * peak_val], axis=0).astype(np.float32)
 
                     # ###############################################################################################
                     # Zeroing to avoid contribution to the integral:
@@ -4137,168 +4165,7 @@ class KeplerLightCurve(object):
                                                                         use_occurrence_rate=True,
                                                                         log_baseline_integral_score_rate=log_baseline_integral_score_rate)
             else:
-                self.best_g_template_index = np.nan
-                self.best_g_stat = np.nan
-                self.best_g_stat_gaussianized = np.nan
-                self.best_g_ftt = np.nan
-                self.best_g_integral_score = np.nan
-
-    def get_best_trigger_old(self, apply_veto_mes=True, fn_threshold=Fn_threshold_veto_mes, max_trials=Max_mes_veto_trials,
-                         in_gaussianized=False, save_veto_masks=False,
-                         min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
-                         min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction,
-                         log_baseline_integral_score_rate=0):
-        """
-        TODO: write
-        # ATTENTION. SINCE WE USE VETO OF SES, THERE WILL BE ZEROS, AND THE INTEGRAL WILL NOT BE FULL
-        # THEREFORE WE IN GENERAL LOSE SNR, BOT ALSO THE DISTRIBUTION WILL HAVE AN UNKNOWN VARIANCE
-
-        ATTENTION WARNING. The search was done on the statistics marginalized over templates. It is not well-defined then to
-        check individual transits of individual templates. It is possible to define something like first marginalize then compare,
-        but it is not the same. So it was decided in the end that we will only check the consistency of the best template.
-
-        The test is checking whether some transits are zeros. In fact, it is the biggest amplitude difference between the transits,
-        but it was derived to check zeroness. First, explicit zeros are checked. They can be there due to holes. And then,
-        the veto is used to test statistical zeros.
-
-        not applying score correction, we need to check whether it is more probable to have all equal transits or to have
-        some equal and some zeros
-        Creates:
-        self.best_stat : Best score (SNR squared marginalized over templates, corrected for single-event-distribution non-gaussianity)
-        self.best_per_index : Index in periods corresponding to the best score
-        self.best_phase_index : Index in phases corresponding to the best score
-        self.best_period : Period corresponding to the best score
-        self.best_ftt : First transit time corresponding to the best score
-        self.best_template_index : Index of best template at the point of the best score
-        self.best_stat_gaussianized : Gaussianized statistic at the position corresponding to `self.best_stat`
-        self.best_integral_score : The inegral over statistic with prior around the maximum
-        And the same with index _g_ for the maximum over the gaussianized score.
-        """
-        if not in_gaussianized:
-            stats_periodic_mar_temp = self.stats_periodic_mar_temp
-            statistics_periodic = self.statistics_periodic
-        else:
-            stats_periodic_mar_temp = self.stats_gaussianized_periodic_mar_temp
-            statistics_periodic = self.stats_gaussianized_periodic
-
-        stats_periodic_mar_temp_initial = np.array(stats_periodic_mar_temp)
-        # Finding period-phase bests list
-        shap_x = stats_periodic_mar_temp.shape[1]
-        # flat_inds = ut.nanargsort(stats_periodic_mar_temp[self.period_overlap_bins: len(
-        #     stats_periodic_mar_temp) - self.period_overlap_bins, :].flatten())
-        # sorting_inds = np.array([flat_inds // shap_x + self.period_overlap_bins, flat_inds % shap_x]).T[::-1]
-
-        # We will scan all the bins, including ones in the safety overlap region, because there can be large bad peaks there
-        # Which will contribute to the integral score and make it too large.
-        # We will avoid safety overlap regions later on
-        flat_inds = ut.nanargsort(stats_periodic_mar_temp.flatten())
-        sorting_inds = np.array([flat_inds // shap_x, flat_inds % shap_x]).T[::-1]
-        if max_trials is not None:
-            max_trials = min(max_trials, len(sorting_inds))
-        else:
-            max_trials = len(sorting_inds)
-
-        if apply_veto_mes:
-            veto_mes_masks = np.ones_like(stats_periodic_mar_temp).astype(bool)
-            assert statistics_periodic is not None, 'self.statistics_periodic needed for finding the best template'
-            best_per_index = None
-            best_phase_index = None
-            trigger_accepted = False
-            index_counter = 0
-            while (not trigger_accepted) and (index_counter < max_trials):
-                is_good = True
-                best_per_index = int(sorting_inds[index_counter][0])
-                best_phase_index = int(sorting_inds[index_counter][1])
-                best_period = self.periods[best_per_index]
-
-                best_ftt = self.tmin + self._phases[best_phase_index]
-                best_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=in_gaussianized,
-                                                                   ind_period=best_per_index, ind_phase=best_phase_index,
-                                                                   period=best_period)
-
-                summed_indices, summed_times, summed_stats_raw, summed_vars, summed_stats_raw_gauss, \
-                    summed_corrections = self.get_summed_values(first_transit_time=best_ftt,
-                                                                period=best_period, template=best_template_index,
-                                                                minimize_downsampling=True, return_results=True)
-                n_transits = len(summed_stats_raw)
-                non_zero_mask = (~np.isclose(summed_stats_raw, 0)) & (~np.isclose(summed_vars, 0)) & (~np.isnan(summed_stats_raw)) & (
-                    ~np.isinf(summed_vars))
-                n_non_zeros = len(np.where(non_zero_mask)[0])
-                if ((n_non_zeros < n_transits * min_required_nonzero_transits_fraction)
-                        or (n_non_zeros < min_required_nonzero_transits_number)):
-                    is_good = False
-                else:
-                    p_val = ut.unequal_amplitude_veto(summed_stats_raw, stat_vars=summed_vars, negative=True)
-                    if p_val >= fn_threshold:
-                        is_good = True
-                    else:
-                        is_good = False
-                if not is_good:
-                    veto_mes_masks[best_per_index, best_phase_index] = False
-                    # WARNING: we are zeroing the statistic which did not pass the veto for
-                    # this statistic not to impact the integral score
-                    stats_periodic_mar_temp[best_per_index, best_phase_index] = 0.
-                    # The values will be zeroed only if they are larger than the best trigger!
-                # If the trigger passed the veto, then me check whether it is not in the safety overlap region
-                if is_good:
-                    if ((best_per_index >= self.period_overlap_bins)
-                            and (best_per_index < len(stats_periodic_mar_temp) - self.period_overlap_bins)):
-                        trigger_accepted = True
-                index_counter += 1
-            if save_veto_masks:
-                if not in_gaussianized:
-                    self.veto_mes_masks = veto_mes_masks
-                else:
-                    self.veto_g_mes_masks = veto_mes_masks
-            if not trigger_accepted:
-                # raise ValueError('No MES passing veto was found after ' + str(index_counter) + ' trials!')
-                best_per_index, best_phase_index = np.nan, np.nan
-        else:
-            best_per_index, best_phase_index = sorting_inds[0]
-        if not in_gaussianized:
-            self.best_per_index = best_per_index
-            self.best_phase_index = best_phase_index
-            if (not np.isnan(best_per_index)) and (not np.isnan(best_phase_index)):
-                self.best_period = self.periods[self.best_per_index]
-                self.best_ftt = self.tmin + self._phases[self.best_phase_index]
-                if self.statistics_periodic is not None:
-                    self.best_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=False,
-                                                                            ind_period=self.best_per_index,
-                                                                            ind_phase=self.best_phase_index, period=self.best_period)
-                self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
-                self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
-                self.best_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
-                                                                          phase_ind_max=self.best_phase_index, gaussianized=False,
-                                                                          use_occurrence_rate=True,
-                                                                          log_baseline_integral_score_rate=log_baseline_integral_score_rate)
-            else:
-                self.best_period = np.nan
-                self.best_ftt = np.nan
-                self.best_template_index = np.nan
-                self.best_stat = np.nan
-                self.best_stat_gaussianized = np.nan
-                self.best_integral_score = np.nan
-
-        else:
-            self.best_g_per_index = best_per_index
-            self.best_g_phase_index = best_phase_index
-            if (not np.isnan(best_per_index)) and (not np.isnan(best_phase_index)):
-                self.best_g_period = self.periods[self.best_g_per_index]
-                if self.stats_gaussianized_periodic is not None:
-                    self.best_g_template_index = self.get_best_template_index(with_prior=True, in_gaussianized=True,
-                                                                              ind_period=self.best_g_per_index,
-                                                                              ind_phase=self.best_g_phase_index,
-                                                                              period=self.best_g_period)
-
-                self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
-                self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
-                self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
-                self.best_g_integral_score = self.get_integral_score_at_max(
-                                                                        per_ind_max=self.best_g_per_index,
-                                                                        phase_ind_max=self.best_g_phase_index, gaussianized=True,
-                                                                        use_occurrence_rate=True,
-                                                                        log_baseline_integral_score_rate=log_baseline_integral_score_rate)
-            else:
+                self.best_g_period = np.nan
                 self.best_g_template_index = np.nan
                 self.best_g_stat = np.nan
                 self.best_g_stat_gaussianized = np.nan
@@ -4417,8 +4284,10 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statis
 
 
 def get_minimal_processed_folded_klc(period, template_index='all', times=None, fluxes=None, target_id=None, get_data=False,
-                                     nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos, delta_period=0.1):
-    klc = KeplerLightCurve(target_id=target_id, get_data=get_data, times=times, fluxes=fluxes)
+                                     nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos, delta_period=0.1,
+                                     data_location=None, output_location=None, cut_edge_nans=False):
+    klc = KeplerLightCurve(target_id=target_id, get_data=get_data, times=times, fluxes=fluxes, cut_edge_nans=cut_edge_nans,
+                           data_location=data_location, output_location=output_location)
     klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
                        nsig_outliers_0_neg=nsig_outliers_0_neg,
                        nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
@@ -4431,5 +4300,44 @@ def get_minimal_processed_folded_klc(period, template_index='all', times=None, f
     klc.sum_periods(p_min=period - delta_period, p_max=period + delta_period)
     # -> we do not marginalize, so statistics are still not in units of snr squared
     return klc
+
+
+def get_fold_quickly(target_id, period, data_location=Default_data_location, output_location=Default_output_location,
+                     connected_statistic_data_filename_postfix=Default_connected_statistic_data_filename_postfix,
+                     conditioned_data_filename_postfix=Default_conditioned_data_filename_postfix,
+                     overlap_period_bins=P_bins_overlap):
+    klc = KeplerLightCurve(target_id=target_id, get_data=True, data_location=data_location, output_location=output_location)
+    file_path_connected_data = af.get_saving_file_path(output_location=klc.output_location, target_id=klc.target_id,
+                                                       filename_postfix=connected_statistic_data_filename_postfix, file_format='npy')
+    file_path_conditioned_data = af.get_saving_file_path(output_location=klc.output_location, target_id=klc.target_id,
+                                                         filename_postfix=conditioned_data_filename_postfix, file_format='npy')
+
+    if hasattr(klc, 'statistics_full') and (klc.statistics_full is not None):
+        pass
+    elif os.path.exists(file_path_connected_data):
+        klc.load_connected_stats(file_path=file_path_connected_data)
+    else:
+        if klc.statistics_raw is None or not hasattr(klc, 'statistics_raw'):
+            if os.path.exists(file_path_conditioned_data):
+                klc.load_conditioned_data(file=file_path_conditioned_data)
+                klc.initialize_templates()
+            else:
+                klc.condition_data()
+                klc.condition_templates()
+            klc.detect_single_transits(gaussianize=True)
+        klc.connect_quarters()
+    klc.interleave_shifts()
+
+    if not hasattr(period, '__len__'):
+        periods = np.ones(1) * period
+    else:
+        periods = np.array(period, dtype=float)
+    klc.periodicity_search(p_min=None, p_max=None, periods=periods,
+                           delete_full_stats=False, force_interleave_shifts=False,
+                           delete_periodic_interleaved=False,
+                           save_uncorrected_periodic=True, delete_non_marginalized=False,
+                           overlap_period_bins=overlap_period_bins)
+    return klc
+
 
 

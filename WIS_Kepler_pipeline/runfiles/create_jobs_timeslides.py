@@ -14,7 +14,9 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--trigger_list_file", type=str, nargs=1, help="path to file where to take triggers",
                     default=Triggers_for_slides_injections_file)
 args = parser.parse_args()
-trigger_list_file = args.trigger_list_file[0]
+trigger_list_file = args.trigger_list_file
+if isinstance(trigger_list_file, list):
+    trigger_list_file = trigger_list_file[0]
 
 with open(trigger_list_file, 'r') as tlf:
     trigs = tlf.readlines()
@@ -48,4 +50,6 @@ for ii in range(len(trig_ids)):
                            arg_jobind=False,
                            other_args=[['target_id', tid], ['period', per]])
 
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers_for_slides_injections.txt
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py --trigger_list_file /home/labs/barakz/orynai/run_11/threshold_crossing_scrambled_triggers_to_slide.txt
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py --trigger_list_file /home/labs/barakz/Collaboration-Kepler/orynai/triggers_global_slides_to_slide_rerun.txt

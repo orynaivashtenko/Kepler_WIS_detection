@@ -269,6 +269,38 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
     return np.nanstd(data[mask])
 
 
+def get_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
+    """
+    Calculates the standard deviation of the mean of the data with the following model. We assume that the
+    data points data[i] come from the model with distribution normal(mu, (stds[i]**2+sigma_global**2)**0.5).
+    The stds are known, and sigma_global is not known. The goal is to estimate mu and provide the error of this
+    estimate. This function provides the error of this estimate. It finds it from calculating the estimator
+    for sigma_global.
+    PROBLEM !!!: for some reason, we do not use the given stds.
+    :param data:
+    :type data:
+    :param stds:
+    :type stds:
+    :param mask:
+    :type mask:
+    :return:
+    :rtype:
+    """
+    if mask is None:
+        mask = ~np.isnan(data)
+    # if not hasattr(stds, '__len__'):
+    #     stds = np.ones(len(data)) * stds
+
+    data = np.array(data)[mask]
+    # vars = (np.array(stds)**2)[mask]
+    n_samples = len(data)
+
+    sum_data = np.sum(data)
+    sum_data_2 = np.sum(data ** 2)
+    var_of_mean_est = 1 / (n_samples * (n_samples - 1)) * (sum_data_2 - 1 / n_samples * sum_data ** 2)
+    return np.sqrt(var_of_mean_est)
+
+
 def get_average_dt(times):
     """
     take list of time arrays and get the average time step.
@@ -2978,3 +3010,26 @@ def rough_fold(array, period_bins):
         i2 = min(len(array), (i + 1) * period_bins)
         res[: i2 - i1] += array[i1: i2]
     return res
+
+
+def check_transit_overlap(period, ftt, period_ref, ftt_ref, n_transits, timing_error):
+    """
+    Checks if the transits of the ephemeris set by `ftt` and `period` overlap with the transits
+    of the ephemeris set by `ftt_ref` and `period_ref`. The overlap is defined by the transit centers being off
+    by less than `timing_error`. The transit durations are not taken into account.
+    """
+    ephemeris = np.arange(ftt, ftt + period * n_transits, period)[:n_transits]
+    ephemeris_ref = np.arange(ftt_ref, ftt + period * n_transits, period_ref)[:n_transits]
+    min_offsets = np.array([np.min(np.abs(ephemeris_ref - tt)) for tt in ephemeris])
+    overlap_mask = min_offsets < timing_error
+    return overlap_mask
+
+
+def calculate_p_planet_statistical(f_p, f_s, f_sc, pi_p, mu_m_mu_p=1):
+    g_p = f_p * pi_p
+    g_s = f_s * (1 - pi_p)
+    g_sc = f_sc * (1 - pi_p)
+    kap = mu_m_mu_p
+    return g_p * kap / (0.5 * (kap * (g_p + g_s) - (1 - kap) * g_p)
+                        + 0.5 * ((kap * (g_p + g_s) - (1 - kap) * g_p) ** 2
+                                 + 4 * g_p * kap * ((g_p + g_s) * (1 - kap) + g_sc - g_s)) ** 0.5)

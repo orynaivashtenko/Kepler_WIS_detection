@@ -15,12 +15,19 @@ parser.add_argument("--tids_list_file", type=str, nargs=1, help="path to file wh
 parser.add_argument("--runfile", type=str, nargs=1, help="whether main or alternative runfile (differs by output location)",
                     default="main")
 args = parser.parse_args()
-tids_list_file = args.tids_list_file[0]
-runfile = args.runfile[0]
+tids_list_file = args.tids_list_file
+runfile = args.runfile
+if isinstance(tids_list_file, list):
+    tids_list_file = tids_list_file[0]
+if isinstance(runfile, list):
+    runfile = runfile[0]
+
 if runfile == 'main':
     main_search_runfile_filename = Main_search_runfile_filename
-else:
+elif runfile == 'alternative':
     main_search_runfile_filename = 'runfile_main_search_alternative.py'
+else:
+    main_search_runfile_filename = Main_search_scramble_runfile_filename
 
 with open(tids_list_file, 'r') as ttrf:
     targ_ids = ttrf.readlines()
@@ -48,3 +55,5 @@ for target_id in targ_ids:
                        other_args=[['target_id', target_id]])
 
 # bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_some_stars.py
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_some_stars.py --tids_list_file /home/labs/barakz/orynai/run_11/not_run_tids.txt --runfile alternative
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_some_stars.py --tids_list_file /home/labs/barakz/orynai/run_11/not_run_tids_scrambled_run.txt --runfile scrambled

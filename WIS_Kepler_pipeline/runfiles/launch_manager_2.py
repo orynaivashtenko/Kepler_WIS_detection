@@ -47,6 +47,7 @@ while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_file
         time.sleep(30)  # sleep 30 seconds if the time to check did not yet come
 
 # bsub -q long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_2.py
+# bsub -q risk -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_2.py
 
 
 # ################################################################################################

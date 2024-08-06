@@ -20,10 +20,6 @@ parser.add_argument("--first_injection_load_parameters_index", type=str, nargs=1
 
 args = parser.parse_args()
 Target_id = args.target_id[0]
-# In the run_6, it used to be this:
-# First_injection_load_parameters_index = int(args.first_injection_load_parameters_index[0])
-# this should have been multiplied by N_injections_chunk????????:
-# So correct to this:
 First_injection_load_parameters_index = int(int(args.first_injection_load_parameters_index[0]) * N_injections_chunk)
 
 for i in range(First_injection_load_parameters_index, min(First_injection_load_parameters_index + N_injections_chunk, N_injections_total)):
