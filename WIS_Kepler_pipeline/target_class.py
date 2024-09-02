@@ -19,7 +19,7 @@ import utils as ut
 import time
 from pipeline_parameters import *  # all the parameters, physical constants, occurrence table
 from file_operations import report_exception, Locker, print_problem
-import trigger_class as tc
+import trigger_functions as tc
 
 # import warnings  #
 # warnings.filterwarnings("ignore")
@@ -103,8 +103,7 @@ duty_cycle
 
 
 class KeplerTarget(object):
-    star_attributes = ['stellar_radius', 'stellar_mass', 'kepmag', 'phot_g_mean_mag', 'parallax',
-                       'gaia_abs_gmag', 'gaia_b_r', 'teff', 'ra', 'dec', 'm_1_3_r_s']
+    star_attributes = Star_attributes
 
     def __init__(self, target_id='003097222', data_location=Data_location, output_location=Output_location,
                  load_pickled_attributes=False,
@@ -291,30 +290,30 @@ class KeplerTarget(object):
         """Index of the best trigger chunk in `self.best_candidates_concat`"""
         self.best_g_best_candidates_concat_index = None
         """Index of the best gaussianized trigger chunk in `self.best_candidates_concat`"""
-        self.log_baseline_integral_score_rate = None
+        self.log_baseline_int_score_rate = None
         """Value of integral score which is subtracted from all the integral scores. Subtraction removes the
            arbitrary units of rate and makes the scores relative. It is like having the statistic with 
            punishment for prior and parameter space measure. 
            The definition of the punishment is such that it vanishes at the m_1_3_r_s=1
            and the period chunk corresponding to the lowest period (30 days usually). 
-           This rate is a product of `self.log_baseline_integral_score_rate_density` 
+           This rate is a product of `self.log_baseline_int_score_rate_density` 
            and `self.log_baseline_phase_space_measure`. 
            It also makes scores comparable between different stars with different m_1_3_r_s."""
         self.baseline_rate_period = None
-        """Period used fo compute `self.log_baseline_integral_score_rate`"""
-        self.log_baseline_integral_score_rate_density = None
+        """Period used fo compute `self.log_baseline_int_score_rate`"""
+        self.log_baseline_int_score_rate_density = None
         """Log density of occurrence per d_period and d_first_transit time. Occurrence is for planets of all radii 
            summed."""
         self.dp_0 = None
         """Period step in the reference chunk (smallest-period chunk with vanishing baseline density correction).
-           Is used in `self.log_baseline_phase_space_measure` which is needed for `self.log_baseline_integral_score_rate`
+           Is used in `self.log_baseline_phase_space_measure` which is needed for `self.log_baseline_int_score_rate`
         """
         self.d_ftt_0 = None
         """Phase step in the reference chunk (smallest-period chunk with vanishing baseline density correction).
-           Is used in `self.log_baseline_phase_space_measure` which is needed for `self.log_baseline_integral_score_rate`
+           Is used in `self.log_baseline_phase_space_measure` which is needed for `self.log_baseline_int_score_rate`
         """
         self.log_baseline_phase_space_measure = None
-        """Is equal to np.log(`self.dp_0` * `self.d_ftt_0`), is used in `self.log_baseline_integral_score_rate`. 
+        """Is equal to np.log(`self.dp_0` * `self.d_ftt_0`), is used in `self.log_baseline_int_score_rate`. 
         """
         self.best_stat = None
         """Best score in the search pipeline - see `search_pipeline.py`"""
@@ -326,9 +325,9 @@ class KeplerTarget(object):
         """First transit time corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
         self.best_gauss_stat = None
         """Gaussianized statistic corresponding to the best score in the search pipeline - see `search_pipeline.py`"""
-        self.best_integral_score = None
+        self.best_int_score = None
         """Integral coherent score corresponding to the best score in the search pipeline - see `search_pipeline.py`.
-           Note that the `self.log_baseline_integral_score_rate` was subtracted"""
+           Note that the `self.log_baseline_int_score_rate` was subtracted"""
         self.best_g_stat = None
         """Statistic corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_per = None
@@ -339,7 +338,7 @@ class KeplerTarget(object):
         """First transit time corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.best_g_gauss_stat = None
         """Best gaussianized score in the search pipeline - see `search_pipeline.py`"""
-        self.best_g_integral_score = None
+        self.best_g_int_score = None
         """Integral coherent score corresponding to the best gaussianized score in the search pipeline - see `search_pipeline.py`"""
         self.summed_transit_times = None  # times of values that were summed to produce the best trigger
         """Approximate times when the individual transits of the best trigger happened"""
@@ -416,7 +415,7 @@ class KeplerTarget(object):
         """List of detected first transit times of injections which were successfully detected"""
         self.retrieved_gauss_stat_success = None
         """List of detected gaussianized statistics of injections which were successfully detected"""
-        self.retrieved_integral_score_success = None
+        self.retrieved_int_score_success = None
         """List of detected integral coherent scores of injections which were successfully detected"""
         self.retrieved_g_stat_success = None
         """List of detected (in the best gaussianized sense) of statistics of injections which were successfully detected"""
@@ -426,7 +425,7 @@ class KeplerTarget(object):
         """List of detected (in the best gaussianized sense) of first transit times of injections which were successfully detected"""
         self.retrieved_g_gauss_stat_success = None
         """List of detected (in the best gaussianized sense) of gaussianized statistics of injections which were successfully detected"""
-        self.retrieved_g_integral_score_success = None
+        self.retrieved_g_int_score_success = None
         """List of detected (in the best gaussianized sense) on integral coherent scores of injections which were successfully detected"""
 
         self.per_inj_bad = None
@@ -451,7 +450,7 @@ class KeplerTarget(object):
         """List of detected first transit times of injections which were missed by the search"""
         self.retrieved_gauss_stat_bad = None
         """List of detected gaussianized statistics of injections which were missed by the search"""
-        self.retrieved_integral_score_bad = None
+        self.retrieved_int_score_bad = None
         """List of detected integral coherent scores of injections which were missed by the search"""
         self.retrieved_g_stat_bad = None
         """List of detected (in the best gaussianized sense) of statistics of injections which were missed by the search"""
@@ -461,7 +460,7 @@ class KeplerTarget(object):
         """List of detected (in the best gaussianized sense) of first transit times of injections which were missed by the search"""
         self.retrieved_g_gauss_stat_bad = None
         """List of detected (in the best gaussianized sense) of gaussianized statistics of injections which were missed by the search"""
-        self.retrieved_g_integral_score_bad = None
+        self.retrieved_g_int_score_bad = None
         """List of detected (in the best gaussianized sense) on integral coherent scores of injections which were missed by the search"""
 
         self.number_of_success_injections = None
@@ -519,6 +518,42 @@ class KeplerTarget(object):
         """Total number of time-scramblings made"""
 
         # Significance evaluation attributes:
+        # Integral:
+        self.bins_int_score_histogram = None
+        """Bins used to build the distribution of the integral score of the time-scrambling and injections"""
+        self.bins_int_score_histogram_inj = None
+        """Bins used to build the distribution of the integral score of the injections"""
+        self.bins_int_score_histogram_bg = None
+        """Bins used to build the distribution of the integral score of the time-scrambling"""
+        self.bins_int_score_histogram_bg_clean = None
+        """Bins used to build the distribution of the integral score of the time-scrambling with removed trigger"""
+        self.distr_int_score_h0 = None
+        """Histogram of distribution of the integral score of the time-scrambling"""
+        self.distr_int_score_h0_clean = None
+        """Histogram of distribution of the integral score of the time-scrambling with removed trigger"""
+        self.distr_int_score_inj_all = None
+        """Histogram of distribution of the integral score of the injections (successful and missed together)"""
+        self.distr_int_score_inj_success = None
+        """Histogram of distribution of the integral score of the successful injections"""
+        self.prob_density_h0_trigger = None
+        """Probability density (see units in description) of the background at the location of the trigger (integral score)"""
+        self.prob_density_h0_clean_trigger = None
+        """Probability density (see units in description) of the background with removed trigger at the location 
+           of the trigger (integral score)"""
+        self.false_alarm_prob_trigger = None
+        """False-alarm probability of the trigger estimated from the time-scrambling (integral score)"""  # TODO look-elsewhere
+        self.prob_density_h1_trigger = None
+        """Probability density (see units in description) of the expected planets at the location of the trigger (integral score)"""
+        self.prob_density_planet_not_noise = None  # TODO not good name density
+        """Probability of the trigger to originate from the planet and not from the noise (integral score)"""
+        self.extrapolation_coefs_int_score_h0_hist = None
+        """Pair of coefficients describing the linear extrapolation of the background distribution of the integral score
+           up to the location of the trigger"""
+        self.extrapolation_coefs_int_score_h0_clean_hist = None
+        """Pair of coefficients describing the linear extrapolation of the background distribution with the removed trigger
+           of the integral score up to the location of the trigger"""
+
+        # Statistic
         self.bins_stat_histogram = None
         """Bins used to build the distribution of the statistics of the time-scrambling and injections"""
         self.bins_stat_histogram_inj = None
@@ -535,17 +570,12 @@ class KeplerTarget(object):
         """Histogram of distribution of the statistics of the injections (successful and missed together)"""
         self.distr_stat_inj_success = None
         """Histogram of distribution of the statistics of the successful injections"""
-        # self.extrapolation_coefs_stat_h0_hist = None  # TODO
-        self.prob_density_h0_trigger = None
-        """Probability density (see units in description) of the background at the location of the trigger"""
-        self.false_alarm_prob_trigger = None
-        """False-alarm probability of the trigger estimated from the time-scrambling"""  # TODO look-elsewhere
-        self.prob_density_h1_trigger = None
-        """Probability density (see units in description) of the expected planets at the location of the trigger"""
-        self.prob_density_planet_not_noise = None  # TODO not good name density
-        """Probability of the trigger to originate from the planet and not from the noise"""
         self.extrapolation_coefs_stat_h0_hist = None
-        """Pair of coefficients describing the linear extrapolation of the background distribution up to the location of the trigger"""
+        """Pair of coefficients describing the linear extrapolation of the background distribution of the statistic
+           up to the location of the trigger"""
+        self.extrapolation_coefs_stat_h0_hist_clean = None
+        """Pair of coefficients describing the linear extrapolation of the background distribution with the removed trigger
+           of the statistic up to the location of the trigger"""
 
         # Gaussianized statistic (still for the location of the best non-gaussianized score):
         self.bins_gauss_stat_histogram = None
@@ -658,14 +688,17 @@ class KeplerTarget(object):
             output_location = self.output_location
         file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
                                             filename_postfix=pickle_small_attributes_filename_postfix, file_format='pickle')
+        dict_of_old_locations = {}
+        for key in Location_attributes:
+            dict_of_old_locations[key] = self.__dict__[key]
 
-        old_output_location = self.output_location
-        old_data_location = self.data_location
-        old_gaia_kepler_file_path = self.gaia_kepler_file
-        old_koi_dict_file = self.koi_dict_file
-        old_ttv_dict_file = self.ttv_dict_file
-        old_villanova_dict_file = self.villanova_dict_file
-        old_limb_darkening_array_file = self.limb_darkening_array_file
+        # old_output_location = self.output_location
+        # old_data_location = self.data_location
+        # old_gaia_kepler_file_path = self.gaia_kepler_file
+        # old_koi_dict_file = self.koi_dict_file
+        # old_ttv_dict_file = self.ttv_dict_file
+        # old_villanova_dict_file = self.villanova_dict_file
+        # old_limb_darkening_array_file = self.limb_darkening_array_file
 
         if os.path.exists(file_path):
             with open(file_path, 'rb') as pickle_file:
@@ -673,13 +706,15 @@ class KeplerTarget(object):
                 self.__dict__.update(dict1.items())
 
             if not overwrite_location_parameters:
-                self.data_location = old_data_location
-                self.output_location = old_output_location
-                self.gaia_kepler_file = old_gaia_kepler_file_path
-                self.koi_dict_file = old_koi_dict_file
-                self.ttv_dict_file = old_ttv_dict_file
-                self.villanova_dict_file = old_villanova_dict_file
-                self.limb_darkening_array_file = old_limb_darkening_array_file
+                for key in Location_attributes:
+                    self.__dict__[key] = dict_of_old_locations[key]
+                # self.data_location = old_data_location
+                # self.output_location = old_output_location
+                # self.gaia_kepler_file = old_gaia_kepler_file_path
+                # self.koi_dict_file = old_koi_dict_file
+                # self.ttv_dict_file = old_ttv_dict_file
+                # self.villanova_dict_file = old_villanova_dict_file
+                # self.limb_darkening_array_file = old_limb_darkening_array_file
 
     def get_fields_from_gaia(self, gaia_file_path=None):
         """
@@ -847,7 +882,8 @@ class KeplerTarget(object):
         for key in self.__dict__:
             if key not in fields_not_to_print:
                 value = self.__dict__[key]
-                if isinstance(value, (str, float, int, np.float32, np.integer, np.ndarray, list, dict)):  # float is np.float64 but not 32!
+                if isinstance(value, (str, float, int, np.float32, np.integer, np.ndarray, list, dict)):
+                    # -> float is np.float64 but not 32!
                     ok_to_print = True
                     if hasattr(value, '__len__') and len(value) > 0:
                         if isinstance(value, dict) and hasattr(value[list(value.keys())[0]], '__len__'):
@@ -855,7 +891,7 @@ class KeplerTarget(object):
                         elif ((not isinstance(value, dict)) and (not isinstance(value, str))
                               and hasattr(value[0], '__len__')):
                             ok_to_print = False  # not printing nested lists
-                        elif (not isinstance(value, str)) and len(value) > 40:
+                        elif (not isinstance(value, str)) and len(value) > 50:
                             # roughly to be able to set summed values for planets with period 30
                             ok_to_print = False
                     if key == 'errors' or key == 'failures':
@@ -888,7 +924,7 @@ class KeplerTarget(object):
                     print(attr, ':', self.__dict__[attr], file=fil1)
                 print('', file=fil1)
 
-                print('best_int_score', ':', self.best_integral_score, file=fil1)
+                print('best_int_score', ':', self.best_int_score, file=fil1)
                 print('best_stat', ':', self.best_stat, file=fil1)
                 print('best_per', ':', self.best_per, file=fil1)
                 print('best_ftt', ':', self.best_ftt, file=fil1)
@@ -896,7 +932,7 @@ class KeplerTarget(object):
                 print('best_temp', ':', self.best_temp, file=fil1)
 
                 print('', file=fil1)
-                print('best_g_int_score', ':', self.best_g_integral_score, file=fil1)
+                print('best_g_int_score', ':', self.best_g_int_score, file=fil1)
                 print('best_g_stat', ':', self.best_g_stat, file=fil1)
                 print('best_g_per', ':', self.best_g_per, file=fil1)
                 print('best_g_ftt', ':', self.best_g_ftt, file=fil1)
@@ -908,7 +944,7 @@ class KeplerTarget(object):
                 print(attr, ':', self.__dict__[attr])
             print('')
 
-            print('best_int_score', ':', self.best_integral_score)
+            print('best_int_score', ':', self.best_int_score)
             print('best_stat', ':', self.best_stat)
             print('best_per', ':', self.best_per)
             print('best_ftt', ':', self.best_ftt)
@@ -916,7 +952,7 @@ class KeplerTarget(object):
             print('best_temp', ':', self.best_temp)
 
             print('')
-            print('best_g_int_score', ':', self.best_g_integral_score)
+            print('best_g_int_score', ':', self.best_g_int_score)
             print('best_g_stat', ':', self.best_g_stat)
             print('best_g_per', ':', self.best_g_per)
             print('best_g_ftt', ':', self.best_g_ftt)
@@ -989,6 +1025,7 @@ class KeplerTarget(object):
             self.is_bad_fft = False
         else:
             self.is_bad_fft = True
+            self.is_good_for_processing = False
 
     def check_detectable_radius(self, stellar_radius=None, snr_thresh=Stat_candidate_search ** 0.5 - 1,
                                 rp_re_max=Rp_re_max, rp_rs_max=Rp_rs_max):
@@ -1024,6 +1061,7 @@ class KeplerTarget(object):
         if snr_max < snr_thresh:
             self.failures = self.failures + ' too_large_noise; '
             self.is_bad_fft = True
+            self.is_good_for_processing = False
 
     def get_predicted_snr_flux(self, flux_model, period, depth_factor=1., rp_rs=0.02, wf_fd=None, n_quarters=16,
                                include_detrending=True, nperseg_psd=128,
@@ -1194,7 +1232,10 @@ class KeplerTarget(object):
         return rps_res
 
     def mask_koi_planet(self, modify_self_klc=True, return_durations_transit_times=False,
-                        include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives):
+                        mask_candidates=Mask_kepler_candidates, mask_false_positives=Mask_kepler_false_positives,
+                        mask_bright_candidates=Mask_kepler_bright_candidates,
+                        bright_candidate_mes=Kepler_bright_candidate_mes,
+                        bright_candidate_ses=Kepler_bright_candidate_ses):
         """
         Take the information of the KIO of this target that are saved in the class instance fields. Find the times and the
         durations of transits of these planets. If `modify_self_klc` is True, then in the KeplerLightCurve attribute
@@ -1203,27 +1244,37 @@ class KeplerTarget(object):
         :type modify_self_klc: bool
         :param return_durations_transit_times: Whether to return the durations and the transit times of KOI planets.
         :type return_durations_transit_times: bool
-        :param include_candidates: Whether to include in the process the Kepler planets with status 'Candidate',
+        :param mask_candidates: Whether to include in the process the Kepler planets with status 'Candidate',
             as opposed to 'Confirmed'.
-        :type include_candidates: bool
-        :param include_false_positives: Whether to include Kepler official false positives. Warning: sometimes, there is
+        :type mask_candidates: bool
+        :param mask_false_positives: Whether to include Kepler official false positives. Warning: sometimes, there is
             no ephemeris provided for them!
-        :type include_false_positives: bool
+        :type mask_false_positives: bool
         :return: durations_and_times, durations and the transit times of KOI planets of this target
         :rtype: list of list(numpy.ndarray 1d, numpy.ndarray 1d)
         """
-        # TODO We could also subtract villanova ephemeris.
         # TODO: include occultation (secondary transit)
         assert self.is_koi, 'The target is not KOI, so the KOI planet cannot be masked!'
         # Take all the transit times with TTV, take transit duration, take fractional TDV and mask.
         durations_and_times = []
         for i, koi_name in enumerate(self.koi_dict['kepoi_name']):
-            # In Run 8, we will only mask confirmed or false positives, we will leave the candidates.
-            if ((self.koi_dict['koi_disposition'][i] == 'CONFIRMED' and self.koi_dict['koi_pdisposition'][i] == 'CANDIDATE')
-                    or (self.koi_dict['koi_disposition'][i] == 'FALSE POSITIVE'
-                        and self.koi_dict['koi_pdisposition'][i] == 'FALSE POSITIVE'
-                        and include_false_positives)
-                    or include_candidates):
+            # Deciding whether to mask:
+            to_mask = False
+            if self.koi_dict['koi_disposition'][i] == 'CONFIRMED':
+                to_mask = True
+            elif mask_false_positives:
+                if self.koi_dict['koi_disposition'][i] == 'FALSE POSITIVE' or self.koi_dict['koi_pdisposition'][i] == 'FALSE POSITIVE':
+                    to_mask = True
+            elif mask_candidates:
+                if self.koi_dict['koi_disposition'][i] == 'CANDIDATE' or self.koi_dict['koi_pdisposition'][i] == 'CANDIDATE':
+                    to_mask = True
+            elif mask_bright_candidates:
+                if self.koi_dict['koi_disposition'][i] == 'CANDIDATE' or self.koi_dict['koi_pdisposition'][i] == 'CANDIDATE':
+                    if float(self.koi_dict['koi_max_mult_ev'][i]) >= bright_candidate_mes or \
+                            float(self.koi_dict['koi_max_sngle_ev'][i]) >= bright_candidate_ses:
+                        to_mask = True
+            # If decided that we need to mask:
+            if to_mask:
                 transit_durations = None  # just initialization, no meaning
                 transit_times = None
                 was_in_ttv = False
@@ -1329,13 +1380,14 @@ class KeplerTarget(object):
 
         if len(self.klc.quarters) < min_quarters_to_process:
             self.is_too_short = True  # too few quarters to search for a 50-day period
+            self.is_good_for_processing = False
         else:
             self.is_too_short = False
             self.bad_fft_check()  # Made on orig_fluxes
             if (not self.is_bad_fft) or (not stop_if_bad):
                 if self.is_koi and mask_koi_planet:
-                    self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
-                                         include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives)
+                    self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False, mask_candidates=Mask_kepler_candidates,
+                                         mask_false_positives=Mask_kepler_false_positives)
                     # Attention: we do not mask candidates
                 self.klc.condition_data()
                 self.was_notched = self.klc.was_notched
@@ -1398,8 +1450,8 @@ class KeplerTarget(object):
             if self.is_koi and (mask_koi_planet or (self.is_koi_planet_masked and mask_koi_planet is None)):
                 # the latter is from the pickled attributes, meaning
                 # that the saved connected data is probably also with the masked koi planet
-                self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
-                                     include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives)
+                self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False, mask_candidates=Mask_kepler_candidates,
+                                     mask_false_positives=Mask_kepler_false_positives)
                 # # if there are only candidates, it will not mask
         file_path_connected_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                                            filename_postfix=connected_statistic_data_filename_postfix, file_format='npy')
@@ -1487,14 +1539,14 @@ class KeplerTarget(object):
         self.baseline_rate_period = baseline_rate_period
         self.d_ftt_0 = tm.dt_lc  # Should be taken from KeplerLightCurve._phases, but hopefully, this is correct
         # Preparing densities for renormalizing the integral score
-        self.log_baseline_integral_score_rate_density = np.log(tm.get_number_of_transiting_planets_density_per_dp(
+        self.log_baseline_int_score_rate_density = np.log(tm.get_number_of_transiting_planets_density_per_dp(
             baseline_rate_period, m_1_3_r_s=1., dp=1.
         ) / baseline_rate_period)
         # -> the function gives density per dp, and dividing it by the period, we get it also for dt.
 
         self.log_baseline_phase_space_measure = np.log(self.dp_0 * self.d_ftt_0)
-        self.log_baseline_integral_score_rate = (self.log_baseline_integral_score_rate_density
-                                                 + self.log_baseline_phase_space_measure)
+        self.log_baseline_int_score_rate = (self.log_baseline_int_score_rate_density
+                                            + self.log_baseline_phase_space_measure)
 
     def run_periodicity_search(self, p_min=P_min_search, p_max=P_max_search, duty_cycle=spip.Duty_cycle,
                                per_phases_per_chunk=Per_phases_per_chunk,
@@ -1615,11 +1667,11 @@ class KeplerTarget(object):
                     self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False, save_veto_masks=save_veto_masks,
                                               min_required_nonzero_transits_number=min_required_nonzero_transits_number,
                                               min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
-                                              log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
+                                              log_baseline_integral_score_rate=self.log_baseline_int_score_rate)
                     self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=True, save_veto_masks=save_veto_masks,
                                               min_required_nonzero_transits_number=min_required_nonzero_transits_number,
                                               min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
-                                              log_baseline_integral_score_rate=self.log_baseline_integral_score_rate)
+                                              log_baseline_integral_score_rate=self.log_baseline_int_score_rate)
                     self.klc.make_best_periodic_scores()
                     if np.isnan(self.klc.best_period):
                         self.print_problem(text=problem_description + 'No trigger found after veto MES for pers='
@@ -1705,7 +1757,7 @@ class KeplerTarget(object):
                 [best_periodic_scores[i][spip.Best_per_results_index_stats][ind_gauss] for i in range(len(best_periodic_scores))])
             g_periods_res = np.array(
                 [best_periodic_scores[i][spip.Best_per_results_index_per][ind_gauss] for i in range(len(best_periodic_scores))])
-            g_integral_scores_res = np.array(
+            g_int_scores_res = np.array(
                 [best_periodic_scores[i][spip.Best_per_results_index_best_integral][ind_gauss] for i in range(len(best_periodic_scores))])
             g_ftts_res = np.array(
                 [best_periodic_scores[i][spip.Best_per_results_index_ftt][ind_gauss] for i in range(len(best_periodic_scores))])
@@ -1716,7 +1768,7 @@ class KeplerTarget(object):
 
             # Determining TCEs among [chunks maxima in non-gaussianized sense]
             trigger_mask = integral_scores_res >= Stat_candidate_search
-            triggering_integral_scores = integral_scores_res[trigger_mask]
+            triggering_int_scores = integral_scores_res[trigger_mask]
             triggering_stats = stats_res[trigger_mask]
             triggering_periods = periods_res[trigger_mask]
             triggering_ftts = ftts_res[trigger_mask]
@@ -1724,7 +1776,7 @@ class KeplerTarget(object):
             triggering_max_templs = max_templs_res[trigger_mask]
 
             self.triggers = [[] for _ in range(spip.Best_per_results_length)]
-            self.triggers[spip.Best_per_results_index_best_integral] = triggering_integral_scores
+            self.triggers[spip.Best_per_results_index_best_integral] = triggering_int_scores
             self.triggers[spip.Best_per_results_index_stats] = triggering_stats
             self.triggers[spip.Best_per_results_index_per] = triggering_periods
             self.triggers[spip.Best_per_results_index_ftt] = triggering_ftts
@@ -1733,21 +1785,21 @@ class KeplerTarget(object):
 
             if save_to_threshold_crossing_list:
                 with open(threshold_crossing_list_multiple_triggers_file, 'a') as fil1:  # will save here these good targets
-                    for i in range(len(triggering_integral_scores)):
-                        triggering_integral_score = triggering_integral_scores[i]
+                    for i in range(len(triggering_int_scores)):
+                        triggering_int_score = triggering_int_scores[i]
                         triggering_stat = triggering_stats[i]
                         triggering_period = triggering_periods[i]
                         triggering_ftt = triggering_ftts[i]
                         triggering_max_templ = triggering_max_templs[i]
                         triggering_stat_gauss = triggering_stats_gauss[i]
                         tc.print_trigger_line(target_id=self.target_id, stat=triggering_stat, per=triggering_period, ftt=triggering_ftt,
-                                              gauss_stat=triggering_stat_gauss, integral_score=triggering_integral_score,
+                                              gauss_stat=triggering_stat_gauss, integral_score=triggering_int_score,
                                               template=triggering_max_templ, file=fil1, sep=' ', end='\n')
 
             # Determining TCEs among [chunks maxima in gaussianized sense]
             # SAME FOR GAUSS BUT A DIFFERENT ORDER OF SAVING: GAUSS STAT GOES FIRST< AND THE INTEGRAL WAS ALSO MADE ON GAUSS
-            g_trigger_mask = g_integral_scores_res >= Stat_candidate_search
-            g_triggering_integral_scores = g_integral_scores_res[g_trigger_mask]
+            g_trigger_mask = g_int_scores_res >= Stat_candidate_search
+            g_triggering_int_scores = g_int_scores_res[g_trigger_mask]
             g_triggering_stats = g_stats_res[g_trigger_mask]
             g_triggering_periods = g_periods_res[g_trigger_mask]
             g_triggering_ftts = g_ftts_res[g_trigger_mask]
@@ -1755,7 +1807,7 @@ class KeplerTarget(object):
             g_triggering_max_templs = g_max_templs_res[g_trigger_mask]
 
             self.g_triggers = [[] for _ in range(spip.Best_per_results_length)]
-            self.g_triggers[spip.Best_per_results_index_best_integral] = g_triggering_integral_scores
+            self.g_triggers[spip.Best_per_results_index_best_integral] = g_triggering_int_scores
             self.g_triggers[spip.Best_per_results_index_stats] = g_triggering_stats
             self.g_triggers[spip.Best_per_results_index_per] = g_triggering_periods
             self.g_triggers[spip.Best_per_results_index_ftt] = g_triggering_ftts
@@ -1764,8 +1816,8 @@ class KeplerTarget(object):
 
             if save_to_threshold_crossing_list:
                 with open(threshold_g_crossing_list_multiple_triggers_file, 'a') as fil1:  # will save here these good targets
-                    for i in range(len(g_triggering_integral_scores)):
-                        g_triggering_integral_score = g_triggering_integral_scores[i]
+                    for i in range(len(g_triggering_int_scores)):
+                        g_triggering_int_score = g_triggering_int_scores[i]
                         g_triggering_stat = g_triggering_stats[i]
                         g_triggering_period = g_triggering_periods[i]
                         g_triggering_ftt = g_triggering_ftts[i]
@@ -1773,7 +1825,7 @@ class KeplerTarget(object):
                         g_triggering_stat_gauss = g_triggering_stats_gauss[i]
                         tc.print_trigger_line(target_id=self.target_id, stat=g_triggering_stat, per=g_triggering_period,
                                               ftt=g_triggering_ftt,
-                                              gauss_stat=g_triggering_stat_gauss, integral_score=g_triggering_integral_score,
+                                              gauss_stat=g_triggering_stat_gauss, integral_score=g_triggering_int_score,
                                               template=g_triggering_max_templ, file=fil1, sep=' ', end='\n')
         else:
             self.triggers = [[] for _ in range(spip.Best_per_results_length)]
@@ -1795,39 +1847,32 @@ class KeplerTarget(object):
         :param best_candidates_concat: The properly formatted list of the best candidates from every chunk
         :type best_candidates_concat: list of lists of length 2
         """
-        #     delta_period = 0.5
-        #     delta_integral = 0.2
-        #     delta_stat = 1.
-        #     for ii, tid in enumerate(tids_tce_set):
-        #         triggers_per_tid = [all_triggers[i] for i in range(len(all_triggers)) if all_triggers[i][0] == tid]
-        #         max_trigger = triggers_per_tid[np.argmax([triggers_per_tid[i][1] for i in range(len(triggers_per_tid))])]
-        #         for trigger in triggers_per_tid:
-        #             if (np.abs(trigger[3] - max_trigger[3]) < delta_period) and (max_trigger[1] - trigger[1] < delta_integral) and (
-        #                     trigger[2] - max_trigger[2] > delta_stat):
-        #                 max_trigger = trigger
-        #         max_triggers_tids.append(max_trigger)
-
         self.best_best_candidates_concat_index = None
         self.best_g_best_candidates_concat_index = None
         if len(best_candidates_concat) > 0:
-            self.best_integral_score = -np.inf
+            self.best_int_score = -np.inf
+            ii_last = None
             for ii, best_candidates in enumerate(best_candidates_concat):  # if there is a big MES score, further processing
                 scormax = best_candidates[spip.Best_per_results_index_best_integral][0]
                 stat = best_candidates[spip.Best_per_results_index_stats][0]
                 assign = False
-                if (self.best_integral_score is None or self.best_stat is None
-                        or np.isnan(self.best_integral_score) or np.isnan(self.best_stat)):
-                    assign = True
-                else:
-                    delta_integral = scormax - self.best_integral_score
-                    delta_stat = stat - self.best_stat
-                    if ((not np.isnan(scormax))
-                            and ((delta_integral >= - delta_stat * (delta_integral_close / delta_stat_close)
-                                  or (self.best_integral_score == -np.inf))
-                                 )):
+                if not np.isnan(scormax):
+                    if (self.best_int_score is None or self.best_stat is None
+                            or np.isnan(self.best_int_score) or np.isnan(self.best_stat) or (self.best_int_score == -np.inf)):
                         assign = True
+                    else:
+                        delta_integral = scormax - self.best_int_score
+                        if ii_last is not None and (ii - ii_last == 1):
+                            # -> if we are only one chunk away from the previous peak, then it can be that
+                            # one of the chunks contains the true peak, but the integral is in the other chunk captured it from the
+                            # overlap, but does not point to the peak itself.
+                            delta_stat = stat - self.best_stat
+                            if delta_integral >= - delta_stat * (delta_integral_close / delta_stat_close):
+                                assign = True
+                        elif delta_integral >= 0:
+                            assign = True
                 if assign:
-                    self.best_integral_score = scormax
+                    self.best_int_score = scormax
                     self.best_stat = best_candidates[spip.Best_per_results_index_stats][0]
                     self.best_per = best_candidates[spip.Best_per_results_index_per][0]
                     self.best_ftt = best_candidates[spip.Best_per_results_index_ftt][0]
@@ -1837,23 +1882,36 @@ class KeplerTarget(object):
                     else:
                         self.best_temp = np.nan
                     self.best_best_candidates_concat_index = ii
-            self.best_g_integral_score = -np.inf
+                    ii_last = ii
+            if self.best_int_score == -np.inf:
+                self.best_int_score = np.nan
+                self.best_stat = np.nan
+                self.best_per = np.nan
+                self.best_ftt = np.nan
+                self.best_gauss_stat = np.nan
+                self.best_temp = np.nan
+
+            # Same for g_trigger:
+            self.best_g_int_score = -np.inf
+            ii_last = None
             for ii, best_candidates in enumerate(best_candidates_concat):  # if there is a big MES score, further processing
                 scormax = best_candidates[spip.Best_per_results_index_best_integral][1]
                 stat = best_candidates[spip.Best_per_results_index_stats][1]
                 assign = False
-                if (self.best_g_integral_score is None or self.best_g_stat is None
-                        or np.isnan(self.best_g_integral_score) or np.isnan(self.best_g_stat)):
-                    assign = True
-                else:
-                    delta_integral = scormax - self.best_g_integral_score
-                    delta_stat = stat - self.best_g_stat
-                    if ((not np.isnan(scormax))
-                            and ((delta_integral >= - delta_stat * (delta_integral_close / delta_stat_close)
-                                  or (self.best_g_integral_score == -np.inf)))):
+                if not np.isnan(scormax):
+                    if (self.best_g_int_score is None or self.best_g_stat is None
+                            or np.isnan(self.best_g_int_score) or np.isnan(self.best_g_stat) or (self.best_g_int_score == -np.inf)):
                         assign = True
+                    else:
+                        delta_integral = scormax - self.best_g_int_score
+                        if ii_last is not None and (ii - ii_last == 1):
+                            delta_stat = stat - self.best_g_stat
+                            if delta_integral >= - delta_stat * (delta_integral_close / delta_stat_close):
+                                assign = True
+                        elif delta_integral >= 0:
+                            assign = True
                 if assign:
-                    self.best_g_integral_score = scormax
+                    self.best_g_int_score = scormax
                     self.best_g_stat = best_candidates[spip.Best_per_results_index_stats][1]
                     self.best_g_per = best_candidates[spip.Best_per_results_index_per][1]
                     self.best_g_ftt = best_candidates[spip.Best_per_results_index_ftt][1]
@@ -1863,52 +1921,65 @@ class KeplerTarget(object):
                     else:
                         self.best_g_temp = np.nan
                     self.best_g_best_candidates_concat_index = ii
+                    ii_last = ii
+            if self.best_g_int_score == -np.inf:
+                self.best_g_int_score = np.nan
+                self.best_g_stat = np.nan
+                self.best_g_per = np.nan
+                self.best_g_ftt = np.nan
+                self.best_g_gauss_stat = np.nan
+                self.best_g_temp = np
         else:
-            self.best_integral_score = np.nan
+            self.best_int_score = np.nan
             self.best_stat = np.nan
             self.best_per = np.nan
             self.best_ftt = np.nan
             self.best_gauss_stat = np.nan
             self.best_temp = np.nan
-            self.best_g_integral_score = np.nan
+            self.best_g_int_score = np.nan
             self.best_g_stat = np.nan
             self.best_g_per = np.nan
             self.best_g_ftt = np.nan
             self.best_g_gauss_stat = np.nan
             self.best_g_temp = np.nan
 
-    def save_best_candidate(self, candidate_threshold=Stat_candidate_search, threshold_crossing_list_file=None,
+    def save_best_candidate(self, candidate_threshold=Stat_candidate_search,
+                            period_threshold=Per_min_candidate,
+                            threshold_crossing_list_file=None,
                             threshold_crossing_list_location=None, threshold_crossing_list_filename=None,
                             threshold_g_crossing_list_file=None, threshold_g_crossing_list_filename=None,
                             save_to_threshold_crossing_list=False, best_candidates_concat=None):
         if best_candidates_concat is None:
             best_candidates_concat = self.best_candidates_concat
         self.find_best_trigger_from_per_chunks(best_candidates_concat=best_candidates_concat)
-        if ((self.best_integral_score is not None) and (self.best_stat is not None)
-                and (not np.isnan(self.best_integral_score)) and (not np.isnan(self.best_stat))
-                and self.best_integral_score >= candidate_threshold):
-            # TODO: warning: we changed to integral score boundary after run_11
+        if ((self.best_int_score is not None) and (self.best_stat is not None)
+                and (not np.isnan(self.best_int_score)) and (not np.isnan(self.best_stat))
+                and (self.best_per is None) and (not np.isnan(self.best_per))
+                and ((period_threshold is None) or (self.best_per >= period_threshold))
+                and self.best_int_score >= candidate_threshold):
             self.is_threshold_crossing = True
             if save_to_threshold_crossing_list:
                 if (threshold_crossing_list_file is None) and (threshold_crossing_list_location is not None):
                     threshold_crossing_list_file = os.path.join(threshold_crossing_list_location, threshold_crossing_list_filename)
                 with open(threshold_crossing_list_file, 'a') as fil1:  # will save here these good targets
-                    tc.print_trigger_line(target_id=self.target_id, integral_score=self.best_integral_score, stat=self.best_stat,
+                    tc.print_trigger_line(target_id=self.target_id, integral_score=self.best_int_score, stat=self.best_stat,
                                           per=self.best_per, ftt=self.best_ftt, gauss_stat=self.best_gauss_stat, template=self.best_temp,
                                           file=fil1, sep=' ', end='\n')
         else:
             self.is_threshold_crossing = False
+        # ----------------------------------------------------------------------------------------------------------------
         # Separately for gaussianized:
-        if ((self.best_g_integral_score is not None) and (self.best_g_gauss_stat is not None)
-                and (not np.isnan(self.best_g_integral_score)) and (not np.isnan(self.best_g_gauss_stat))
-                and self.best_g_integral_score >= candidate_threshold):
-            # TODO: warning: we changed to integral score boundary after run_11
+        if ((self.best_g_int_score is not None) and (self.best_g_gauss_stat is not None)
+                and (not np.isnan(self.best_g_int_score)) and (not np.isnan(self.best_g_gauss_stat))
+                and (self.best_g_per is None) and (not np.isnan(self.best_g_per))
+                and ((period_threshold is None) or (self.best_g_per >= period_threshold))
+                and self.best_g_int_score >= candidate_threshold):
             self.is_threshold_g_crossing = True
             if save_to_threshold_crossing_list:
                 if (threshold_g_crossing_list_file is None) and (threshold_crossing_list_location is not None):
                     threshold_g_crossing_list_file = os.path.join(threshold_crossing_list_location, threshold_g_crossing_list_filename)
                 with open(threshold_g_crossing_list_file, 'a') as fil1:  # will save here these good targets
-                    tc.print_trigger_line(target_id=self.target_id, integral_score=self.best_g_integral_score, stat=self.best_g_stat,
+                    tc.print_trigger_line(target_id=self.target_id, integral_score=self.best_g_int_score, stat=self.best_g_stat,
                                           per=self.best_g_per, ftt=self.best_g_ftt, gauss_stat=self.best_g_gauss_stat,
                                           template=self.best_g_temp, file=fil1, sep=' ', end='\n')
         else:
@@ -2039,6 +2110,7 @@ class KeplerTarget(object):
                 self.initialize_kepler_light_curve()
                 if len(self.klc.quarters) < min_quarters_to_process:
                     self.is_too_short = True  # too few quarters to search for a 50-day period
+                    self.is_good_for_processing = False
                 else:
                     self.is_too_short = False
                     self.bad_fft_check()  # Made on orig_fluxes
@@ -2233,7 +2305,7 @@ class KeplerTarget(object):
                     periods = self.klc.make_periods_array(p_min=p_min, p_max=p_max)
                     period_chunks = [periods]
 
-            if self.log_baseline_integral_score_rate is None:
+            if self.log_baseline_int_score_rate is None:
                 self.calculate_baseline_integral_score_rate()
 
             # HISTOGRAM DATA WILL BE COLLECTED HERE
@@ -2623,8 +2695,8 @@ class KeplerTarget(object):
             periods_to_search = self.klc.make_periods_array(p_min=p_min, p_max=p_max, dp=None, duty_cycle=self.duty_cycle, t_mission=None)
 
         if self.is_koi:  # Masking koi planets
-            self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
-                                 include_candidates=Mask_kepler_candidates, include_false_positives=Mask_kepler_false_positives)
+            self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False, mask_candidates=Mask_kepler_candidates,
+                                 mask_false_positives=Mask_kepler_false_positives)
         masked_dur = 1.5 * tm.Durations[-1]
         self.klc.mask_ephemeris(period=self.best_per, durations=masked_dur, transit_times=self.best_ftt)
         # Mask the suspected real transit. Warning, can kill some of injected signal
@@ -2635,7 +2707,7 @@ class KeplerTarget(object):
         self.klc.delete_irrelevant()  # For memory
         self.klc.interleave_shifts(delete_fulls=True)
 
-        if self.log_baseline_integral_score_rate is None:
+        if self.log_baseline_int_score_rate is None:
             self.calculate_baseline_integral_score_rate()
 
         period_chunks = [periods_to_search]
@@ -2660,13 +2732,13 @@ class KeplerTarget(object):
             retrieved_period = best_periodic_scores_data[spip.Best_per_results_index_per][0]
             retrieved_first_transit_time = best_periodic_scores_data[spip.Best_per_results_index_ftt][0]
             retrieved_gauss_stat = best_periodic_scores_data[spip.Best_per_results_index_stats_gauss][0]
-            retrieved_integral_score = best_periodic_scores_data[spip.Best_per_results_index_best_integral][0]
+            retrieved_int_score = best_periodic_scores_data[spip.Best_per_results_index_best_integral][0]
             retrieved_temp = best_periodic_scores_data[spip.Best_per_results_index_template][0]
             retrieved_g_stat = best_periodic_scores_data[spip.Best_per_results_index_stats][1]
             retrieved_g_period = best_periodic_scores_data[spip.Best_per_results_index_per][1]
             retrieved_g_first_transit_time = best_periodic_scores_data[spip.Best_per_results_index_ftt][1]
             retrieved_g_gauss_stat = best_periodic_scores_data[spip.Best_per_results_index_stats_gauss][1]
-            retrieved_g_integral_score = best_periodic_scores_data[spip.Best_per_results_index_best_integral][1]
+            retrieved_g_int_score = best_periodic_scores_data[spip.Best_per_results_index_best_integral][1]
             retrieved_g_temp = best_periodic_scores_data[spip.Best_per_results_index_template][1]
 
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
@@ -2677,11 +2749,11 @@ class KeplerTarget(object):
                         line_inj_par = [per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, first_transit_time_inj]
                         line_inj_par = [str(e) for e in line_inj_par]
                         line_inj_par = ' '.join(line_inj_par)
-                        line_trigger = tc.line_from_trigger_fields(target_id=self.target_id, integral_score=retrieved_integral_score,
+                        line_trigger = tc.line_from_trigger_fields(target_id=self.target_id, integral_score=retrieved_int_score,
                                                                    stat=retrieved_stat, per=retrieved_period,
                                                                    ftt=retrieved_first_transit_time, gauss_stat=retrieved_gauss_stat,
                                                                    template=retrieved_temp, sep=' ')
-                        line_g_trigger = tc.line_from_trigger_fields(target_id=self.target_id, integral_score=retrieved_g_integral_score,
+                        line_g_trigger = tc.line_from_trigger_fields(target_id=self.target_id, integral_score=retrieved_g_int_score,
                                                                      stat=retrieved_g_stat, per=retrieved_g_period,
                                                                      ftt=retrieved_g_first_transit_time, gauss_stat=retrieved_g_gauss_stat,
                                                                      template=retrieved_g_temp, sep=' ')
@@ -2720,12 +2792,12 @@ class KeplerTarget(object):
             self.__dict__['retrieved_period_' + status] = []
             self.__dict__['retrieved_first_transit_time_' + status] = []
             self.__dict__['retrieved_gauss_stat_' + status] = []
-            self.__dict__['retrieved_integral_score_' + status] = []
+            self.__dict__['retrieved_int_score_' + status] = []
             self.__dict__['retrieved_g_stat_' + status] = []
             self.__dict__['retrieved_g_period_' + status] = []
             self.__dict__['retrieved_g_first_transit_time_' + status] = []
             self.__dict__['retrieved_g_gauss_stat_' + status] = []
-            self.__dict__['retrieved_g_integral_score_' + status] = []
+            self.__dict__['retrieved_g_int_score_' + status] = []
         if file_path is None:
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                                 filename_postfix=injections_filename_postfix, file_format='txt')
@@ -2741,9 +2813,9 @@ class KeplerTarget(object):
                     n_inj_pars = 10
                     n_trigger_pars = tc.Trigger_len
                     per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, ftt_inj = res[:n_inj_pars]
-                    (_, retrieved_integral_score, retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat,
+                    (_, retrieved_int_score, retrieved_stat, retrieved_period, retrieved_first_transit_time, retrieved_gauss_stat,
                      retrieved_template) = tc.trigger_fields_from_list(res[n_inj_pars: n_inj_pars + n_trigger_pars])
-                    (_, retrieved_g_integral_score, retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time,
+                    (_, retrieved_g_int_score, retrieved_g_stat, retrieved_g_period, retrieved_g_first_transit_time,
                      retrieved_g_gauss_stat, retrieved_g_template) = tc.trigger_fields_from_list(
                         res[n_inj_pars + n_trigger_pars: n_inj_pars + 2 * n_trigger_pars])
                     per_inj = float(per_inj)
@@ -2758,12 +2830,12 @@ class KeplerTarget(object):
                     retrieved_period = float(retrieved_period)
                     retrieved_first_transit_time = float(retrieved_first_transit_time)
                     retrieved_gauss_stat = float(retrieved_gauss_stat)
-                    retrieved_integral_score = float(retrieved_integral_score)
+                    retrieved_int_score = float(retrieved_int_score)
                     retrieved_g_stat = float(retrieved_g_stat)
                     retrieved_g_period = float(retrieved_g_period)
                     retrieved_g_first_transit_time = float(retrieved_g_first_transit_time)
                     retrieved_g_gauss_stat = float(retrieved_g_gauss_stat)
-                    retrieved_g_integral_score = float(retrieved_g_integral_score)
+                    retrieved_g_int_score = float(retrieved_g_int_score)
 
                     max_phase_mismatch = dur_inj * max_phase_mismatch_to_dur
                     if min(np.abs(ftt_inj - retrieved_first_transit_time) % per_inj,
@@ -2784,12 +2856,12 @@ class KeplerTarget(object):
                     self.__dict__['retrieved_period_' + status].append(retrieved_period)
                     self.__dict__['retrieved_first_transit_time_' + status].append(retrieved_first_transit_time)
                     self.__dict__['retrieved_gauss_stat_' + status].append(retrieved_gauss_stat)
-                    self.__dict__['retrieved_integral_score_' + status].append(retrieved_integral_score)
+                    self.__dict__['retrieved_int_score_' + status].append(retrieved_int_score)
                     self.__dict__['retrieved_g_stat_' + status].append(retrieved_g_stat)
                     self.__dict__['retrieved_g_period_' + status].append(retrieved_g_period)
                     self.__dict__['retrieved_g_first_transit_time_' + status].append(retrieved_g_first_transit_time)
                     self.__dict__['retrieved_g_gauss_stat_' + status].append(retrieved_g_gauss_stat)
-                    self.__dict__['retrieved_g_integral_score_' + status].append(retrieved_g_integral_score)
+                    self.__dict__['retrieved_g_int_score_' + status].append(retrieved_g_int_score)
 
             self.number_of_success_injections = len(self.per_inj_success)
             self.number_of_injections = len(self.per_inj_bad) + len(self.per_inj_success)
@@ -2897,8 +2969,10 @@ class KeplerTarget(object):
 
         self.n_slides_clean = len(res_slides)  # we now save one per star, so it is len!
 
-    def _get_bin_min_bin_max(self, in_gaussianized=False, use_slides=True, use_injections=True, use_clean_slides=True):
+    def _get_bin_min_bin_max(self, in_gaussianized=False, use_slides=True, use_injections=True, use_clean_slides=True,
+                             use_integral=True):
         """
+        # Attention! Here, the trigger used is not Gaussianized!
         Gets the boundaries for the histograms of the time shuffling and the injection-recovery runs
         from the obtained statistics.
         :param in_gaussianized: Whether to look at the gaussianized statistics or not.
@@ -2906,70 +2980,87 @@ class KeplerTarget(object):
         :return:
         :rtype:
         """
-        if in_gaussianized:
+        if use_integral:
             if use_injections:
-                retrieved_stat_success = self.retrieved_gauss_stat_success
-                retrieved_stat_bad = self.retrieved_gauss_stat_bad
+                retrieved_score_success = self.retrieved_int_score_success
+                retrieved_score_bad = self.retrieved_int_score_bad
             else:
-                retrieved_stat_success = None
-                retrieved_stat_bad = None
+                retrieved_score_success = None
+                retrieved_score_bad = None
             if use_slides:
-                stats_slides = self.gauss_stats_slides
+                scores_slides = self.int_scores_slides
             else:
-                stats_slides = None
+                scores_slides = None
             if use_clean_slides:
-                stats_slides_clean = self.gauss_stats_slides_clean
+                scores_slides_clean = self.int_scores_slides_clean
             else:
-                stats_slides_clean = None
-            # Attention! Here, the trigger used is not Gaussianized!
-            best_stat = self.best_gauss_stat
+                scores_slides_clean = None
+            best_score = self.best_int_score
         else:
-            if use_injections:
-                retrieved_stat_success = self.retrieved_stat_success
-                retrieved_stat_bad = self.retrieved_stat_bad
+            if in_gaussianized:
+                if use_injections:
+                    retrieved_score_success = self.retrieved_gauss_stat_success
+                    retrieved_score_bad = self.retrieved_gauss_stat_bad
+                else:
+                    retrieved_score_success = None
+                    retrieved_score_bad = None
+                if use_slides:
+                    scores_slides = self.gauss_stats_slides
+                else:
+                    scores_slides = None
+                if use_clean_slides:
+                    scores_slides_clean = self.gauss_stats_slides_clean
+                else:
+                    scores_slides_clean = None
+                # Attention! Here, the trigger used is not Gaussianized!
+                best_score = self.best_gauss_stat
             else:
-                retrieved_stat_success = None
-                retrieved_stat_bad = None
-            if use_slides:
-                stats_slides = self.stats_slides
-            else:
-                stats_slides = None
-            if use_clean_slides:
-                stats_slides_clean = self.stats_slides_clean
-            else:
-                stats_slides_clean = None
-            best_stat = self.best_stat
+                if use_injections:
+                    retrieved_score_success = self.retrieved_stat_success
+                    retrieved_score_bad = self.retrieved_stat_bad
+                else:
+                    retrieved_score_success = None
+                    retrieved_score_bad = None
+                if use_slides:
+                    scores_slides = self.stats_slides
+                else:
+                    scores_slides = None
+                if use_clean_slides:
+                    scores_slides_clean = self.stats_slides_clean
+                else:
+                    scores_slides_clean = None
+                best_score = self.best_stat
 
         # The following can happen if there are no injections but the injection retrieval function was used.
         # (If only one of them is empty, it means that maybe all the injections were good or bad)
-        if ((retrieved_stat_success is not None and len(retrieved_stat_success) == 0) and
-                (retrieved_stat_bad is not None and len(retrieved_stat_bad) == 0)):
-            retrieved_stat_success = None
-            retrieved_stat_bad = None
+        if ((retrieved_score_success is not None and len(retrieved_score_success) == 0) and
+                (retrieved_score_bad is not None and len(retrieved_score_bad) == 0)):
+            retrieved_score_success = None
+            retrieved_score_bad = None
 
-        if best_stat is not None:
-            trig_val = best_stat
+        if best_score is not None:
+            trig_val = best_score
         else:
             trig_val = np.nan
 
-        if (retrieved_stat_bad is not None) and (retrieved_stat_success is not None):
-            conc_inj_stat = np.concatenate((np.abs(retrieved_stat_success), np.abs(retrieved_stat_bad)))
+        if (retrieved_score_bad is not None) and (retrieved_score_success is not None):
+            conc_inj_stat = np.concatenate((np.abs(retrieved_score_success), np.abs(retrieved_score_bad)))
             inj_min = np.nanmin(conc_inj_stat[np.abs(conc_inj_stat) != np.inf])
             inj_max = np.nanmax(conc_inj_stat[np.abs(conc_inj_stat) != np.inf])
         else:
             inj_min = np.nan
             inj_max = np.nan
 
-        if stats_slides is not None:
-            slides_min = np.nanmin(stats_slides[np.abs(stats_slides) != np.inf])
-            slides_max = np.nanmax(stats_slides[np.abs(stats_slides) != np.inf])
+        if scores_slides is not None:
+            slides_min = np.nanmin(scores_slides[np.abs(scores_slides) != np.inf])
+            slides_max = np.nanmax(scores_slides[np.abs(scores_slides) != np.inf])
         else:
             slides_min = np.nan
             slides_max = np.nan
 
-        if stats_slides_clean is not None:
-            slides_clean_min = np.nanmin(stats_slides_clean[np.abs(stats_slides_clean) != np.inf])
-            slides_clean_max = np.nanmax(stats_slides_clean[np.abs(stats_slides_clean) != np.inf])
+        if scores_slides_clean is not None:
+            slides_clean_min = np.nanmin(scores_slides_clean[np.abs(scores_slides_clean) != np.inf])
+            slides_clean_max = np.nanmax(scores_slides_clean[np.abs(scores_slides_clean) != np.inf])
         else:
             slides_clean_min = np.nan
             slides_clean_max = np.nan
@@ -2978,7 +3069,7 @@ class KeplerTarget(object):
         bin_min = np.nanmin([inj_min, slides_min, slides_clean_min, trig_val])
         return bin_min, bin_max
 
-    def make_histogram_bins(self, bin_width=Histogram_stats_binwid, bin_min=None, bin_max=None,
+    def make_histogram_bins(self, bin_width=Histogram_mes_binwid, bin_min=None, bin_max=None,
                             use_slides=True, use_injections=True):
         """
         Create the bins array over which the distributions of the background and the injection-recovery
@@ -2996,7 +3087,7 @@ class KeplerTarget(object):
         """
         use_clean_slides = use_slides
         if use_slides:
-            if self.stats_slides is None:
+            if self.int_scores_slides is None:
                 try:
                     self.retrieve_background()
                 except FileNotFoundError:
@@ -3006,21 +3097,36 @@ class KeplerTarget(object):
                 except (ValueError, FileNotFoundError):
                     use_clean_slides = False
         if use_injections:
-            if self.retrieved_stat_success is None:
+            if self.retrieved_int_score_success is None:
                 try:
                     self.retrieve_injections()
                 except FileNotFoundError:
                     use_injections = False
         if bin_min is None or bin_max is None:
-            bin_min, bin_max = self._get_bin_min_bin_max(in_gaussianized=False, use_slides=use_slides, use_injections=use_injections)
-        self.bins_stat_histogram = np.arange(bin_min, bin_max, bin_width)
-        bin_min, bin_max = self._get_bin_min_bin_max(in_gaussianized=True, use_slides=use_slides, use_clean_slides=use_clean_slides,
-                                                     use_injections=use_injections)
-        self.bins_gauss_stat_histogram = np.arange(bin_min, bin_max, bin_width)
+            bin_min_stat, bin_max_stat = self._get_bin_min_bin_max(in_gaussianized=False, use_slides=use_slides,
+                                                                   use_clean_slides=use_clean_slides, use_injections=use_injections,
+                                                                   use_integral=True)
+            bin_min_integr, bin_max_integr = self._get_bin_min_bin_max(in_gaussianized=False, use_slides=use_slides,
+                                                                       use_clean_slides=use_clean_slides, use_injections=use_injections,
+                                                                       use_integral=False)
+            bin_min_gauss_stat, bin_max_gauss_stat = self._get_bin_min_bin_max(in_gaussianized=True, use_slides=use_slides,
+                                                                               use_clean_slides=use_clean_slides,
+                                                                               use_injections=use_injections, use_integral=True)
+        else:
+            bin_min_stat = bin_min
+            bin_max_stat = bin_max
+            bin_min_integr = bin_min
+            bin_max_integr = bin_max
+            bin_min_gauss_stat = bin_min
+            bin_max_gauss_stat = bin_max
+        self.bins_int_score_histogram = np.arange(bin_min_integr, bin_max_integr, bin_width)
+        self.bins_stat_histogram = np.arange(bin_min_stat, bin_max_stat, bin_width)
+        self.bins_gauss_stat_histogram = np.arange(bin_min_gauss_stat, bin_max_gauss_stat, bin_width)
 
-    def make_background_histogram(self, bins=None, bin_min=None, bin_max=None, bin_width=Histogram_stats_binwid, central_period=None,
+    def make_background_histogram(self, bins=None, bin_min=None, bin_max=None, bin_width=Histogram_mes_binwid, central_period=None,
                                   slides_res_filename_postfix=Slides_res_filename_postfix,
-                                  slides_clean_res_filename_postfix=Slides_clean_res_filename_postfix):
+                                  slides_clean_res_filename_postfix=Slides_clean_res_filename_postfix,
+                                  use_integral=True):
         """
         Create a histogram of the background (from time-shuffled runs) distribution of the statistic scores.
         Saves bins and counts as attributes.
@@ -3038,66 +3144,144 @@ class KeplerTarget(object):
         :type slides_res_filename_postfix: str
         :param slides_clean_res_filename_postfix: The postfix of the clean time-slide file name, it does not contain period.
         :type slides_clean_res_filename_postfix: str
+        :param use_integral: Whether to use integral score or statistic
+        :type use_integral: bool
         """
-        if self.stats_slides is None:
+        if self.int_scores_slides is None:
             self.retrieve_background(central_period=central_period, slides_res_filename_postfix=slides_res_filename_postfix)
-        if self.stats_slides_clean is None:
-            self.retrieve_background_clean(central_period=central_period,
-                                           slides_clean_res_filename_postfix=slides_clean_res_filename_postfix)
+        use_clean = True
+        if self.int_scores_slides_clean is None:
+            try:
+                self.retrieve_background_clean(central_period=central_period,
+                                               slides_clean_res_filename_postfix=slides_clean_res_filename_postfix)
+            except (ValueError, FileNotFoundError):
+                use_clean = False
 
-        # TODO THIS DOES NOT WORK THIS WAY!
-        for in_clean in [False, True]:
-            if not in_clean:
-                bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0 = (
-                    self.bins_stat_histogram_bg, self.bins_gauss_stat_histogram_bg, self.stats_slides,
-                    self.n_slides, self.distr_stat_h0, self.distr_gauss_stat_h0)
+        # scores_slides, bins_scores_histogram, n_slides, in_gaussianized, in_integral, in_clean:
+        if use_integral:
+            if use_clean:
+                list_options = [
+                    [self.int_scores_slides, self.bins_int_score_histogram_bg, self.n_slides, False, True, False],
+                    [self.int_scores_slides_clean, self.bins_int_score_histogram_bg, self.n_slides_clean, False, True, True]]
             else:
-                bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0 = (
-                    self.bins_stat_histogram_bg_clean, self.bins_gauss_stat_histogram_bg_clean, self.stats_slides_clean,
-                    self.n_slides_clean, self.distr_stat_h0_clean, self.distr_gauss_stat_h0_clean)
+                list_options = [
+                    [self.int_scores_slides, self.bins_int_score_histogram_bg, self.n_slides, False, True, False]]
+        else:
+            if use_clean:
+                list_options = [
+                    [self.stats_slides, self.bins_stat_histogram, self.n_slides, False, False, False],
+                    [self.stats_slides_clean, self.bins_stat_histogram, self.n_slides_clean, False, False, True],
+                    [self.gauss_stats_slides, self.bins_gauss_stat_histogram, self.n_slides, True, False, False],
+                    [self.gauss_stats_slides_clean, self.bins_gauss_stat_histogram, self.n_slides_clean, True, False, True]]
+            else:
+                list_options = [
+                    [self.stats_slides, self.bins_stat_histogram, self.n_slides, False, False, False],
+                    [self.gauss_stats_slides, self.bins_gauss_stat_histogram, self.n_slides, True, False, False]]
 
-            if stats_slides is not None:  # If some slides do not exist, do not do anything
+        for scores_slides, bins_scores_histogram, n_slides, in_gaussianized, in_integral, in_clean in list_options:
+            if scores_slides is not None:  # If some slides do not exist, do not do anything
                 if bins is not None:
-                    bins_stat_histogram_bg = bins
-                    bins_gauss_stat_histogram_bg = bins
+                    bins_scores_histogram_bg = bins
                 else:
-                    if self.bins_stat_histogram is not None:
-                        bins_stat_histogram_bg = self.bins_stat_histogram
+                    if bins_scores_histogram is not None:
+                        bins_scores_histogram_bg = bins_scores_histogram
                     else:
-                        bin_mi, bin_ma = self._get_bin_min_bin_max()
+                        bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=in_gaussianized, use_integral=in_integral)
                         if bin_min is None:
                             bin_min = bin_mi
                         if bin_max is None:
                             bin_max = bin_ma
-                        bins_stat_histogram_bg = np.arange(bin_min, bin_max, bin_width)
-                    if self.bins_gauss_stat_histogram is not None:
-                        bins_gauss_stat_histogram_bg = self.bins_gauss_stat_histogram
-                    else:
-                        bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
-                        if bin_min is None:
-                            bin_min = bin_mi
-                        if bin_max is None:
-                            bin_max = bin_ma
-                        bins_gauss_stat_histogram_bg = np.arange(bin_min, bin_max, bin_width)
+                        bins_scores_histogram_bg = np.arange(bin_min, bin_max, bin_width)
 
-                distr_stat_h0 = np.histogram(stats_slides, bins=bins_stat_histogram_bg, density=False)[0]
-                distr_stat_h0 = distr_stat_h0 / n_slides
+                distr_score_h0 = np.histogram(scores_slides, bins=bins_scores_histogram_bg, density=False)[0]
+                distr_score_h0 = distr_score_h0 / n_slides
                 if self.transiting_planets_in_relevant_range is not None:
-                    distr_stat_h0 = distr_stat_h0 * (1 - self.transiting_planets_in_relevant_range)  # the rate of not having a planet
-                distr_gauss_stat_h0 = np.histogram(self.gauss_stats_slides, bins=bins_gauss_stat_histogram_bg, density=False)[0]
-                distr_gauss_stat_h0 = distr_gauss_stat_h0 / n_slides
-                if self.transiting_planets_in_relevant_range is not None:
-                    distr_gauss_stat_h0 = distr_gauss_stat_h0 * (1 - self.transiting_planets_in_relevant_range)
+                    distr_score_h0 = distr_score_h0 * (1 - self.transiting_planets_in_relevant_range)  # the rate of not having a planet
                     # -> the rate of not having a planet
 
-                if not in_clean:
-                    (self.bins_stat_histogram_bg, self.bins_gauss_stat_histogram_bg, self.stats_slides,
-                        self.n_slides, self.distr_stat_h0, self.distr_gauss_stat_h0) = (
-                        bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0)
+                if in_integral:
+                    if in_clean:
+                        self.distr_int_score_h0_clean = distr_score_h0
+                        self.bins_int_score_histogram_bg = bins_scores_histogram_bg
+                    else:
+                        self.distr_int_score_h0 = distr_score_h0
+                        self.bins_int_score_histogram_bg = bins_scores_histogram_bg
                 else:
-                    (self.bins_stat_histogram_bg_clean, self.bins_gauss_stat_histogram_bg_clean, self.stats_slides_clean,
-                        self.n_slides_clean, self.distr_stat_h0_clean, self.distr_gauss_stat_h0_clean) = (
-                        bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0)
+                    if in_gaussianized:
+                        if in_clean:
+                            self.distr_stat_h0_clean = distr_score_h0
+                            self.bins_stat_histogram_bg = bins_scores_histogram_bg
+                        else:
+                            self.distr_stat_h0 = distr_score_h0
+                            self.bins_stat_histogram_bg = bins_scores_histogram_bg
+                    else:
+                        if in_clean:
+                            self.distr_gauss_stat_h0_clean = distr_score_h0
+                            self.bins_gauss_stat_histogram_bg = bins_scores_histogram_bg
+                        else:
+                            self.distr_gauss_stat_h0 = distr_score_h0
+                            self.bins_gauss_stat_histogram_bg = bins_scores_histogram_bg
+
+        # # #############################
+        # for in_clean in in_cleans:
+        #     if use_integral:
+        #         # TODO
+        #         if not in_clean:
+        #             bins_score_histogram_bg, stats_slides, n_slides, distr_stat_h0 = (
+        #                 self.bins_int_score_histogram_bg, self.int_scores_slides,
+        #                 self.n_slides, self.distr_int_score_h0)
+        #     else:
+        #         if not in_clean:
+        #             bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0 = (
+        #                 self.bins_stat_histogram_bg, self.bins_gauss_stat_histogram_bg, self.stats_slides,
+        #                 self.n_slides, self.distr_stat_h0, self.distr_gauss_stat_h0)
+        #         else:
+        #             bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0 = (
+        #                 self.bins_stat_histogram_bg_clean, self.bins_gauss_stat_histogram_bg_clean, self.stats_slides_clean,
+        #                 self.n_slides_clean, self.distr_stat_h0_clean, self.distr_gauss_stat_h0_clean)
+        #
+        #     if stats_slides is not None:  # If some slides do not exist, do not do anything
+        #         if bins is not None:
+        #             bins_stat_histogram_bg = bins
+        #             bins_gauss_stat_histogram_bg = bins
+        #         else:
+        #             if self.bins_stat_histogram is not None:
+        #                 bins_stat_histogram_bg = self.bins_stat_histogram
+        #             else:
+        #                 bin_mi, bin_ma = self._get_bin_min_bin_max()
+        #                 if bin_min is None:
+        #                     bin_min = bin_mi
+        #                 if bin_max is None:
+        #                     bin_max = bin_ma
+        #                 bins_stat_histogram_bg = np.arange(bin_min, bin_max, bin_width)
+        #             if self.bins_gauss_stat_histogram is not None:
+        #                 bins_gauss_stat_histogram_bg = self.bins_gauss_stat_histogram
+        #             else:
+        #                 bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
+        #                 if bin_min is None:
+        #                     bin_min = bin_mi
+        #                 if bin_max is None:
+        #                     bin_max = bin_ma
+        #                 bins_gauss_stat_histogram_bg = np.arange(bin_min, bin_max, bin_width)
+        #
+        #         distr_stat_h0 = np.histogram(stats_slides, bins=bins_stat_histogram_bg, density=False)[0]
+        #         distr_stat_h0 = distr_stat_h0 / n_slides
+        #         if self.transiting_planets_in_relevant_range is not None:
+        #             distr_stat_h0 = distr_stat_h0 * (1 - self.transiting_planets_in_relevant_range)  # the rate of not having a planet
+        #         distr_gauss_stat_h0 = np.histogram(self.gauss_stats_slides, bins=bins_gauss_stat_histogram_bg, density=False)[0]
+        #         distr_gauss_stat_h0 = distr_gauss_stat_h0 / n_slides
+        #         if self.transiting_planets_in_relevant_range is not None:
+        #             distr_gauss_stat_h0 = distr_gauss_stat_h0 * (1 - self.transiting_planets_in_relevant_range)
+        #             # -> the rate of not having a planet
+        #
+        #         if not in_clean:
+        #             (self.bins_stat_histogram_bg, self.bins_gauss_stat_histogram_bg, self.stats_slides,
+        #                 self.n_slides, self.distr_stat_h0, self.distr_gauss_stat_h0) = (
+        #                 bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0)
+        #         else:
+        #             (self.bins_stat_histogram_bg_clean, self.bins_gauss_stat_histogram_bg_clean, self.stats_slides_clean,
+        #                 self.n_slides_clean, self.distr_stat_h0_clean, self.distr_gauss_stat_h0_clean) = (
+        #                 bins_stat_histogram_bg, bins_gauss_stat_histogram_bg, stats_slides, n_slides, distr_stat_h0, distr_gauss_stat_h0)
 
         # self.distr_stat_h0 = np.histogram(self.stats_slides, bins=self.bins_stat_histogram_bg, density=False)[0]
         # self.distr_stat_h0 = self.distr_stat_h0 / self.n_slides
@@ -3109,98 +3293,165 @@ class KeplerTarget(object):
         #     self.distr_gauss_stat_h0 = self.distr_gauss_stat_h0 * (1 - self.transiting_planets_in_relevant_range)
         #     # -> the rate of not having a planet
 
-    def make_injections_histogram(self, bins=None, bin_min=None, bin_max=None):
-        if self.retrieved_stat_success is None:
+    def make_injections_histogram(self, bins=None, bin_min=None, bin_max=None, use_integral=True):
+        if self.retrieved_int_score_success is None:
             self.retrieve_injections()
 
         if self.number_of_injections > 0:
-            if bins is not None:
-                self.bins_stat_histogram_inj = bins
-                self.bins_gauss_stat_histogram_inj = bins
+            if use_integral:
+                # retrieved_score_success, retrieved_score_bad, bins_scores_histogram, in_gaussianized, in_integral
+                list_options = [[self.retrieved_int_score_success, self.retrieved_int_score_bad, self.bins_int_score_histogram,
+                                 False, True]]
             else:
-                if self.bins_stat_histogram is not None:
-                    self.bins_stat_histogram_inj = self.bins_stat_histogram
+                list_options = [[self.retrieved_stat_success, self.retrieved_stat_bad, self.bins_stat_histogram, False, False],
+                                [self.retrieved_gauss_stat_success, self.retrieved_gauss_stat_bad, self.bins_gauss_stat_histogram,
+                                 True, False]]
+            for retrieved_score_success, retrieved_score_bad, bins_scores_histogram, in_gaussianized, in_integral in list_options:
+                if bins is not None:
+                    bins_score_histogram_inj = bins
                 else:
-                    bin_mi, bin_ma = self._get_bin_min_bin_max()
-                    if bin_min is None:
-                        bin_min = bin_mi
-                    if bin_max is None:
-                        bin_max = bin_ma
-                    self.bins_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+                    if bins_scores_histogram is not None:
+                        bins_score_histogram_inj = bins_scores_histogram
+                    else:
+                        bin_mi, bin_ma = self._get_bin_min_bin_max(use_integral=in_integral, in_gaussianized=in_gaussianized)
+                        if bin_min is None:
+                            bin_min = bin_mi
+                        if bin_max is None:
+                            bin_max = bin_ma
+                        bins_score_histogram_inj = np.arange(bin_min, bin_max, Histogram_mes_binwid)
 
-                if self.bins_gauss_stat_histogram is not None:
-                    self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
+                scores_all = np.array(retrieved_score_bad + retrieved_score_success, dtype=float)
+                n_injections = len(scores_all)
+                scores_all = scores_all[~np.isnan(scores_all)]
+                distr_score_inj_all = np.histogram(scores_all, bins=bins_score_histogram_inj, density=False)[0]
+                distr_score_inj_all = (distr_score_inj_all / n_injections * self.transiting_planets_in_relevant_range)
+                scores_success = np.array(retrieved_score_success, dtype=float)
+                scores_success = scores_success[~np.isnan(scores_success)]
+                distr_score_inj_success = np.histogram(scores_success, bins=bins_score_histogram_inj)[0]
+                distr_score_inj_success = (distr_score_inj_success / n_injections * self.transiting_planets_in_relevant_range)
+
+                if in_integral:
+                    self.distr_int_score_inj_all = distr_score_inj_all
+                    self.distr_int_score_inj_success = distr_score_inj_success
+                    self.bins_int_score_histogram_inj = bins_score_histogram_inj
                 else:
-                    bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
-                    if bin_min is None:
-                        bin_min = bin_mi
-                    if bin_max is None:
-                        bin_max = bin_ma
-                    self.bins_gauss_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_stats_binwid)
+                    if in_gaussianized:
+                        self.distr_gauss_stat_inj_all = distr_score_inj_all
+                        self.distr_gauss_stat_inj_success = distr_score_inj_success
+                        self.bins_gauss_stat_histogram_inj = bins_score_histogram_inj
+                    else:
+                        self.distr_stat_inj_all = distr_score_inj_all
+                        self.distr_stat_inj_success = distr_score_inj_success
+                        self.bins_stat_histogram_inj = bins_score_histogram_inj
 
-            stats_all = np.array(self.retrieved_stat_bad + self.retrieved_stat_success, dtype=float)
-            stats_all = stats_all[~np.isnan(stats_all)]
-            n_injections_not_nan = len(stats_all)
-            self.distr_stat_inj_all = np.histogram(stats_all, bins=self.bins_stat_histogram_inj, density=False)[0]
-            self.distr_stat_inj_all = (self.distr_stat_inj_all / n_injections_not_nan * self.transiting_planets_in_relevant_range)
-            stats_success = np.array(self.retrieved_stat_success, dtype=float)
-            stats_success = stats_success[~np.isnan(stats_success)]
-            self.distr_stat_inj_success = np.histogram(stats_success, bins=self.bins_stat_histogram_inj)[0]
-            self.distr_stat_inj_success = (self.distr_stat_inj_success / n_injections_not_nan
-                                           * self.transiting_planets_in_relevant_range)
+        # if self.number_of_injections > 0:
+        #     if bins is not None:
+        #         self.bins_stat_histogram_inj = bins
+        #         self.bins_gauss_stat_histogram_inj = bins
+        #     else:
+        #         if self.bins_stat_histogram is not None:
+        #             self.bins_stat_histogram_inj = self.bins_stat_histogram
+        #         else:
+        #             bin_mi, bin_ma = self._get_bin_min_bin_max()
+        #             if bin_min is None:
+        #                 bin_min = bin_mi
+        #             if bin_max is None:
+        #                 bin_max = bin_ma
+        #             self.bins_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_mes_binwid)
+        #
+        #         if self.bins_gauss_stat_histogram is not None:
+        #             self.bins_gauss_stat_histogram_inj = self.bins_gauss_stat_histogram
+        #         else:
+        #             bin_mi, bin_ma = self._get_bin_min_bin_max(in_gaussianized=True)
+        #             if bin_min is None:
+        #                 bin_min = bin_mi
+        #             if bin_max is None:
+        #                 bin_max = bin_ma
+        #             self.bins_gauss_stat_histogram_inj = np.arange(bin_min, bin_max, Histogram_mes_binwid)
+        #
+        #     stats_all = np.array(self.retrieved_stat_bad + self.retrieved_stat_success, dtype=float)
+        #     stats_all = stats_all[~np.isnan(stats_all)]
+        #     n_injections_not_nan = len(stats_all)
+        #     self.distr_stat_inj_all = np.histogram(stats_all, bins=self.bins_stat_histogram_inj, density=False)[0]
+        #     self.distr_stat_inj_all = (self.distr_stat_inj_all / n_injections_not_nan * self.transiting_planets_in_relevant_range)
+        #     stats_success = np.array(self.retrieved_stat_success, dtype=float)
+        #     stats_success = stats_success[~np.isnan(stats_success)]
+        #     self.distr_stat_inj_success = np.histogram(stats_success, bins=self.bins_stat_histogram_inj)[0]
+        #     self.distr_stat_inj_success = (self.distr_stat_inj_success / n_injections_not_nan
+        #                                    * self.transiting_planets_in_relevant_range)
+        #
+        #     # same for gaussianized
+        #     stats_all = np.array(self.retrieved_gauss_stat_bad + self.retrieved_gauss_stat_success, dtype=float)
+        #     stats_all = stats_all[~np.isnan(stats_all)]
+        #     n_injections_not_nan = len(stats_all)
+        #     self.distr_gauss_stat_inj_all = np.histogram(stats_all, bins=self.bins_gauss_stat_histogram_inj)[0]
+        #     self.distr_gauss_stat_inj_all = (self.distr_gauss_stat_inj_all / n_injections_not_nan
+        #                                      * self.transiting_planets_in_relevant_range)
+        #     stats_success = np.array(self.retrieved_gauss_stat_success, dtype=float)
+        #     stats_success = stats_success[~np.isnan(stats_success)]
+        #     self.distr_gauss_stat_inj_success = np.histogram(stats_success, bins=self.bins_gauss_stat_histogram_inj)[0]
+        #     self.distr_gauss_stat_inj_success = (self.distr_gauss_stat_inj_success / n_injections_not_nan
+        #                                          * self.transiting_planets_in_relevant_range)
 
-            # same for gaussianized
-            stats_all = np.array(self.retrieved_gauss_stat_bad + self.retrieved_gauss_stat_success, dtype=float)
-            stats_all = stats_all[~np.isnan(stats_all)]
-            n_injections_not_nan = len(stats_all)
-            self.distr_gauss_stat_inj_all = np.histogram(stats_all, bins=self.bins_gauss_stat_histogram_inj)[0]
-            self.distr_gauss_stat_inj_all = (self.distr_gauss_stat_inj_all / n_injections_not_nan
-                                             * self.transiting_planets_in_relevant_range)
-            stats_success = np.array(self.retrieved_gauss_stat_success, dtype=float)
-            stats_success = stats_success[~np.isnan(stats_success)]
-            self.distr_gauss_stat_inj_success = np.histogram(stats_success, bins=self.bins_gauss_stat_histogram_inj)[0]
-            self.distr_gauss_stat_inj_success = (self.distr_gauss_stat_inj_success / n_injections_not_nan
-                                                 * self.transiting_planets_in_relevant_range)
+    def calculate_significance(self, remake_histograms=True, bin_width=Histogram_mes_binwid):
+        if remake_histograms or self.bins_int_score_histogram is None:
+            self.make_histogram_bins(bin_width=bin_width, use_slides=True, use_injections=True)
+            self.make_injections_histogram(bins=self.bins_int_score_histogram, use_integral=True)
+            self.make_background_histogram(bins=self.bins_int_score_histogram, use_integral=True)
+        # ---------------------------------------------------------------------------------------
+        # MAKE EXTRAPOLATION. Determine intersection with horizontal axis in log scale.
+        self.extrapolation_coefs_int_score_h0_hist = af.get_histogram_extrapolation_coefs_in_log(
+            self.distr_int_score_h0, self.bins_int_score_histogram)  # attention: extrapolating only the direct bg
+        self.prob_density_h0_trigger = np.exp(self.best_int_score * self.extrapolation_coefs_int_score_h0_hist[1]
+                                              + self.extrapolation_coefs_int_score_h0_hist[0])
+        false_alarm_prob_trigger = (1 / np.abs(self.extrapolation_coefs_int_score_h0_hist[1])
+                                    * np.exp(self.extrapolation_coefs_int_score_h0_hist[0]
+                                             + self.extrapolation_coefs_int_score_h0_hist[1] * self.best_int_score))
 
-    def calculate_significance(self, remake_histograms=True):
-        # TODO!
-        if remake_histograms or self.bins_stat_histogram is None:
-            self.make_histogram_bins()
-            self.make_injections_histogram(bins=self.bins_stat_histogram)
-            self.make_background_histogram(bins=self.bins_stat_histogram)
+        self.extrapolation_coefs_int_score_h0_clean_hist = af.get_histogram_extrapolation_coefs_in_log(
+            self.distr_int_score_h0_clean, self.bins_int_score_histogram)  # attention: extrapolating only the direct bg
+        self.prob_density_h0_clean_trigger = np.exp(self.best_int_score * self.extrapolation_coefs_int_score_h0_clean_hist[1]
+                                                    + self.extrapolation_coefs_int_score_h0_clean_hist[0])
+        false_alarm_prob_trigger_clean = (1 / np.abs(self.extrapolation_coefs_int_score_h0_clean_hist[1])
+                                          * np.exp(self.extrapolation_coefs_int_score_h0_clean_hist[0]
+                                                   + self.extrapolation_coefs_int_score_h0_clean_hist[1] * self.best_int_score))
+        # Find edges of this bin:
+        bin_ind_close_trigger = np.sort(np.argsort(np.abs(self.bins_int_score_histogram - self.best_int_score))[:2])[0]
+
+        self.prob_density_h1_trigger = np.nanmean(self.distr_int_score_inj_success[
+                                                  max(0, bin_ind_close_trigger - 1): min(len(self.distr_int_score_inj_success),
+                                                                                         bin_ind_close_trigger + 1)])
+        # use the left edge index to access the bin
+        p_planet = ut.calculate_p_planet_statistical(f_p=self.prob_density_h1_trigger, f_s=self.prob_density_h0_trigger,
+                                                     f_sc=self.prob_density_h0_clean_trigger, pi_p=1.,  # We already multiplied by it
+                                                     mu_m_mu_p=1.)  # we take this approximation close to the detection threshold
+        self.prob_density_planet_not_noise = p_planet
+        # self.prob_density_planet_not_noise = self.prob_density_h1_trigger / (self.prob_density_h1_trigger + self.prob_density_h0_trigger)
+        self.false_alarm_prob_trigger = false_alarm_prob_trigger * (1 - p_planet) + false_alarm_prob_trigger_clean * p_planet
+
         # # ---------------------------------------------------------------------------------------
+        # # MAKE EXTRAPOLATION
         # # Determine intersection with horizontal axis in log scale:
         # self.extrapolation_coefs_stat_h0_hist = af.get_histogram_extrapolation_coefs_in_log(
         #     self.distr_stat_h0, self.bins_stat_histogram)  # attention: extrapolating only the direct bg
-        #
+        # # self.extrapolation_coefs_stat_h0_hist[1] is supposed to be negative because the trend is decreasing
         # self.prob_density_h0_trigger = np.exp(self.best_stat * self.extrapolation_coefs_stat_h0_hist[1]
         #                                       + self.extrapolation_coefs_stat_h0_hist[0])
-        #
-        # self.extrapolation_coefs_stat_h0_hist_clean = af.get_histogram_extrapolation_coefs_in_log(
-        #     self.distr_stat_h0_clean, self.bins_stat_histogram)  # attention: extrapolating only the direct bg
-
-        # ---------------------------------------------------------------------------------------
-        # MAKE EXTRAPOLATION
-        # Determine intersection with horizontal axis in log scale:
-        self.extrapolation_coefs_stat_h0_hist = af.get_histogram_extrapolation_coefs_in_log(
-            self.distr_stat_h0, self.bins_stat_histogram)  # attention: extrapolating only the direct bg
-        # self.extrapolation_coefs_stat_h0_hist[1] is supposed to be negative because the trend is decreasing
-        self.prob_density_h0_trigger = np.exp(self.best_stat * self.extrapolation_coefs_stat_h0_hist[1]
-                                              + self.extrapolation_coefs_stat_h0_hist[0])
-        # Follows from the integration of the non-log distribution over MES[SNR^2]
-        self.false_alarm_prob_trigger = (1 / np.abs(self.extrapolation_coefs_stat_h0_hist[1])
-                                         * np.exp(
-                    self.extrapolation_coefs_stat_h0_hist[0] + self.extrapolation_coefs_stat_h0_hist[1] * self.best_stat))
-        bin_ind_close_trigger = np.sort(np.argsort(np.abs(self.bins_stat_histogram - self.best_stat))[:2])[0]  # find edges of this bin
-        # self.prob_density_h1_trigger = self.distr_stat_inj_all[bin_ind_close_trigger]  # use the left edge index to access the bin
-        self.prob_density_h1_trigger = np.nanmean(self.distr_stat_inj_all[
-                                                  max(0, bin_ind_close_trigger - 1): min(len(self.distr_stat_inj_all),
-                                                                                         bin_ind_close_trigger + 1)])
-        # use the left edge index to access the bin
-        self.prob_density_planet_not_noise = self.prob_density_h1_trigger / (self.prob_density_h1_trigger + self.prob_density_h0_trigger)
+        # # Follows from the integration of the non-log distribution over MES[SNR^2]
+        # self.false_alarm_prob_trigger = (1 / np.abs(self.extrapolation_coefs_stat_h0_hist[1])
+        #                                  * np.exp(
+        #             self.extrapolation_coefs_stat_h0_hist[0] + self.extrapolation_coefs_stat_h0_hist[1] * self.best_stat))
+        # bin_ind_close_trigger = np.sort(np.argsort(np.abs(self.bins_stat_histogram - self.best_stat))[:2])[0]  # find edges of this bin
+        # # self.prob_density_h1_trigger = self.distr_stat_inj_all[bin_ind_close_trigger]  # use the left edge index to access the bin
+        # self.prob_density_h1_trigger = np.nanmean(self.distr_stat_inj_all[
+        #                                           max(0, bin_ind_close_trigger - 1): min(len(self.distr_stat_inj_all),
+        #                                                                                  bin_ind_close_trigger + 1)])
+        # # use the left edge index to access the bin
+        # self.prob_density_planet_not_noise = self.prob_density_h1_trigger / (self.prob_density_h1_trigger + self.prob_density_h0_trigger)
 
     def analyze_injections_and_background(self, max_phase_mismatch_to_dur=Max_phase_mismatch_to_dur,
-                                          bins=None, bin_min=None, bin_max=None, bin_width=Histogram_stats_binwid):
+                                          bins=None, bin_min=None, bin_max=None, bin_width=Histogram_mes_binwid):
+        # TODO: MAKE SURE ALL IS CORRECT! IN THE P_PLANET!
         """
         Retrieves the results of the time-shuffled and injection-recovery runs in the corresponding files,
         makes histograms of them, finds the distribution density and estimates the statistical significance
@@ -3223,12 +3474,11 @@ class KeplerTarget(object):
         self.retrieve_background()
         self.retrieve_injections(max_phase_mismatch_to_dur=max_phase_mismatch_to_dur)
         if bins is None:
-            self.make_histogram_bins(bin_min=bin_min, bin_max=bin_max, bin_width=bin_width)
+            self.make_histogram_bins(bin_min=bin_min, bin_max=bin_max, bin_width=bin_width, use_slides=True, use_injections=True)
         else:
-            self.bins_stat_histogram = bins
-            self.bins_gauss_stat_histogram = bins
-        self.make_injections_histogram(bins=self.bins_stat_histogram)
-        self.make_background_histogram(bins=self.bins_stat_histogram)
+            self.bins_int_score_histogram = bins
+        self.make_injections_histogram(bins=self.bins_int_score_histogram, use_integral=True)
+        self.make_background_histogram(bins=self.bins_int_score_histogram, use_integral=True)
         self.calculate_significance(remake_histograms=False)
 
     def get_ses_for_postprocessing(self, no_filters=True, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,
@@ -3281,5 +3531,3 @@ class KeplerTarget(object):
         #                                 load_no_veto_no_score_cor=True,
         #                                 template_index=self.best_temp, apply_score_correction=False, apply_veto=False)
         # ...
-
-

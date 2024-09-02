@@ -149,6 +149,9 @@ def get_occurrence_table_enlarged():
 
 # MASKING KOIs
 Mask_kepler_candidates = False
+Mask_kepler_bright_candidates = True
+Kepler_bright_candidate_mes = 20.
+Kepler_bright_candidate_ses = 8.
 Mask_kepler_false_positives = False
 
 # TARGET CLASS PARAMETERS
@@ -161,6 +164,9 @@ Dif_max_bad_fft = 11.  # Maximal difference between the value at point and the s
 # Search
 P_min_search = 30  # days
 P_max_search = 500  # days
+P_short_min = 10  # days - short periodicity search for verification
+P_short_max = 30  # days - short periodicity search for verification
+Per_min_candidate = 50.  # days  # Only consider such triggers for follow-up after the search
 Baseline_rate_period = P_min_search
 Rp_re_max = 11  # this number of earth radii we search for now. 11 is Jupiter
 Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune to Sun
@@ -168,7 +174,7 @@ Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune
 # P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
 # -> this one used to be when I had 25 templates. Now I have more, so we must increase
 # P_chunks_search = 1000  # 1440
-Per_phases_per_chunk = 1300000  # With 1500000 some jobs got killed
+Per_phases_per_chunk = 1200000  # It was 1300000 in run 12, but injection search took too much memory # With 1500000 some jobs got killed
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
@@ -200,12 +206,9 @@ Max_phase_mismatch_to_dur = 1.5  # Maximal phase difference in units of template
 Default_min_plot_stat = 10
 Default_max_plot_stat = 140
 
-Figsize_fluxes = (15, 5)
-Figsize_folds = (8, 6)
-Figsize_hist = (8, 6)
-
 Data_location = os.path.join(os.getcwd(), 'light_curves')  # in this directory, a file named after target_id will be created
 Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a file named after target_id will be created
+Triggers_output_location = os.path.join(os.getcwd(), 'triggers_outputs')
 Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
 Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
@@ -222,6 +225,7 @@ if Working_place == 'Home':
 if Working_place == 'Marvin':
     Data_location = '/Collaboration-Kepler/KeplerData'
     Output_location = '/Collaboration-Kepler/orynai/output_' + str(Run_name)
+    Triggers_output_location = '/Collaboration-Kepler/orynai/triggers_output_' + str(Run_name)
     Threshold_crossing_lists_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Run_root_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
@@ -229,6 +233,7 @@ if Working_place == 'Marvin':
 if Working_place == 'WEXAC':
     Data_location = '/home/labs/barakz/Collaboration-Kepler/KeplerData'
     Output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/output_' + str(Run_name)
+    Triggers_output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/triggers_output_' + str(Run_name)
     # Kepler_files_folder = '/home/labs/barakz/Collaboration-Kepler/KeplerFiles'
     Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
@@ -308,14 +313,13 @@ No_veto_no_score_cor_stats_filename_postfix = 'no_veto_no_cor_stats'
 Connected_statistic_data_filename_postfix = 'connected_stats'
 Best_periodic_scores_filename_postfix = 'best_periodic_scores_all_p'
 Best_scrambled_periodic_scores_filename_postfix = 'best_scrambled_periodic_scores_all_p'
+Best_short_periodic_scores_filename_postfix = '_best_periodic_scores_'+str(P_short_min)+'_'+str(P_short_max)+'.npy'
 Injection_parameters_filename_postfix = 'injection_parameter_sets.txt'
 All_injection_parameters_filename_postfix = 'all_injection_parameter_sets'
 Injections_filename_postfix = 'injections.txt'
 # these stupid names are because of the search which checks `in`, and I need one file not to be in another one
 Slides_res_filename_postfix = 'scramble_res_scramble'
 Slides_clean_res_filename_postfix = 'scramble_res_clean'
-
-Histogram_stats_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
 
 #########################################################################################################################
 # Template Bank
@@ -339,6 +343,18 @@ Transit_probabilities_m13r_periods_filename = 'm13r_period_transit_probabilities
 
 # -> effective_filter_whitened normalized to have unit time-domain norm, shifter all to have peaks to the left
 # (even the subbin shifts are forcefully shifted, as will the models be)
+
+#########################################################################################################################
+# Class parameters
+#########################################################################################################################
+Histogram_mes_binwid = 1.  # Width of the bin in the MES[SNR^2] histogram of background and injections
+
+Location_attributes = ['output_location', 'data_location', 'gaia_kepler_file', 'koi_dict_file',
+                       'ttv_dict_file', 'villanova_dict_file', 'limb_darkening_array_file']
+
+Star_attributes = ['stellar_radius', 'stellar_mass', 'kepmag', 'phot_g_mean_mag', 'parallax',
+                   'gaia_abs_gmag', 'gaia_b_r', 'teff', 'ra', 'dec', 'm_1_3_r_s']
+
 
 #########################################################################################################################
 # Simulations

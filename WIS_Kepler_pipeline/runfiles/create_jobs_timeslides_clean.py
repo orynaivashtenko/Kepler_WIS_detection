@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import file_operations as fop
 from pipeline_parameters import Triggers_for_slides_injections_file, N_slides_total, N_slides_chunk
 from runfiles_parameters import *
-from trigger_class import Index_tid, Index_per, Index_ftt
+from trigger_functions import Index_tid, Index_per, Index_ftt
 
 import argparse
 parser = argparse.ArgumentParser()

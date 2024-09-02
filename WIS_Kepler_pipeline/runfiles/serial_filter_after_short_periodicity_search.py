@@ -23,7 +23,7 @@ from pipeline_parameters import (Target_ids_prefiltered_file, Triggers_short_per
                                  Threshold_crossing_list_file, Maximal_short_periodicity_triggers_file,
                                  Non_slidable_tids_short_period_file)
 
-from trigger_class import load_triggers, print_trigger_line
+from trigger_functions import load_triggers, print_trigger_line
 
 Data_location = pp.Data_location
 Output_location = pp.Output_location

@@ -286,7 +286,8 @@ def check_dict_keyword(target_id, output_folder, keyword='is_good_for_processing
 
 
 def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 * 3,
-                time_fold=400 * 0.0204336, dt=0.0204336, means=None, template=None, return_std=False):
+                time_fold=400 * 0.0204336, dt=0.0204336, means=None, template=None, return_std=False,
+                normalize_by_counts=True):
     if not hasattr(times[0], "__len__"):
         times = [times]
     if not hasattr(fluxes[0], "__len__"):
@@ -330,13 +331,37 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
             bins_flux_2[ind] += (flux1[i])**2
             bins_counts[ind] += 1
 
-    # bins_flux = bins_flux / bins_counts
-    inds1 = bins_counts >= 1
-    bins_flux[inds1] = bins_flux[inds1] / bins_counts[inds1]
-    # estimate of the variance of the measurements:
-    bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
-    bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
-    bins_std = bins_flux_2**0.5
+    bins_std = None
+    if return_std:
+        bins_flux_normalized = np.array(bins_flux)
+        # For the entries with enough counts for the unbiased estimate:
+        inds1 = (bins_counts >= 2)
+        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        # estimate of the variance of the measurements:
+        bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
+        bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        # See notebook from 22/08/24 for the explanation of the formula above
+
+        # For the ones where there is not enough counts for unbiased estimate of variance:
+        inds1 = (bins_counts == 1)
+        if len(np.where(inds1)[0]) > 0:
+            bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+            # estimate of the variance of the measurements:
+            bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / bins_counts[inds1]
+            bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+
+        bins_std = bins_flux_2**0.5
+        if normalize_by_counts:
+            bins_flux = bins_flux_normalized
+
+    elif normalize_by_counts:
+        bins_flux_normalized = np.array(bins_flux)
+        inds1 = (bins_counts >= 2)
+        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        inds1 = (bins_counts == 1)
+        if len(np.where(inds1)[0]) > 0:
+            bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        bins_flux = bins_flux_normalized
 
     if template is None:
         if return_std:
@@ -358,6 +383,52 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std
         else:
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped
+
+
+def get_average_whitened_template(whitened_templates_td, temp_number, n_time_templ, dt_days=None, indices_of_templates=None):
+    if indices_of_templates is None:
+        from template_bank.template_module import Indices_of_templates
+        indices_of_templates = Indices_of_templates
+    if dt_days is None:
+        from template_bank.template_module import dt_lc as dt_days
+    n_quarters = len(whitened_templates_td[0])
+
+    iot = indices_of_templates[temp_number]
+    if iot[1] - iot[0] > 1:
+        temps = [np.nanmean([whitened_templates_td[i][q] for i in range(iot[0], iot[1])], axis=0)
+                 for q in range(n_quarters)]
+    else:
+        temps = whitened_templates_td[indices_of_templates[temp_number][0]]
+        temps = [np.array(t) for t in temps]
+    for q in range(len(temps)):
+        if len(temps[q]) < n_time_templ:
+            temps[q] = ut.pad_by_zeros(temps[q], n_time_templ, in_the_center=True)
+        elif len(temps[q]) > n_time_templ:
+            temps[q] = np.concatenate((temps[q][:n_time_templ // 2], temps[q][- (n_time_templ + 1) // 2:]))
+    temp_best_1 = np.array(np.mean([temps[q][:n_time_templ // 2] for q in range(n_quarters)], axis=0))
+    temp_best_2 = np.array(np.mean([temps[q][n_time_templ // 2:] for q in range(n_quarters)], axis=0))
+    time_template_1 = np.arange(len(temp_best_1)) * dt_days
+    time_template_2 = (np.arange(len(temp_best_2)) * dt_days * (-1))[::-1]
+    time_template_2 = time_template_2 - (time_template_2[1] - time_template_2[0])
+    temp_best = np.concatenate((temp_best_2, temp_best_1))
+    time_template = np.concatenate((time_template_2, time_template_1))
+    # tem_center = np.nanargmax(np.abs(temp_best))
+    # time_template = np.concatenate((np.arange(tem_center) - tem_center, np.arange(len(temp_best) - tem_center))) * self.klc.dt_days
+    return temp_best, time_template
+
+
+def get_average_stat_template(whitened_templates_td, temp_number, n_time_templ,
+                              dt_days=None, indices_of_templates=None):
+    temp_best, time_template = get_average_whitened_template(whitened_templates_td=whitened_templates_td, temp_number=temp_number,
+                                                             n_time_templ=n_time_templ, dt_days=dt_days,
+                                                             indices_of_templates=indices_of_templates)
+    temp_best = temp_best / np.linalg.norm(temp_best)
+    temp_best = np.roll(temp_best, -np.argmax(temp_best))  # the maximum is supposed to be at zero
+    temp_best = np.fft.irfft(np.abs(np.fft.rfft(temp_best)) ** 2)  # for statistic, template is convolution
+    tem_center = n_time_templ // 2
+    temp_best = np.roll(temp_best, tem_center)  # the maximum is supposed to be at zero before
+    time_template = np.concatenate((np.arange(tem_center) - tem_center, np.arange(len(temp_best) - tem_center))) * dt_days
+    return temp_best, time_template
 
 
 def mask_ephemeris(times, quarters, masks, big_hole_masks, dt_days,
@@ -527,6 +598,312 @@ def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
         return flag
     else:
         raise AssertionError('Please finish the code for rfft=False !')
+
+
+# ####################################################################################################
+# FUNCTIONS FOR VETO FOLDED
+# ####################################################################################################
+
+def mf_high_pass(data, dt, dt_pass, template=None, template_rolled=None, renorm_psd_drift=False):
+    """
+    ! Warning ! uses the np.fft.rfft(..., norm=None) convention!
+    Matched-filtering of `data` and `template` with high-pass filter. That is, the matched filter is informed
+    that there is no information below `1/dt_pass` frequency. It creates an effective whitening filter which zeros
+    everything below the frequency `1/dt_pass`. This filter is also used in the denominator of the matched-filter,
+    so that the score is properly normalized.
+    :param data: data array to be matched-filtered
+    :type data: numpy.ndarray 1d or 2d
+    :param template: template or templates in the time domain. Superseded by `template_rolled`.
+        Used if `template_rolled` is `None`.
+    :type template: None or numpy.ndarray 1d or 2d
+    :param template_rolled: template for all its possible rolls. Is needed when convolution cannot be made because
+        the template shape is not shift-invariant. If None, then `template` is used, and convolution is made.
+    :type template_rolled: None or numpy.ndarray 2d
+    :param dt: time step of the data, should have the same units as `dt_pass`
+    :type dt: float
+    :param dt_pass: maximal timescale of the high-pass filter. Power at frequencies smaller than `1/dt_pass`
+        will be zeroed. Should have the same units as `dt_pass`.
+    :type dt_pass: float
+    :param renorm_psd_drift:
+    :type renorm_psd_drift: bool
+    :return: matched-filtering scores in units of snr and in units of amplitude
+    :rtype: (numpy.ndarray 1d or 2d, numpy.ndarray 1d or 2d), corresponding to the sizes of `data` and `template`
+    """
+    data = np.array(data)
+    template = np.array(template)
+    freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
+    inds_pass = freqs > 1 / dt_pass
+    wf2_effective = np.zeros(freqs.shape[-1])
+    f_data = np.fft.rfft(data, axis=-1)
+    wf2_effective[inds_pass] = data.shape[-1] / np.mean((np.abs(f_data) ** 2)[inds_pass])
+    if template_rolled is not None:
+        blued_data = np.fft.irfft(f_data * wf2_effective, n=len(data), axis=-1)
+        numer = np.sum(blued_data * template_rolled, axis=-1)
+        blued_template_rolled = np.fft.irfft(np.fft.rfft(template_rolled, axis=-1) * wf2_effective, n=len(data), axis=-1)
+        denom = np.sum(blued_template_rolled * template_rolled, axis=-1) ** 0.5
+    elif template is not None:
+        f_template = np.fft.rfft(template, axis=-1)
+        numer = np.fft.irfft(f_data * wf2_effective * np.conjugate(f_template), n=len(data), axis=-1)
+        denom = (np.fft.irfft(f_template * wf2_effective * np.conjugate(f_template), n=len(data), axis=-1)[..., 0]) ** 0.5
+    else:
+        raise ValueError('Either `template` or `template_rolled` should be provided')
+
+    stats_snr = (numer.T / denom).T
+    stats_ampl = (numer.T / denom ** 2).T
+    if renorm_psd_drift and hasattr(stats_snr, '__len__') and len(stats_snr) > 1:
+        stats_snr = stats_snr / ut.outlier_free_std(stats_snr, nsig=3, n_iterations=1, renormalize=True)
+    return stats_snr, stats_ampl  # snr, ampl
+
+
+def mf_high_pass_iterative_rolls(data, dt, dt_pass, template=None, coefficients_template=None, renorm_psd_drift=False):
+    """
+    ! Warning ! uses the np.fft.rfft(..., norm=None) convention!
+    Matched-filtering of `data` and `template` with high-pass filter. That is, the matched filter is informed
+    that there is no information below `1/dt_pass` frequency. It creates an effective whitening filter which zeros
+    everything below the frequency `1/dt_pass`. This filter is also used in the denominator of the matched-filter,
+    so that the score is properly normalized.
+    :param data: data array to be matched-filtered
+    :type data: numpy.ndarray 1d or 2d
+    :param template: template or templates in the time domain.
+    :type template: None or numpy.ndarray 1d or 2d
+    :param dt: time step of the data, should have the same units as `dt_pass`
+    :type dt: float
+    :param dt_pass: maximal timescale of the high-pass filter. Power at frequencies smaller than `1/dt_pass`
+        will be zeroed. Should have the same units as `dt_pass`.
+    :type dt_pass: float
+    :param renorm_psd_drift:
+    :type renorm_psd_drift: bool
+    :return: matched-filtering scores in units of snr and in units of amplitude
+    :rtype: (numpy.ndarray 1d or 2d, numpy.ndarray 1d or 2d), corresponding to the sizes of `data` and `template`
+    """
+    data = np.array(data)
+    template = np.array(template)
+    freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
+    inds_pass = freqs > 1 / dt_pass
+    wf2_effective = np.zeros(freqs.shape[-1])
+    f_data = np.fft.rfft(data, axis=-1)
+    wf2_effective[inds_pass] = data.shape[-1] / np.mean((np.abs(f_data) ** 2)[inds_pass])
+    if coefficients_template is None:  # bins_counts ** 0.5
+        coefficients_template = np.ones(len(template))
+    blued_data = np.fft.irfft(f_data * wf2_effective, n=len(data), axis=-1)
+
+    stats_snr = np.zeros(len(template))
+    stats_ampl = np.zeros(len(template))
+    for rolling_ind in range(len(template)):
+        template_rolled = coefficients_template * np.roll(template, rolling_ind)
+        numer = np.sum(blued_data * template_rolled, axis=-1)
+        blued_template_rolled = np.fft.irfft(np.fft.rfft(template_rolled, axis=-1) * wf2_effective, n=len(data), axis=-1)
+        denom = np.sum(blued_template_rolled * template_rolled, axis=-1) ** 0.5
+        stats_snr[rolling_ind] = (numer.T / denom).T
+        stats_ampl[rolling_ind] = (numer.T / denom ** 2).T
+
+    if renorm_psd_drift and hasattr(stats_snr, '__len__') and len(stats_snr) > 1:
+        stats_snr = stats_snr / ut.outlier_free_std(stats_snr, nsig=3, n_iterations=1, renormalize=True)
+    return stats_snr, stats_ampl  # snr, ampl
+
+
+def renorm_noise_high_pass(data, dt, dt_pass):
+    """
+    ! Warning ! uses the np.fft.rfft(..., norm=None) convention!
+    Renormalizes the noise`data` after high-pass filtering. We want that the noise is white,
+    but its lowest frequencies are removes. This means that the high-frequency spectrum of the
+    Fourier image of the data should look in the same way as if the data was white. Therefore,
+    going to the time domain and measuring the variance is not an option because it will measure
+    a smaller variance. This function renormalizes the data in the Fourier space so that the
+    power at the high frequencies corresponds to the power of the white noise at the same
+    frequencies, as defined by the length of the data in the np.fft.rfft(..., norm=None) convention
+    :param data: Noise vector to be renormalized. In time-domain
+    :type data: numpy.ndarray 1d
+    :param dt: time step of the data, should have the same units as `dt_pass`
+    :type dt: float
+    :param dt_pass: Maximal timescale of the high-pass filter. Power at frequencies smaller than `1/dt_pass`
+        will be zeroed. Should have the same units as `dt_pass`.
+    :type dt_pass: float
+    :return: Renormalized data vector. In time-domain
+    :rtype: numpy.ndarray 1d
+    """
+    data = np.array(data)
+    f_data = np.fft.rfft(data, axis=-1)
+    freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
+    inds_pass = freqs > 1 / dt_pass
+    wf2_effective = np.zeros(freqs.shape[-1])
+    wf2_effective[inds_pass] = data.shape[-1] / np.mean((np.abs(f_data)**2)[inds_pass])
+    return np.fft.irfft(f_data * wf2_effective**0.5, n=data.shape[-1], axis=-1)
+
+
+def matched_filter_folded_fluxes_still_too_much_memory(template_number, whitened_templates_td, n_time_templ, binwid,
+                                 indices_of_templates, bins_time, bins_counts, flux_normalized_vars,
+                                 dt_steps_high_pass, dt_days):
+    """
+    # ------------------------------------------------------------------------------------------------------------
+    # CALCULATING THE MATCHED FILTER SCORE ON THE BINNED WHITENED FLUX
+    # Matched-filtering of the folded binned flux with the templates corresponding to their expected values.
+    # Takes the original `whitened_templates_td` that were used fot the search, in their original time resolution,
+    # averages them over sub-bin shifts, and interpolates them (not integrates, which is in general wrong!)
+    # to the binned time `bins_time`. The binned template is normalized by the `bins_counts`, as well as the
+    # binned flux `bins_flux`, so that the expectations are consistent, and the variances are uniform.
+    # Then, the binned flux `bins_flux` is matched-filtered with the binned and the normalized templates
+    # The folded template is proportional to the counts, but the matched filtering should be done
+    # on the whitened template, and the standard deviation is proportional to the square root of counts.
+    # Important: template multiplied by counts is not shift-invariant because counts are different
+    # in every bin. Therefore, convolution cannot be used.
+    :param template_number:
+    :type template_number:
+    :param whitened_templates_td:
+    :type whitened_templates_td:
+    :param n_time_templ:
+    :type n_time_templ:
+    :param binwid:
+    :type binwid:
+    :param indices_of_templates:
+    :type indices_of_templates:
+    :param bins_time:
+    :type bins_time:
+    :param bins_counts:
+    :type bins_counts:
+    :param flux_normalized_vars:
+    :type flux_normalized_vars:
+    :param dt_steps_high_pass:
+    :type dt_steps_high_pass:
+    :param dt_days:
+    :type dt_days:
+    :return:
+    :rtype:
+    """
+    folded_template_rolled = get_shift_averaged_rolled_template_normalized_by_bins(
+        whitened_templates_td=whitened_templates_td, template_number=template_number, indices_of_templates=indices_of_templates,
+        n_time_templ=n_time_templ, dt_days=dt_days, bins_time=bins_time, bins_counts=bins_counts)
+
+    mf_scores, ampl_scores = mf_high_pass(flux_normalized_vars, template=None, template_rolled=folded_template_rolled,
+                                          dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+                                          renorm_psd_drift=True)
+
+    rolling_arg = np.argmax(mf_scores)
+    # rolling_val_peak = rolling_arg if rolling_arg <= len(mf_scores) / 2 else len(mf_scores) - rolling_arg
+    mf_score_peak = mf_scores[rolling_arg]
+    ampl_score_peak = ampl_scores[rolling_arg]
+
+    # max_dist_from_detected_peak_bins = 5  # how far away the pipeline peak can be from the folding peak for the best template
+    # if rolling_vals_peaks[np.argmax(mf_scores_peaks)] > max_dist_from_detected_peak_bins:
+    #     self.is_bad_fold_residuals = True  # There is some largest peak in the wrong place
+    #     self.template_and_stat_of_fold_contaminant = (np.argmax(mf_scores_peaks), np.max(mf_scores_peaks))
+    # self.best_temp_folded = np.argmax(mf_scores_peaks * (rolling_vals_peaks <= max_dist_from_detected_peak_bins).astype(float))
+    # temp_number = self.best_temp_folded
+
+    # mf_score, ampl_score = np.array(mf_scores[temp_number]), np.array(ampl_scores[temp_number])
+    # del mf_scores  # for memory
+    # del ampl_scores
+    return mf_score_peak, ampl_score_peak, rolling_arg, folded_template_rolled[rolling_arg]
+
+
+
+def matched_filter_folded_fluxes(template_number, whitened_templates_td, n_time_templ, binwid,
+                                 indices_of_templates, bins_time, bins_counts, flux_normalized_vars,
+                                 dt_steps_high_pass, dt_days, renorm_psd_drift=True):
+    """
+    # ------------------------------------------------------------------------------------------------------------
+    # CALCULATING THE MATCHED FILTER SCORE ON THE BINNED WHITENED FLUX
+    # Matched-filtering of the folded binned flux with the templates corresponding to their expected values.
+    # Takes the original `whitened_templates_td` that were used fot the search, in their original time resolution,
+    # averages them over sub-bin shifts, and interpolates them (not integrates, which is in general wrong!)
+    # to the binned time `bins_time`. The binned template is normalized by the `bins_counts`, as well as the
+    # binned flux `bins_flux`, so that the expectations are consistent, and the variances are uniform.
+    # Then, the binned flux `bins_flux` is matched-filtered with the binned and the normalized templates
+    # The folded template is proportional to the counts, but the matched filtering should be done
+    # on the whitened template, and the standard deviation is proportional to the square root of counts.
+    # Important: template multiplied by counts is not shift-invariant because counts are different
+    # in every bin. Therefore, convolution cannot be used.
+    # ------------------------------------------------------------------------------------------------------------
+    The folded template is proportional to the counts, but the matched filtering should be done
+    # on the whitened template, amd the standard deviation is proportional to the square root of counts.
+
+    # The following is incorrect because you cannot divide template which will be slided by the bins which will
+    # not be slided (in the matched-filtering over all the transit phases)
+    # folded_template = np.zeros(len(bins_counts))
+    # folded_template[bins_counts > 0] = temp_interp[bins_counts > 0] * bins_counts[bins_counts > 0] ** 0.5
+    :param template_number:
+    :type template_number:
+    :param whitened_templates_td:
+    :type whitened_templates_td:
+    :param n_time_templ:
+    :type n_time_templ:
+    :param binwid:
+    :type binwid:
+    :param indices_of_templates:
+    :type indices_of_templates:
+    :param bins_time:
+    :type bins_time:
+    :param bins_counts:
+    :type bins_counts:
+    :param flux_normalized_vars:
+    :type flux_normalized_vars:
+    :param dt_steps_high_pass:
+    :type dt_steps_high_pass:
+    :param dt_days:
+    :type dt_days:
+    :return:
+    :rtype:
+    """
+
+    averaged_template, time_template = get_average_whitened_template(whitened_templates_td=whitened_templates_td,
+                                                                     temp_number=template_number, n_time_templ=n_time_templ,
+                                                                     dt_days=dt_days, indices_of_templates=indices_of_templates)
+    # Interpolating the best averaged template
+    temp_interp = np.interp(bins_time, time_template, averaged_template)
+    temp_interp = - temp_interp / np.linalg.norm(temp_interp)
+
+    mf_scores, ampl_scores = mf_high_pass_iterative_rolls(data=flux_normalized_vars, dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+                                                          template=temp_interp, coefficients_template=bins_counts**0.5,
+                                                          renorm_psd_drift=renorm_psd_drift)
+    rolling_arg = np.argmax(mf_scores)
+    mf_score_peak = mf_scores[rolling_arg]
+    ampl_score_peak = ampl_scores[rolling_arg]
+    return mf_score_peak, ampl_score_peak, rolling_arg, bins_counts ** 0.5 * np.roll(temp_interp, rolling_arg)
+
+
+def make_rolled_template_normalized_by_bins(averaged_template, bins_counts):
+    """
+    THIS TAKES TOO MUCH MEMORY
+    :param averaged_template:
+    :type averaged_template:
+    :param bins_counts:
+    :type bins_counts:
+    :return:
+    :rtype:
+    """
+    return bins_counts ** 0.5 * np.array([np.roll(averaged_template, ii) for ii in range(len(averaged_template))])
+
+
+def get_shift_averaged_rolled_template_normalized_by_bins(whitened_templates_td, template_number, indices_of_templates,
+                                                          n_time_templ, dt_days, bins_time, bins_counts):
+    temp_best, time_template = get_average_whitened_template(whitened_templates_td=whitened_templates_td,
+                                                             temp_number=template_number, n_time_templ=n_time_templ,
+                                                             dt_days=dt_days, indices_of_templates=indices_of_templates)
+    # Interpolating the best averaged template
+    temp_interp = np.interp(bins_time, time_template, temp_best)
+    temp_interp = - temp_interp / np.linalg.norm(temp_interp)
+    folded_template_rolled = make_rolled_template_normalized_by_bins(temp_interp, bins_counts)
+    # -> The folded template is proportional to the counts, but the matched filtering should be done
+    # on the whitened template, amd the standard deviation is proportional to the square root of counts.
+
+    # The following is incorrect because you cannot divide template which will be slided by the bins which will
+    # not be slided (in the matched-filtering over all the transit phases)
+    # folded_template = np.zeros(len(bins_counts))
+    # folded_template[bins_counts > 0] = temp_interp[bins_counts > 0] * bins_counts[bins_counts > 0] ** 0.5
+    return folded_template_rolled
+
+
+def get_orig_quarters(times):
+    from tce_parameters import get_quarter_start_end_times
+    quarter_start_times, quarter_end_times = get_quarter_start_end_times()
+    orig_quarters = []
+    for tim in times:
+        for q_orig in range(len(quarter_start_times)):
+            if quarter_start_times[q_orig] <= tim <= quarter_end_times[q_orig]:
+                orig_quarters.append(q_orig)
+            elif q_orig > 0 and quarter_end_times[q_orig-1] < tim < quarter_start_times[q_orig]:
+                orig_quarters.append(np.nan)
+    return np.array(orig_quarters)
 
 
 def plot_many(list_times, list_values=None, first_index=0, prefix='quarter',
@@ -706,7 +1083,8 @@ def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None
         return bins, counts
 
 
-def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=False, remove_quarter_17=False, return_aperture_masks=False):
+def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=False, remove_quarter_17=False, return_aperture_masks=False,
+                              dtype=np.float64):
     target_id = str(target_id).rjust(9, "0")
     data_folder = get_correct_tid_folder(target_id=target_id, location=data_folder, allow_creation=True)
 
@@ -722,8 +1100,8 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
     aperture_masks = []
     for tp_fits_filename in tp_fits_filenames:
         tp_fits_file = fits.open(os.path.join(data_folder, tp_fits_filename))
-        time = tp_fits_file[1].data['TIME']
-        target_pix = tp_fits_file[1].data['FLUX']
+        time = tp_fits_file[1].data['TIME'].astype(dtype)
+        target_pix = tp_fits_file[1].data['FLUX'].astype(dtype)
         if return_aperture_masks:
             aperture_masks.append(tp_fits_file[2].data)
         tp_fits_file.close()
@@ -762,7 +1140,7 @@ def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=Fals
 
 
 def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True,
-                                    dtype=np.float32):
+                                    dtype=np.float64):
     """
 
     ra and dec are in decimal degrees
@@ -791,7 +1169,8 @@ def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quar
             tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
             time_tpf = np.array(tpf1.time.value, dtype=dtype)
             flux_tpf = np.array(tpf1.flux.value, dtype=dtype)
-            ra, dec = tpf1.get_coordinates(cadence='all')
+            # ra, dec = tpf1.get_coordinates(cadence='all')  # see in the description of get_tpf_coordinates_corrected_origin
+            ra, dec = get_tpf_coordinates_corrected_origin(tpf1, cadence='all')
             ra = np.array(ra, dtype=dtype)
             dec = np.array(dec, dtype=dtype)
             mask = np.array(tpf1.quality_mask)
@@ -852,6 +1231,111 @@ def get_target_pixel_sky_coords_fun(target_id, data_location, remove_zeroth_quar
 
     # times, fluxes, sky_coords, time_masks, aperture_masks
     return times, fluxes, sky_coords, time_masks, aperture_masks
+
+
+def get_tpf_coordinates_corrected_origin(tpf, cadence="all"):
+    """
+    Copy of
+    https://github.com/lightkurve/lightkurve/blob/b74b30795ddb52595e80939713558cdaf9252872/src/lightkurve/targetpixelfile.py#L438
+    but with changed origin of the transformation of coordinates, see description in the comments.
+
+    Returns two 3D arrays of RA and Dec values in decimal degrees.
+
+    If cadence number is given, returns 2D arrays for that cadence. If
+    cadence is 'all' returns one RA, Dec value for each pixel in every cadence.
+    Uses the WCS solution and the POS_CORR data from TPF header.
+
+    :param tpf: instance of lightkurve.targetpixelfile.KeplerTargetPixelFile
+    from lightkurve import targetpixelfile
+    tpf = targetpixelfile.KeplerTargetPixelFile(target_pixels_file_path)
+    :type tpf: lightkurve.targetpixelfile.KeplerTargetPixelFile
+    :param cadence: 'all' or int
+    :type cadence: Which cadences to return the RA Dec coordinates for.
+    :return:
+    ra : numpy array, same shape as tpf.flux[cadence]
+        Array containing RA values for every pixel, for every cadence.
+    dec : numpy array, same shape as tpf.flux[cadence]
+        Array containing Dec values for every pixel, for every cadence.
+    :rtype:
+    """
+    w = tpf.wcs
+    xx, yy = np.meshgrid(np.arange(tpf.shape[2]), np.arange(tpf.shape[1]))
+    pos_corr1_pix = np.copy(tpf.hdu[1].data["POS_CORR1"])
+    pos_corr2_pix = np.copy(tpf.hdu[1].data["POS_CORR2"])
+
+    # We zero POS_CORR* when the values are NaN or make no sense (>50px)
+    with warnings.catch_warnings():  # Comparing NaNs to numbers is OK here
+        warnings.simplefilter("ignore", RuntimeWarning)
+        bad = np.any(
+            [
+                ~np.isfinite(pos_corr1_pix),
+                ~np.isfinite(pos_corr2_pix),
+                np.abs(pos_corr1_pix - np.nanmedian(pos_corr1_pix)) > 50,
+                np.abs(pos_corr2_pix - np.nanmedian(pos_corr2_pix)) > 50,
+            ],
+            axis=0,
+        )
+    pos_corr1_pix[bad], pos_corr2_pix[bad] = 0, 0
+
+    # ----------------------------------------------------------------------------------------------------------
+    # Add in POSCORRs
+    # xx = np.atleast_3d(xx).transpose([2, 0, 1]) + np.atleast_3d(pos_corr1_pix).transpose([1, 2, 0])
+    # yy = np.atleast_3d(yy).transpose([2, 0, 1]) + np.atleast_3d(pos_corr2_pix).transpose([1, 2, 0])
+    # WARNING: the correction (as in the commented section above) was added in the original lightkurve implementation.
+    # However, I noticed that this only makes the tred worse. On the contrary, subtracting the correction improves the trend,
+    # therefore I decided to subtract it, as below:
+    xx = np.atleast_3d(xx).transpose([2, 0, 1]) - np.atleast_3d(pos_corr1_pix).transpose([1, 2, 0])
+    yy = np.atleast_3d(yy).transpose([2, 0, 1]) - np.atleast_3d(pos_corr2_pix).transpose([1, 2, 0])
+
+    # ----------------------------------------------------------------------------------------------------------
+    # Pass through WCS
+    # WARNING: the following commented line:
+    # # ra, dec = w.wcs_pix2world(xx.ravel(), yy.ravel(), 1)
+    # was the original implementation of lightkurve package. The last argument,
+    # 1, is the origin of the coordinates. It is set to 1, which is the default value for Fortran and FITS files. However, the
+    # Numpy and C is 0.
+    # The description from
+    # https://github.com/astropy/astropy/blob/54578767c44950710562c1333bfe1a5312a083e3/astropy/wcs/docstrings.py#L48
+    # origin : int
+    #     Specifies the origin of pixel values. The Fortran and FITS
+    #     standards use an origin of 1. Numpy and C use array indexing with
+    #     origin at 0.
+    #
+    # I noticed that when using this transformation, the result id not consistent between this function
+    # https://github.com/lightkurve/lightkurve/blob/b74b30795ddb52595e80939713558cdaf9252872/src/lightkurve/targetpixelfile.py#L438
+    # and this transformation of the Gaia sources to the pixel coordinates
+    # https://github.com/lightkurve/lightkurve/blob/main/src/lightkurve/interact.py#L549
+    # I needed this for the interact_sky plot of the pixel data and Gaia sources:
+    # https://github.com/lightkurve/lightkurve/blob/b74b30795ddb52595e80939713558cdaf9252872/src/lightkurve/targetpixelfile.py#L1378
+    # I saw that the transformation is not invertible when using 1 and 0 in direct and inverse transform, so it cannot be
+    # consistent, only one of them can possibly be correct.
+    ra, dec = w.wcs_pix2world(xx.ravel(), yy.ravel(), 0)
+    ra = ra.reshape((pos_corr1_pix.shape[0], tpf.shape[1], tpf.shape[2]))
+    dec = dec.reshape((pos_corr2_pix.shape[0], tpf.shape[1], tpf.shape[2]))
+    ra, dec = ra[tpf.quality_mask], dec[tpf.quality_mask]
+    if cadence != "all":
+        return ra[cadence], dec[cadence]
+    return ra, dec
+
+
+def get_tpf_fiducial_frame(tpf):
+    """
+    :param tpf: instance of lightkurve.targetpixelfile.KeplerTargetPixelFile
+    from lightkurve import targetpixelfile
+    tpf = targetpixelfile.KeplerTargetPixelFile(target_pixels_file_path)
+    :type tpf: lightkurve.targetpixelfile.KeplerTargetPixelFile
+    :return: fiducial_frame, index of time array when supposedly the TPF WCS coordinate system is exact
+    :rtype: int
+    """
+    # Try to identify the "fiducial frame", for which the TPF WCS is exact
+    zp = (tpf.pos_corr1 == 0) & (tpf.pos_corr2 == 0)
+    (zp_loc,) = np.where(zp)
+
+    if len(zp_loc) == 1:
+        fiducial_frame = zp_loc[0]
+    else:
+        fiducial_frame = 0
+    return fiducial_frame
 
 
 def get_kepler_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
@@ -1119,7 +1603,7 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
     return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
 
 
-def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=None, time_masks=None):
+def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=None, time_masks=None, dtype=np.float64):
     """
     see https://github.com/lightkurve/lightkurve/blob/main/src/lightkurve/targetpixelfile.py, the `estimate_centroids` function to learn
     how they do it. They have the simple centroid, same as here, and also some polynomial-fitting one.
@@ -1136,6 +1620,7 @@ def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=Non
     :return:
     :rtype:
     """
+    target_pixel_fluxes = [np.array(e, dtype=dtype) for e in target_pixel_fluxes]
     centroids_x = []  # ra if sky_coords is specified
     centroids_y = []  # dec if sky_coords is specified
     for q in range(len(target_pixel_fluxes)):
@@ -1154,14 +1639,18 @@ def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=Non
 
         if sky_coords is None:
             y_coor, x_coor = np.indices(np.shape(target_pixels_flux)[1:3])
-            x_coor = x_coor * np.ones(np.shape(target_pixels_flux), dtype=float)
-            y_coor = y_coor * np.ones(np.shape(target_pixels_flux), dtype=float)
+            assert ((y_coor[aperture_mask] / np.mean(y_coor[aperture_mask])) != 1.
+                    ).any(), 'All the pixels are in the same row! Centroid is constant'
+            assert ((x_coor[aperture_mask] / np.mean(x_coor[aperture_mask])) != 1.
+                    ).any(), 'All the pixels are in the same column! Centroid is constant'
+            x_coor = x_coor * np.ones(np.shape(target_pixels_flux), dtype=dtype)
+            y_coor = y_coor * np.ones(np.shape(target_pixels_flux), dtype=dtype)
         else:
             y_coor, x_coor = sky_coords[q][1], sky_coords[q][0]
 
-        sap_flux = np.zeros(len(target_pixels_flux)) * np.nan
-        centr_x = np.zeros(len(target_pixels_flux)) * np.nan
-        centr_y = np.zeros(len(target_pixels_flux)) * np.nan
+        sap_flux = np.zeros(len(target_pixels_flux), dtype=dtype) * np.nan
+        centr_x = np.zeros(len(target_pixels_flux), dtype=dtype) * np.nan
+        centr_y = np.zeros(len(target_pixels_flux), dtype=dtype) * np.nan
         sap_flux[time_mask] = np.nansum(target_pixels_flux[time_mask][:, aperture_mask], axis=1)
         centr_x[time_mask] = np.nansum((x_coor[time_mask] * target_pixels_flux[time_mask])[:, aperture_mask], axis=1) / sap_flux[
             time_mask]
@@ -1174,98 +1663,6 @@ def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=Non
         centroids_x.append(centr_x)
         centroids_y.append(centr_y)
     return centroids_x, centroids_y
-
-
-# def find_snr_at_transit_times(signal_quarters, time_quarters, summed_transit_times, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15,
-#                               max_abs=True, time_mismatch_allowed=3):
-#     """
-#     THIS IS NOT USED BECAUSE WE SWITCHED TO JUST A SHORT PERIODICITY SEARCH IN THE TCE CLASS
-#     TODO: look at nsig
-#     TODO: which template?
-#     TODO: now we have ra, dec, so we can summarize quarters!
-#     TODO: maybe periodicity?
-#     :param signal_quarters:
-#     :type signal_quarters:
-#     :param time_quarters:
-#     :type time_quarters:
-#     :param summed_transit_times:
-#     :type summed_transit_times:
-#     :param nsig_outliers_0_pos:
-#     :type nsig_outliers_0_pos:
-#     :param nsig_outliers_0_neg:
-#     :type nsig_outliers_0_neg:
-#     :param max_abs:
-#     :type max_abs:
-#     :param time_mismatch_allowed: is specified in bins! (very stupid name then!)
-#     :type time_mismatch_allowed: int
-#     :return:
-#     :rtype:
-#     """
-#     pass
-#     # # making the lightcurve out of this whatever data and doing search:
-#     # klc = spip.KeplerLightCurve(target_id=None, get_data=False, times=time_quarters, fluxes=signal_quarters)
-#     # klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
-#     #                    nsig_outliers_0_neg=nsig_outliers_0_neg,
-#     #                    nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
-#     #                    nsig_outliers_w_neg=nsig_outliers_0_neg)
-#     # klc.condition_templates()
-#     # klc.matched_filtering()
-#     # klc.cut_zero_padding_ends()
-#     #
-#     # klc.templates_of_indices = [k for k in range(len(klc.indices_of_templates))
-#     #                             for _ in range(klc.indices_of_templates[k][0], klc.indices_of_templates[k][1])]
-#
-#     # max_stats = []
-#     # std_stat_maxs = []
-#     # max_templs = []
-#     # # max_templs_sh = []
-#     # # times_max = []
-#     # for i, tt in enumerate(summed_transit_times):
-#     #     max_stat_to_std = 0.
-#     #     max_stat = None
-#     #     std_stat_max = None
-#     #     templ_sh_ind = None
-#     #     # max_templ = None
-#     #     for q in klc.quarters:
-#     #         if klc.times[q][~np.isnan(klc.times[q])][0] <= tt <= klc.times[q][~np.isnan(klc.times[q])][-1]:
-#     #             ind_tr = np.nanargmin(np.abs(klc.times[q] - tt))
-#     #             for k in range(len(klc.statistics_snr)):
-#     #                 std_stat = ut.outlier_free_std(klc.statistics_snr[k][q], nsig=3, mask=klc.masks[q], detrend=False, detr_len=128)
-#     #                 ti0 = max(0, ind_tr - time_mismatch_allowed)
-#     #                 if max_abs:
-#     #                     time_index = ti0 + np.nanargmax(np.abs(klc.statistics_snr[k][q][ti0:ind_tr + time_mismatch_allowed]))
-#     #                     # -> allow the actual minimum to be a little shifted
-#     #                     stat_here = klc.statistics_snr[k][q][time_index]
-#     #                     stat_to_std_here = stat_here/std_stat
-#     #                     if np.abs(stat_to_std_here) >= np.abs(max_stat_to_std):
-#     #                         max_stat = stat_here
-#     #                         templ_sh_ind = k
-#     #                         std_stat_max = std_stat
-#     #                         max_stat_to_std = stat_to_std_here
-#     #                         # time_max = klc.times[q][time_index]
-#     #                 else:
-#     #                     time_index = ti0 + np.nanargmin(klc.statistics_snr[k][q][ti0:ind_tr + time_mismatch_allowed])
-#     #                     # -> allow the actual minimum to be a little shifted
-#     #                     stat_here = klc.statistics_snr[k][q][time_index]
-#     #                     stat_to_std_here = stat_here / std_stat
-#     #                     if stat_to_std_here <= max_stat_to_std:
-#     #                         max_stat = stat_here
-#     #                         templ_sh_ind = k
-#     #                         std_stat_max = std_stat
-#     #                         max_stat_to_std = stat_to_std_here
-#     #                         # time_max = klc.times[q][time_index]
-#     #     if templ_sh_ind is not None:  # it can be for example if the expected transit happened between the quarters
-#     #         max_templ = klc.templates_of_indices[templ_sh_ind]
-#     #         max_stats.append(max_stat)
-#     #         std_stat_maxs.append(std_stat_max)
-#     #         max_templs.append(max_templ)
-#     #         # times_max.append(time_max)
-#     #         # max_templs_sh.append(templ_sh_ind)
-#     #     else:
-#     #         max_stats.append(np.nan)
-#     #         std_stat_maxs.append(np.nan)
-#     #         max_templs.append(np.nan)
-#     # return max_stats, std_stat_maxs, max_templs
 
 
 def make_bool_aperture_mask(bit_aperture_mask, bit=1):

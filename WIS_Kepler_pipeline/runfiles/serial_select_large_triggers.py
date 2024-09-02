@@ -15,7 +15,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = core_num  # export NUMEXPR_NUM_THREADS=6
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
-import trigger_class
+import trigger_functions
 
 Trigger_list_file = '/home/labs/barakz/orynai/run_11/threshold_crossing_scrambled_kid_info.txt'
 Filtered_trigger_list_file = '/home/labs/barakz/orynai/run_11/threshold_crossing_scrambled_triggers_to_slide.txt'

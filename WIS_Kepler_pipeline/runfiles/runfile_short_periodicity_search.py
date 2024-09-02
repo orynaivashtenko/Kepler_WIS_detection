@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import target_class
 import search_pipeline as spip
 import pipeline_parameters as pp
-from trigger_class import print_trigger_line
+from trigger_functions import print_trigger_line
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -23,8 +23,8 @@ Target_id = args.target_id[0]
 
 Saving_maximal_scores_file = pp.Maximal_short_periodicity_triggers_file
 Saving_maximal_g_scores_file = pp.Maximal_short_periodicity_g_triggers_file
-P_short_min = 10
-P_short_max = 30
+P_short_min = pp.P_short_min
+P_short_max = pp.P_short_max
 
 targ = target_class.KeplerTarget(target_id=Target_id,
                                  load_pickled_attributes=False)  # all the arguments are set to the defaults like main search
@@ -32,9 +32,20 @@ targ = target_class.KeplerTarget(target_id=Target_id,
 # We will have here a simplified version of the search. We do not change anything in the saved parameters after the main search!
 
 targ.unpickle_small_attributes()
-# targ.initialize_kepler_light_curve()
-# targ.klc.load_conditioned_data()
-# targ.klc.load_connected_stats()
+# Just in case:
+targ.best_stat = None
+targ.best_per = None
+targ.best_temp = None
+targ.best_ftt = None
+targ.best_gauss_stat = None
+targ.best_int_score = None
+targ.best_g_stat = None
+targ.best_g_per = None
+targ.best_g_temp = None
+targ.best_g_ftt = None
+targ.best_g_gauss_stat = None
+targ.best_g_int_score = None
+
 targ.get_connected_klc(reinitialize=True, mask_koi_planet=True, save_conditioned_data=True, save_connected_stats=True)
 targ.klc.interleave_shifts()
 
@@ -57,7 +68,7 @@ best_candidates_concat, failures = targ.search_periodicity_over_chunks(
     report_exceptions=True, problem_description='Short: ',
     return_failures=True, save_search_time=False, save_veto_masks=False)
 
-np.save(os.path.join(targ.output_location, targ.target_id + '_best_periodic_scores_'+str(targ.p_min)+'_'+str(targ.p_max)+'.npy'),
+np.save(os.path.join(targ.output_location, targ.target_id + pp.Best_short_periodic_scores_filename_postfix),
         np.array(best_candidates_concat, dtype=object), allow_pickle=True)
 targ.save_best_candidate(candidate_threshold=pp.Stat_candidate_search,
                          threshold_crossing_list_file=None,
@@ -68,12 +79,12 @@ targ.save_best_candidate(candidate_threshold=pp.Stat_candidate_search,
                          best_candidates_concat=best_candidates_concat)
 
 with open(Saving_maximal_scores_file, 'a') as fil1:  # will save here these good targets
-    print_trigger_line(target_id=targ.target_id, integral_score=targ.best_integral_score, stat=targ.best_stat, per=targ.best_per,
+    print_trigger_line(target_id=targ.target_id, integral_score=targ.best_int_score, stat=targ.best_stat, per=targ.best_per,
                        ftt=targ.best_ftt, gauss_stat=targ.best_gauss_stat, template=targ.best_temp,
                        file=fil1, sep=' ', end='\n')
 
 with open(Saving_maximal_g_scores_file, 'a') as fil1:  # will save here these good targets
-    print_trigger_line(target_id=targ.target_id, integral_score=targ.best_g_integral_score, stat=targ.best_g_stat, per=targ.best_g_per,
+    print_trigger_line(target_id=targ.target_id, integral_score=targ.best_g_int_score, stat=targ.best_g_stat, per=targ.best_g_per,
                        ftt=targ.best_g_ftt, gauss_stat=targ.best_g_gauss_stat, template=targ.best_g_temp,
                        file=fil1, sep=' ', end='\n')
 

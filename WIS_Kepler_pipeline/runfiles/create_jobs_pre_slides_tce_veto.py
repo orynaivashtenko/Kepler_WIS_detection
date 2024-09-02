@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import file_operations as fop
 from runfiles_parameters import *
 from pipeline_parameters import Threshold_crossing_list_filename, Threshold_crossing_lists_folder
-from trigger_class import Index_tid
+from trigger_functions import Index_tid
 
 import argparse
 parser = argparse.ArgumentParser()

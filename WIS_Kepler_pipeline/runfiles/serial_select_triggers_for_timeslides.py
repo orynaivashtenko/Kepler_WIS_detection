@@ -19,7 +19,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 from pipeline_parameters import Triggers_short_periodicity_filtered_file, Triggers_for_slides_injections_file
-from trigger_class import load_triggers, print_trigger_line
+from trigger_functions import load_triggers, print_trigger_line
 
 Threshold_integral_score_for_now = 48.
 

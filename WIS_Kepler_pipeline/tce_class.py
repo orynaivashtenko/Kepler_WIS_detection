@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import copy
 import os
 core_num = "1"
@@ -6,59 +8,150 @@ os.environ["OPENBLAS_NUM_THREADS"] = core_num
 os.environ["MKL_NUM_THREADS"] = core_num
 os.environ["VECLIB_MAXIMUM_THREADS"] = core_num
 os.environ["NUMEXPR_NUM_THREADS"] = core_num
-import numpy as np
+# import numpy as np
 import pickle
 from sys import getsizeof
-
-import target_class
-from pipeline_parameters import Limb_darkening_array_file, Problems_folder, R_sun_R_e
+# import target_class
+from pipeline_parameters import (Limb_darkening_array_file, Problems_folder,
+                                 R_sun_R_e, Location_attributes)
 from tce_parameters import *
 import auxiliary_functions as af
 import search_pipeline as spip
 import utils as ut
 import template_bank.template_module as tm
+from scipy.stats import chi2
+# from astropy.table import Table
 
 
-class KeplerTCE(target_class.KeplerTarget):
+class KeplerTCE(object):
     def __init__(self, target_id='003097222',
                  data_location=pp.Data_location, output_location=pp.Output_location,
                  target_pixels_location=Target_pixels_location,
                  load_pickled_attributes=False,
-                 unpickle_target_attributes=True,
-                 get_transit_and_binary_info=True,
+                 load_target_attributes=True,
                  gaia_kepler_file_path=Gaia_kepler_file,
                  koi_dict_file=Koi_dict_file,
                  ttv_dict_file=Ttv_dict_file,
                  villanova_dict_file=Villanova_dict_file,
                  limb_darkening_array_file=Limb_darkening_array_file,
-                 overwrite_location_parameters_by_unpickle=False,
                  allow_output_folder_creation=True,
                  allow_data_folder_creation=True,
                  problems_folder=Problems_folder,
                  add_prefix_to_problems_folder=True,
                  clean_problems_file=False,
-                 overwrite_parameters_by_unpickle=False):
-
-        super().__init__(target_id=target_id, data_location=data_location, output_location=output_location,
-                         load_pickled_attributes=False,
-                         get_transit_and_binary_info=get_transit_and_binary_info,
-                         gaia_kepler_file_path=gaia_kepler_file_path,
-                         koi_dict_file=koi_dict_file,
-                         ttv_dict_file=ttv_dict_file,
-                         villanova_dict_file=villanova_dict_file,
-                         limb_darkening_array_file=limb_darkening_array_file,
-                         overwrite_location_parameters_by_unpickle=overwrite_location_parameters_by_unpickle,
-                         allow_output_folder_creation=allow_output_folder_creation,
-                         allow_data_folder_creation=allow_data_folder_creation,
-                         problems_folder=problems_folder,
-                         add_prefix_to_problems_folder=add_prefix_to_problems_folder,
-                         clean_problems_file=clean_problems_file)
+                 overwrite_location_parameters_by_unpickle=False):
 
         data_location = af.get_correct_tid_folder(target_id, data_location, allow_creation=allow_data_folder_creation)
         output_location = af.get_correct_tid_folder(target_id, output_location, allow_creation=allow_output_folder_creation)
         target_pixels_location = af.get_correct_tid_folder(target_id, target_pixels_location, allow_creation=allow_data_folder_creation)
 
+        # Basic attributes:
+        self.target_id = str(target_id).rjust(9, '0')
+        self.mean_flux = None
+        self.number_of_quarters = None
+
+        # Location attributes:
+        self.data_location = data_location
+        self.output_location = output_location
+        self.gaia_kepler_file = gaia_kepler_file_path
+        self.koi_dict_file = koi_dict_file
+        self.ttv_dict_file = ttv_dict_file
+        self.villanova_dict_file = villanova_dict_file
         self.target_pixels_location = target_pixels_location
+        self.limb_darkening_array_file = limb_darkening_array_file
+
+        if problems_folder is None:
+            problems_folder = self.output_location
+        elif add_prefix_to_problems_folder:
+            if (os.path.basename(problems_folder) != self.target_id[:4]
+                    and os.path.basename(problems_folder) != self.target_id):
+                if self.target_id[:4] in os.listdir(problems_folder):
+                    problems_folder = os.path.join(problems_folder, target_id[:4])
+        self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_tce_txt_filename_postfix)
+        if clean_problems_file:
+            if os.path.exists(self.problems_file_location):
+                os.remove(self.problems_file_location)
+
+        # Trigger attributes
+        self.best_int_score = None
+        self.best_stat = None
+        self.best_per = None
+        self.best_ftt = None
+        self.best_temp = None
+        self.best_gauss_stat = None
+        self.best_g_stat = None
+        self.best_g_per = None
+        self.best_g_temp = None
+        self.best_g_ftt = None
+        self.best_g_gauss_stat = None
+        self.best_g_integral_score = None
+
+        # Significance attributes:
+        self.prob_density_planet_not_noise = None
+        self.false_alarm_prob_trigger = None
+        self.prob_density_h0_trigger = None
+        self.prob_density_h1_trigger = None
+
+        # Stellar and Kepler attributes:
+        self.stellar_radius = None
+        self.m_1_3_r_s = None
+        self.stellar_mass = None
+        self.kepmag = None
+        self.phot_g_mean_mag = None
+        self.parallax = None
+        self.gaia_abs_gmag = None
+        self.gaia_b_r = None
+        self.teff = None
+        self.metallicity = None
+        self.logg = None
+        self.ra = None
+        self.dec = None
+        self.ruwe = None
+        self.gaia_nconfp = None
+        self.gaia_non_single_star_flag = None
+        self.gaia_variable_star_flag = None
+        self.is_villanova_binary = None
+        self.is_koi = None
+        self.koi_status = None
+        self.kepler_tces = None
+
+        # Transits attributes:
+        self.n_transits = None
+        self.n_valid_transits = None
+        self.n_overlapping_transits = None
+        self.badness_of_transits = None
+        self.valid_transit_mask = None
+
+        self.summed_transit_times = None
+        self.summed_raw_stats = None
+        self.summed_vars = None
+        self.summed_corrections = None
+        self.summed_gauss_stats = None
+
+        self.transit_orig_quarters = None
+        self.transit_seasons = None
+        self.transit_amplitudes = None
+        self.mean_transit_amplitude = None
+        self.transit_amplitude_stds = None
+        self.transit_normalized_amplitudes = None
+        self.transit_normalized_amplitude_stds = None
+        self.transit_ppms = None
+        self.transit_ppm_stds = None
+        self.mean_transit_ppm = None
+        self.mean_transit_ppm_std = None
+        self.mean_two_noises_model_ppm_std = None
+        self.rp_to_r_earth = None
+        self.rp_to_r_earth_std = None
+        self.rp_to_rs = None
+        self.rp_to_rs_std = None
+        self.rp_to_rs_std_from_mean_ppm = None
+        self.rp_to_rs_std_conservative = None
+        self.mean_transit_amplitude = None
+        self.mean_transit_ppm = None
+        self.mean_transit_ppm_std = None
+
+        # Vetting attributes:
+        self.too_few_valid_transits = None
         self.star_pixels_ppms = None
         self.star_pixels_stds_of_ppms = None
         self.bg_pixels_ppms = None
@@ -75,39 +168,38 @@ class KeplerTCE(target_class.KeplerTarget):
         self.is_centroid_bad = None
         self.klc_centroid_x = None
         self.klc_centroid_y = None
-
-        self.badness_of_transits = None
-        self.valid_transit_mask = None
-        self.n_valid_transits = None
-        self.n_transits = None
-        self.too_few_valid_transits = None
         self.is_bad_periodicity = None
         self.bad_periodicity_reasons = None
+        self.p_value_fold_residuals = None
+        self.p_value_mf_fold_residuals = None
+        self.is_bad_fold_residuals = None
+        self.best_temp_folded = None
+        self.template_and_stat_of_fold_contaminant = None
+        self.is_bad_fold_residuals_fft = None
+        self.max_season_count = None
+        self.is_bad_seasons = None
         self.is_good_pre_filtering = None
+        # Short periodicity search results attributes
+        self.best_short_int_score = None
+        self.best_short_stat = None
+        self.best_short_per = None
+        self.best_short_ftt = None
+        self.best_short_temp = None
+        self.best_short_gauss_stat = None
+        self.is_short_periodicity_trigger = None
+        self.is_period_short = None
 
-        self.mean_transit_amplitude = None
-        self.mean_transit_ppm = None
-        self.mean_transit_ppm_std = None
-        self.transit_amplitudes = None
-        self.transit_amplitude_stds = None
-        self.transit_normalized_amplitudes = None
-        self.transit_normalized_amplitude_stds = None
-        self.transit_ppms = None
-        self.transit_ppm_stds = None
-        self.mean_two_noises_model_ppm_std = None
-        self.rp_to_rs_std_from_mean_ppm = None
-        self.rp_to_rs_std_conservative = None
+        # Search attributes:
+        self.is_koi_planet_masked = None
+        self.was_notched = None
+        self.failures = None
+        self.n_slides = None
+
+        if load_target_attributes:
+            self.get_attributes_from_target(overwrite_location_parameters=False, overwrite_existing=True)
 
         if load_pickled_attributes:
-            self.unpickle_small_attributes(unpickle_target_attributes=unpickle_target_attributes)
-            if not overwrite_parameters_by_unpickle:
-                self.data_location = data_location
-                self.output_location = output_location
-                self.gaia_kepler_file = gaia_kepler_file_path
-                self.koi_dict_file = koi_dict_file
-                self.ttv_dict_file = ttv_dict_file
-                self.villanova_dict_file = villanova_dict_file
-                self.target_pixels_location = target_pixels_location
+            self.unpickle_small_attributes(overwrite_location_parameters=overwrite_location_parameters_by_unpickle)
 
     def get_transit_times_info(self, period=None, first_transit_time=None, template=None, from_real_klc=True, max_time=Quarter_16_end,
                                data_location=None, output_location=None):
@@ -137,27 +229,63 @@ class KeplerTCE(target_class.KeplerTarget):
             self.summed_transit_times = np.array([first_transit_time + i * period
                                                   for i in range(int(np.ceil((max_time - first_transit_time) / period)))])
 
+        self.transit_orig_quarters = af.get_orig_quarters(self.summed_transit_times)
+        self.transit_seasons = self.transit_orig_quarters % 4
+
+    def seasonal_test(self, threshold_fraction_same_season=Threshold_fraction_same_season):
+        season_options = np.arange(4)
+        transit_seasons_list = list(self.transit_seasons)
+        season_counts = [transit_seasons_list.count(season) for season in season_options]
+        self.max_season_count = np.max(season_counts)
+        fraction_same_season = self.max_season_count / len(transit_seasons_list)
+        if fraction_same_season > threshold_fraction_same_season:
+            self.is_bad_seasons = True
+
+    def get_attributes_from_target(self, overwrite_location_parameters=False,
+                                   output_location=None,
+                                   overwrite_existing=True,
+                                   pickle_target_small_attributes_filename_postfix=pp.Pickle_target_small_attributes_filename_postfix):
+        if output_location is None:
+            output_location = self.output_location
+
+        file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
+                                            filename_postfix=pickle_target_small_attributes_filename_postfix, file_format='pickle')
+
+        dict_of_old_locations = {}
+        for key in Location_attributes:
+            if key in self.__dict__.keys():
+                dict_of_old_locations[key] = self.__dict__[key]
+
+        if overwrite_existing:
+            dict_old = None
+        else:
+            dict_old = copy.deepcopy(self.__dict__)
+
+        with open(file_path, 'rb') as pickle_file:
+            dict1 = pickle.load(pickle_file)
+            self.__dict__.update(dict1.items())
+
+        if not overwrite_existing:
+            for key in dict_old:
+                if dict_old[key] is not None:
+                    self.__dict__[key] = dict_old[key]
+
+        if not overwrite_location_parameters:
+            for key in Location_attributes:
+                if key in self.__dict__.keys():
+                    self.__dict__[key] = dict_of_old_locations[key]
+
     def pickle_small_attributes(self, output_location=None,
-                                pickle_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix,
-                                pickle_target_attributes=False,
-                                pickle_target_small_attributes_filename_postfix=pp.Pickle_target_small_attributes_filename_postfix):
+                                pickle_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix):
         """
         Pickles all attributes which are of type str, float, int, np.float, np.integer, np.ndarray, list, dict
         TODO: we should avoid pickling too long arrays
-        :param pickle_target_attributes: Whether to perform a separate pickling for the target_class object from which this is inherited.
-                                         Not recommended because the target properties are not supposed to be modified.
-        :type pickle_target_attributes:
-        :param pickle_target_small_attributes_filename_postfix: name of the file for the target_class pickle
-        :type pickle_target_small_attributes_filename_postfix:
         :param pickle_small_attributes_filename_postfix:
         :type pickle_small_attributes_filename_postfix:
         :param output_location:
         :type output_location
         :return:
         """
-        if pickle_target_attributes:
-            super().pickle_small_attributes(output_location=output_location,
-                                            pickle_small_attributes_filename_postfix=pickle_target_small_attributes_filename_postfix)
         if output_location is None:
             output_location = self.output_location
         dict_to_pickle = {}
@@ -174,25 +302,21 @@ class KeplerTCE(target_class.KeplerTarget):
 
     def unpickle_small_attributes(self, output_location=None,
                                   pickle_tce_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix,
-                                  unpickle_target_attributes=False,
-                                  pickle_target_small_attributes_filename_postfix=pp.Pickle_target_small_attributes_filename_postfix,
-                                  overwrite_location_parameters=False):
+                                  overwrite_location_parameters=False,
+                                  load_target_attributes=True, overwrite_existing_by_target=True,
+                                  pickle_target_small_attributes_filename_postfix=pp.Pickle_target_small_attributes_filename_postfix):
         if output_location is None:
             output_location = self.output_location
 
-        old_output_location = self.output_location
-        old_data_location = self.data_location
-        old_target_pixels_location = self.target_pixels_location
-        old_gaia_kepler_file_path = self.gaia_kepler_file
-        old_koi_dict_file = self.koi_dict_file
-        old_ttv_dict_file = self.ttv_dict_file
-        old_villanova_dict_file = self.villanova_dict_file
-        old_limb_darkening_array_file = self.limb_darkening_array_file
+        dict_of_old_locations = {}
+        for key in Location_attributes + ['target_pixels_location']:
+            dict_of_old_locations[key] = self.__dict__[key]
 
-        if unpickle_target_attributes:
-            super().unpickle_small_attributes(output_location=output_location,
-                                              pickle_small_attributes_filename_postfix=pickle_target_small_attributes_filename_postfix,
-                                              overwrite_location_parameters=overwrite_location_parameters)
+        if load_target_attributes:
+            self.get_attributes_from_target(
+                pickle_target_small_attributes_filename_postfix=pickle_target_small_attributes_filename_postfix,
+                overwrite_location_parameters=overwrite_location_parameters,
+                overwrite_existing=overwrite_existing_by_target, output_location=output_location)
 
         file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
                                             filename_postfix=pickle_tce_small_attributes_filename_postfix, file_format='pickle')
@@ -202,14 +326,9 @@ class KeplerTCE(target_class.KeplerTarget):
                 self.__dict__.update(dict1.items())
 
         if not overwrite_location_parameters:
-            self.data_location = old_data_location
-            self.output_location = old_output_location
-            self.target_pixels_location = old_target_pixels_location
-            self.gaia_kepler_file = old_gaia_kepler_file_path
-            self.koi_dict_file = old_koi_dict_file
-            self.ttv_dict_file = old_ttv_dict_file
-            self.villanova_dict_file = old_villanova_dict_file
-            self.limb_darkening_array_file = old_limb_darkening_array_file
+            for key in Location_attributes + ['target_pixels_location']:
+                if key in self.__dict__.keys():
+                    self.__dict__[key] = dict_of_old_locations[key]
 
     def pickle_all_attributes(self, output_location=None,
                               pickle_all_attributes_filename_postfix=Pickle_tce_all_attributes_filename_postfix):
@@ -269,7 +388,7 @@ class KeplerTCE(target_class.KeplerTarget):
                         if hasattr(value, '__len__'):
                             if isinstance(value, dict) and len(list(value.keys())) > 0 and hasattr(value[list(value.keys())[0]], '__len__'):
                                 ok_to_print = False  # TODO: maybe make the selection process look at all the dict keys
-                            elif ((not isinstance(value, dict))
+                            elif ((not isinstance(value, dict) and not (value is None))
                                   and (len(value) > 0 and (not isinstance(value[0], str)) and hasattr(value[0], '__len__'))):
                                 ok_to_print = False  # not printing nested lists
                             elif (not isinstance(value, str)) and len(value) > 50:
@@ -280,6 +399,68 @@ class KeplerTCE(target_class.KeplerTarget):
         with open(os.path.join(output_location, self.target_id + '_' + dict_txt_filename_postfix), 'w') as fil:
             for key in dict_to_print:
                 print(key, ":", dict_to_print[key], file=fil)
+
+    def get_periodicity_results(self, short_periodicity=True,
+                                best_periodic_scores_filename_postfix=pp.Best_periodic_scores_filename_postfix,
+                                best_short_periodic_scores_filename_postfix=pp.Best_short_periodic_scores_filename_postfix,
+                                return_lists=False, set_attributes=True):
+        filename_postfix = best_short_periodic_scores_filename_postfix if short_periodicity else best_periodic_scores_filename_postfix
+        stats = []
+        ints = []
+        pers = []
+        ftts = []
+        temps = []
+        gauss_stats = []
+        best_periodic_scores = np.load(os.path.join(self.output_location,
+                                                    self.target_id + filename_postfix), allow_pickle=True)
+        for i_chunk in range(len(best_periodic_scores)):
+            stats.append(best_periodic_scores[i_chunk][spip.Best_per_results_index_stats][0])
+            ints.append(best_periodic_scores[i_chunk][spip.Best_per_results_index_best_integral][0])
+            pers.append(best_periodic_scores[i_chunk][spip.Best_per_results_index_per][0])
+            ftts.append(best_periodic_scores[i_chunk][spip.Best_per_results_index_ftt][0])
+            temps.append(best_periodic_scores[i_chunk][spip.Best_per_results_index_template][0])
+            gauss_stats.append(best_periodic_scores[i_chunk][spip.Best_per_results_index_stats_gauss][0])
+
+        if set_attributes:
+            ind_max = np.argmax(ints)
+            if short_periodicity:
+                self.best_short_int_score = ints[ind_max]
+                self.best_short_stat = stats[ind_max]
+                self.best_short_per = pers[ind_max]
+                self.best_short_ftt = ftts[ind_max]
+                self.best_short_temp = temps[ind_max]
+                self.best_short_gauss_stat = gauss_stats[ind_max]
+            else:
+                self.best_int_score = ints[ind_max]
+                self.best_stat = stats[ind_max]
+                self.best_per = pers[ind_max]
+                self.best_ftt = ftts[ind_max]
+                self.best_temp = temps[ind_max]
+                self.best_gauss_stat = gauss_stats[ind_max]
+        if return_lists:
+            return_array = np.zeros((6, len(ints)))
+            return_array[spip.Best_per_results_index_stats] = stats
+            return_array[spip.Best_per_results_index_best_integral] = ints
+            return_array[spip.Best_per_results_index_per] = pers
+            return_array[spip.Best_per_results_index_ftt] = ftts
+            return_array[spip.Best_per_results_index_template] = temps
+            return_array[spip.Best_per_results_index_stats_gauss] = gauss_stats
+            return return_lists
+
+    def veto_short_periodicity(self, best_short_periodic_scores_filename_postfix=pp.Best_short_periodic_scores_filename_postfix,
+                               best_periodic_scores_filename_postfix=pp.Best_periodic_scores_filename_postfix,
+                               minimal_period=pp.Per_min_candidate):
+        self.get_periodicity_results(short_periodicity=True,
+                                     best_short_periodic_scores_filename_postfix=best_short_periodic_scores_filename_postfix,
+                                     return_lists=False, set_attributes=True)
+        if self.best_int_score is None:
+            self.get_periodicity_results(short_periodicity=False,
+                                         best_periodic_scores_filename_postfix=best_periodic_scores_filename_postfix,
+                                         return_lists=False, set_attributes=True)
+        if self.best_short_int_score > self.best_int_score:
+            self.is_short_periodicity_trigger = True
+        if self.best_per < minimal_period:
+            self.is_period_short = True
 
     def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
                                  number_of_pixels_cut=None, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
@@ -308,7 +489,7 @@ class KeplerTCE(target_class.KeplerTarget):
         klcs = []
         for fluxes in [star_part_sap_fluxes, bg_part_sap_fluxes]:
             # making the lightcurve out of this whatever data and doing search:
-            klc = spip.get_minimal_processed_folded_klc(target_id=None, get_data=False, times=pixel_times, fluxes=copy.deepcopy(fluxes),
+            klc = spip.get_minimal_processed_folded_klc(target_id=self.target_id, get_data=False, times=pixel_times, fluxes=copy.deepcopy(fluxes),
                                                         period=period, template_index=template_index, cut_edge_nans=False,
                                                         nsig_outliers_0_neg=nsig_outliers_0_neg,
                                                         nsig_outliers_0_pos=nsig_outliers_0_pos,
@@ -383,9 +564,9 @@ class KeplerTCE(target_class.KeplerTarget):
 
         # First, see what happened in the transits because they can happen to be nans if the transit in one of them is too deep:
         self.star_valid_transit_mask = (~np.isnan(self.star_pixels_ppms)) & (~np.isnan(self.star_pixels_stds_of_ppms)
-                                                                        & (self.star_pixels_stds_of_ppms > 0))
+                                                                             & (self.star_pixels_stds_of_ppms > 0))
         self.bg_valid_transit_mask = (~np.isnan(self.bg_pixels_ppms)) & (~np.isnan(self.bg_pixels_stds_of_ppms)
-                                                                    & (self.bg_pixels_stds_of_ppms > 0))
+                                                                         & (self.bg_pixels_stds_of_ppms > 0))
         valid_star_bg_transit_mask = self.star_valid_transit_mask & self.bg_valid_transit_mask
         if len(np.where(valid_star_bg_transit_mask)[0]) < 3:
             self.is_bad_bg_pixels = True
@@ -429,6 +610,11 @@ class KeplerTCE(target_class.KeplerTarget):
                                             nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
                                             nsig_outliers_0_neg=Nsig_outliers_0_neg_tests)
         self.centroid_snr_2 = self.centroid_snrs_ra_dec[0]**2 + self.centroid_snrs_ra_dec[1]**2
+        # self.centroid_snr_2 = self.centroid_snrs_ra_dec[0]**2 * np.cos(self.dec)**2 + self.centroid_snrs_ra_dec[1]**2
+        # -> we did not use the spherical basis geometry to make the length element. The reason is that we sum the
+        # snr, which will already include its impact. Say we are on the equator, then the snr is the same for both
+        # directions. If we are on the pole, then the snr is less for ra because the noise is larger. So the effect
+        # of that cosine is taken into account by the snr of ra.
         # this is statistically not really correct, but we at least know what are the snrs we are talking about.
         # we expect the centroid to deviate even if the planet is real. if it deviates in the incorrect direction wrt
         # the neighboring stars, then it is bad.
@@ -440,7 +626,7 @@ class KeplerTCE(target_class.KeplerTarget):
     # noinspection PyProtectedMember
     def find_centroid_transits_snr(self, period=None, ftt=None, nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
                                    nsig_outliers_0_neg=Nsig_outliers_0_neg_tests,
-                                   save_klcs=False):
+                                   save_klcs=False, scaling_factor=Scaling_factor_centroid_flux):
         if period is None:
             period = self.best_per
         if ftt is None:
@@ -452,7 +638,9 @@ class KeplerTCE(target_class.KeplerTarget):
         centroid_x_quarters, centroid_y_quarters = af.get_centroid_series(target_pixel_fluxes=target_pixel_fluxes,
                                                                           sky_coords=sky_coords,
                                                                           time_masks=time_masks, aperture_masks=aperture_masks)
-
+        # Adding the scaling factor to avoid the numerical precision issues:
+        centroid_x_quarters = [centroid_x_quarters[q] * scaling_factor for q in range(len(centroid_x_quarters))]
+        centroid_y_quarters = [centroid_y_quarters[q] * scaling_factor for q in range(len(centroid_y_quarters))]
         max_coords_deviation_periodic = []
         klcs = []
         for fluxes in [centroid_x_quarters, centroid_y_quarters]:
@@ -654,53 +842,50 @@ class KeplerTCE(target_class.KeplerTarget):
         if self.is_bad_periodicity is None:
             self.is_bad_periodicity = False
 
+    # TODO:
+    # def check_harmonic_coincidence(self, period_check, ftt_check, periods_reference, phases_reference,
+    #                                period_error=Period_error, phase_error=Phase_error,
+    #                                harmonics_list=(1., 1./4, 1./3, 1./2, 4./3, 2., 3., 4., 5., 6., 7., 8.),
+    #                                harmonics_nums=(1, 1, 1, 1, 4, 2, 3, 4, 5, 6, 7, 8),
+    #                                harmonics_denoms=(1, 4, 3, 2, 3, 1, 1, 1, 1, 1, 1, 1)):
+    #
+    #     # min_per =
+    #     #
+    #     #
+    #     # periods_reference = np.array(periods_reference)
+    #     # phases_reference = np.array(phases_reference)
+    #     # ###
+    #     # bad_vil = ((vil_periods > self.best_per - period_error) &
+    #     #            (vil_periods < self.best_per + period_error) &
+    #     #            (((vil_phases > self.best_ftt - phase_error) &
+    #     #              (vil_phases < self.best_ftt + phase_error)) |
+    #     #             ((vil_phases + vil_periods > self.best_ftt - phase_error
+    #     #             ) &  # maybe one transit to the left or to the right was missing
+    #     #              (vil_phases + vil_periods < self.best_ftt + phase_error)) |
+    #     #             ((vil_phases - vil_periods > self.best_ftt - phase_error) &
+    #     #              (vil_phases - vil_periods < self.best_ftt + phase_error))
+    #     #             ))
+    #     # ###
+    #
+    #     bad = False
+    #     bad_harms = ''
+    #     for harm in harmonics_list:  # warning, 4/3 was not there before
+    #
+    #         bad_1 = ((periods_reference / harm > period_check - period_error) &
+    #                  (periods_reference / harm < period_check + period_error) &
+    #                  (((phases_reference > ftt_check - phase_error) &
+    #                    (phases_reference < ftt_check + phase_error)) |
+    #                   ((phases_reference + periods_reference > ftt_check - phase_error) &  # maybe one transit was missing
+    #                    (phases_reference + periods_reference < ftt_check + phase_error)) |
+    #                   ((phases_reference - periods_reference > ftt_check - phase_error) &  # maybe one transit was missing
+    #                    (phases_reference - periods_reference < ftt_check + phase_error))
+    #                   )).any()
+    #
+    #         bad = bad | bad_1
+    #         if bad_1:
+    #             bad_harms = bad_harms + ' ' + str(np.round(harm, 2))
 
-    def check_harmonic_coincidence(self, period_check, ftt_check, periods_reference, phases_reference,
-                                   period_error=Period_error, phase_error=Phase_error,
-                                   harmonics_list=(1., 1./4, 1./3, 1./2, 4./3, 2., 3., 4., 5., 6., 7., 8.),
-                                   harmonics_nums=
-                                   (1, 1, 1, 1, 4, 2, 3, 4, 5, 6, 7, 8),
-                                   harmonics_denoms=
-                                   (1, 4, 3, 2, 3, 1, 1, 1, 1, 1, 1, 1)):
-
-        # min_per =
-        #
-        #
-        # periods_reference = np.array(periods_reference)
-        # phases_reference = np.array(phases_reference)
-        # ###
-        # bad_vil = ((vil_periods > self.best_per - period_error) &
-        #            (vil_periods < self.best_per + period_error) &
-        #            (((vil_phases > self.best_ftt - phase_error) &
-        #              (vil_phases < self.best_ftt + phase_error)) |
-        #             ((vil_phases + vil_periods > self.best_ftt - phase_error) &  # maybe one transit to the left or to the right was missing
-        #              (vil_phases + vil_periods < self.best_ftt + phase_error)) |
-        #             ((vil_phases - vil_periods > self.best_ftt - phase_error) &
-        #              (vil_phases - vil_periods < self.best_ftt + phase_error))
-        #             ))
-        # ###
-
-        bad = False
-        bad_harms = ''
-        for harm in harmonics_list:  # warning, 4/3 was not there before
-
-            bad_1 = ((periods_reference / harm > period_check - period_error) &
-                     (periods_reference / harm < period_check + period_error) &
-                     (((phases_reference > ftt_check - phase_error) &
-                       (phases_reference < ftt_check + phase_error)) |
-                      ((phases_reference + periods_reference > ftt_check - phase_error) &  # maybe one transit was missing
-                       (phases_reference + periods_reference < ftt_check + phase_error)) |
-                      ((phases_reference - periods_reference > ftt_check - phase_error) &  # maybe one transit was missing
-                       (phases_reference - periods_reference < ftt_check + phase_error))
-                      )).any()
-
-            bad = bad | bad_1
-            if bad_1:
-                bad_harms = bad_harms + ' ' + str(np.round(harm, 2))
-
-
-
-    def estimate_biased_rp(self, nsig_outliers_0_pos=5, nsig_outliers_0_neg=15):
+    def estimate_biased_rp(self):
         if self.summed_raw_stats is None or self.summed_vars is None or self.mean_flux is None:
             self.get_transit_times_info()
         # ATTENTION! It uses the raw statistics after the SES veto, so some transits may be missed, and the estimate may be biased.
@@ -752,17 +937,251 @@ class KeplerTCE(target_class.KeplerTarget):
         self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
         self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
 
+    # def veto_fold_residuals_quick(self, fn_fold_veto=Fn_fold_veto):
+    #     self.is_bad_fold_residuals = False
+    #
+    #     klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
+    #                                 output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
+    #                                 cut_edge_nans=True, remove_zeroth_quarter=True, remove_quarter_17=True,
+    #                                 simulated_star=False)
+    #     self.number_of_quarters = len(klc.quarters)
+    #
+    #     klc.load_conditioned_data()
+    #     indices_of_templates = tm.Indices_of_templates
+    #     whitened_templates_td = copy.deepcopy(klc.whitened_templates_td)
+    #     dt_days = klc.dt_days
+    #     period_fold = self.best_per
+    #     dt_steps_high_pass = klc.nperseg_psd
+    #
+    #     # ------------------------------------------------------------------------------------------------------------
+    #     # FOLDING WHITENED FLUX AND BINNING
+    #     binwid = klc.dt_days  # min(self.templates_durations_hours[temp_number] / 24 / 40, 0.1)
+    #     bins_time, bins_flux, bins_counts, folds_times, folds_fluxes = af.fold_fluxes(
+    #         times=klc.times, fluxes=klc.whitened_fluxes_td, period=period_fold, first_time=self.best_ftt,
+    #         masks=klc.big_hole_masks, binwid=binwid, time_fold=period_fold,
+    #         dt=klc.dt_days, means=None, template=None, return_std=False,
+    #         normalize_by_counts=False)  # np.array(self.klc.templates[self.klc.indices_of_templates[temp_number][0]]))
+    #     flux_normalized_vars = np.zeros(len(bins_flux))
+    #     flux_normalized_vars[bins_counts > 0] = bins_flux[bins_counts > 0] / bins_counts[bins_counts > 0] ** 0.5
+    #     # -> this will have the same variance for all the bins
+    #
+    #     # ------------------------------------------------------------------------------------------------------------
+    #     # GETTING THE BEST TEMPLATE INDEX
+    #     # The best template index in the fold may not be the best template index from the search due to different binning,
+    #     # corrections, veto etc. So we have to find the best template index in the folded data.
+    #     n_time_templ = int(np.round(period_fold / dt_days))
+    #     averaged_templates, time_templates = np.array([af.get_average_whitened_template(
+    #         whitened_templates_td=whitened_templates_td, temp_number=tn, n_time_templ=n_time_templ,
+    #         dt_days=dt_days, indices_of_templates=indices_of_templates)
+    #         for tn in range(len(indices_of_templates))]).transpose(1, 0, 2)
+    #     # Interpolating the best averaged template
+    #     averaged_templates = np.array([np.interp(bins_time, time_templates[i], averaged_templates[i])
+    #                                    for i in range(len(averaged_templates))])
+    #     averaged_templates = np.array([- temp_interp / np.linalg.norm(temp_interp) for temp_interp in averaged_templates])
+    #     del time_templates
+    #
+    #     mf_scores, ampl_scores = np.array([af.mf_high_pass(data=flux_normalized_vars, template=temp_interp, template_rolled=None,
+    #                                                        dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+    #                                                        renorm_psd_drift=True)
+    #                                        for temp_interp in averaged_templates])
+    #
+    #     mf_scores_peaks = np.max(mf_scores, axis=-1)
+    #     rolling_args = np.argmax(mf_scores, axis=-1)
+    #
+    #     rolling_vals_peaks = np.array([rolling_arg if rolling_arg <= len(flux_normalized_vars) / 2
+    #                                    else len(flux_normalized_vars) - rolling_arg for rolling_arg in rolling_args])
+    #
+    #     max_dist_from_detected_peak_bins = 5  # how far away the pipeline peak can be from the folding peak for the best template
+    #     if rolling_vals_peaks[np.argmax(mf_scores_peaks)] > max_dist_from_detected_peak_bins:
+    #         self.is_bad_fold_residuals = True  # There is some largest peak in the wrong place
+    #         self.template_and_stat_of_fold_contaminant = (np.argmax(mf_scores_peaks), np.max(mf_scores_peaks))
+    #     self.best_temp_folded = np.argmax(mf_scores_peaks * (rolling_vals_peaks <= max_dist_from_detected_peak_bins).astype(float))
+    #     temp_number = self.best_temp_folded
+    #     rolling_arg = rolling_args[temp_number]
+    #     amp_best_fit = ampl_scores[temp_number][rolling_arg]
+    #     # ------------------------------------------------------------------------------------------------------------
+    #     # CALCULATING THE MATCHED FILTER SCORE ON THE BINNED WHITENED FLUX
+    #     # Matched-filtering of the folded binned flux with the templates corresponding to their expected values.
+    #     # Takes the original `whitened_templates_td` that were used fot the search, in their original time resolution,
+    #     # averages them over sub-bin shifts, and interpolates them (not integrates, which is in general wrong!)
+    #     # to the binned time `bins_time`. The binned template is normalized by the `bins_counts`, as well as the
+    #     # binned flux `bins_flux`, so that the expectations are consistent, and the variances are uniform.
+    #     # Then, the binned flux `bins_flux` is matched-filtered with the binned and the normalized templates
+    #     # The folded template is proportional to the counts, but the matched filtering should be done
+    #     # on the whitened template, and the standard deviation is proportional to the square root of counts.
+    #     # Important: template multiplied by counts is not shift-invariant because counts are different
+    #     # in every bin. Therefore, convolution cannot be used.
+    #
+    #     # GETTING THE RESIDUALS
+    #     residuals_flux_binned = flux_normalized_vars - amp_best_fit * np.roll(averaged_templates[temp_number], rolling_arg)
+    #     # Renormalizing to account for blueness:
+    #     residuals_flux_binned = af.renorm_noise_high_pass(data=residuals_flux_binned, dt=binwid, dt_pass=dt_steps_high_pass * dt_days)
+    #
+    #     # ------------------------------------------------------------------------------------------------------------
+    #     # MATCHED_FILTERING OF THE RESIDUALS TO FIND SUSPICIOUS DEVIATIONS
+    #     # THE TEMPLATES DO NOT HAVE TO BE OUR TEMPLATE BANK, THEY CAN BE WHATEVER
+    #
+    #     mf_scores_resid = np.array([af.mf_high_pass(data=residuals_flux_binned, template=temp_interp, template_rolled=None,
+    #                                                 dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+    #                                                 renorm_psd_drift=True)[0]
+    #                                 for temp_interp in averaged_templates]).transpose(1, 0, 2)
+    #     # ------------------------------------------------------------------------------------------------------------
+    #     # Calculating p-values:
+    #     p_val_resid = 1 - (1 - chi2(df=1, scale=1).sf(np.max((residuals_flux_binned / np.std(residuals_flux_binned)) ** 2))
+    #                        ) ** len(residuals_flux_binned)
+    #     p_val_mf = 1. - (1 - chi2(df=1, scale=1).sf(np.max(mf_scores_resid ** 2))) ** len(mf_scores_resid.flatten())
+    #     self.p_value_fold_residuals = p_val_resid
+    #     self.p_value_mf_fold_residuals = p_val_mf
+    #     if self.p_value_mf_fold_residuals < fn_fold_veto:  # or self.p_value_fold_residuals < fn_fold_veto:
+    #         self.is_bad_fold_residuals = True
+
+    def veto_fold_residuals(self, fn_fold_veto=Fn_fold_veto, ignore_moving_template_shape=True):
+        self.is_bad_fold_residuals = False
+        klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
+                                    output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
+                                    cut_edge_nans=True, remove_zeroth_quarter=True, remove_quarter_17=True,
+                                    simulated_star=False)
+        self.number_of_quarters = len(klc.quarters)
+        klc.load_conditioned_data()
+        indices_of_templates = tm.Indices_of_templates
+        whitened_templates_td = copy.deepcopy(klc.whitened_templates_td)
+        dt_days = klc.dt_days
+        period_fold = self.best_per
+        dt_steps_high_pass = klc.nperseg_psd
+
+        # ------------------------------------------------------------------------------------------------------------
+        # FOLDING WHITENED FLUX AND BINNING
+        binwid = klc.dt_days  # min(self.templates_durations_hours[temp_number] / 24 / 40, 0.1)
+        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes = af.fold_fluxes(
+            times=klc.times, fluxes=klc.whitened_fluxes_td, period=period_fold, first_time=self.best_ftt,
+            masks=klc.big_hole_masks, binwid=binwid, time_fold=period_fold,
+            dt=klc.dt_days, means=None, template=None, return_std=False,
+            normalize_by_counts=False)  # np.array(self.klc.templates[self.klc.indices_of_templates[temp_number][0]]))
+        flux_normalized_vars = np.zeros(len(bins_flux))
+        flux_normalized_vars[bins_counts > 0] = bins_flux[bins_counts > 0] / bins_counts[bins_counts > 0] ** 0.5
+        # -> this will have the same variance for all the bins
+
+        # ------------------------------------------------------------------------------------------------------------
+        # GETTING THE BEST TEMPLATE INDEX
+        # The best template index in the fold may not be the best template index from the search due to different binning,
+        # corrections, veto etc. So we have to find the best template index in the folded data.
+        n_time_templ = int(np.round(period_fold / dt_days))
+        if ignore_moving_template_shape:
+            folded_templates_rolled = None
+            averaged_templates, time_templates = np.array([af.get_average_whitened_template(
+                whitened_templates_td=whitened_templates_td, temp_number=tn, n_time_templ=n_time_templ,
+                dt_days=dt_days, indices_of_templates=indices_of_templates)
+                for tn in range(len(indices_of_templates))]).transpose(1, 0, 2)
+            # Interpolating the best averaged template
+            averaged_templates = np.array([np.interp(bins_time, time_templates[i], averaged_templates[i])
+                                           for i in range(len(averaged_templates))])
+            averaged_templates = np.array([- temp_interp / np.linalg.norm(temp_interp) for temp_interp in averaged_templates])
+            del time_templates
+            mf_scores, ampl_scores = np.array([af.mf_high_pass(data=flux_normalized_vars, template=temp_interp, template_rolled=None,
+                                                               dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+                                                               renorm_psd_drift=True)
+                                               for temp_interp in averaged_templates]).transpose(1, 0, 2)
+            mf_scores_peaks = np.max(mf_scores, axis=-1)
+            rolling_args = np.argmax(mf_scores, axis=-1)
+            ampl_scores_peaks = np.array([ampl_scores[i][rolling_arg] for i, rolling_arg in enumerate(rolling_args)])
+        else:
+            averaged_templates = None
+            res = [af.matched_filter_folded_fluxes(
+                template_number=template_number, whitened_templates_td=whitened_templates_td, n_time_templ=n_time_templ, binwid=binwid,
+                indices_of_templates=indices_of_templates, bins_time=bins_time, bins_counts=bins_counts,
+                flux_normalized_vars=flux_normalized_vars, dt_steps_high_pass=dt_steps_high_pass, dt_days=dt_days, renorm_psd_drift=True)
+                for template_number in range(len(indices_of_templates))]  # ).transpose(1, 0, 2)
+
+            mf_scores_peaks = np.array([r[0] for r in res])
+            ampl_scores_peaks = np.array([r[1] for r in res])
+            rolling_args = np.array([r[2] for r in res])
+            folded_templates_rolled = np.array([r[3] for r in res])
+
+        rolling_vals_peaks = np.array([rolling_arg if rolling_arg <= len(flux_normalized_vars) / 2
+                                       else len(flux_normalized_vars) - rolling_arg for rolling_arg in rolling_args])
+
+        max_dist_from_detected_peak_bins = 5  # how far away the pipeline peak can be from the folding peak for the best template
+        if rolling_vals_peaks[np.argmax(mf_scores_peaks)] > max_dist_from_detected_peak_bins:
+            self.is_bad_fold_residuals = True  # There is some largest peak in the wrong place
+            self.template_and_stat_of_fold_contaminant = (np.argmax(mf_scores_peaks), np.max(mf_scores_peaks))
+        self.best_temp_folded = np.argmax(mf_scores_peaks * (rolling_vals_peaks <= max_dist_from_detected_peak_bins).astype(float))
+        temp_number = self.best_temp_folded
+        amp_best_fit = ampl_scores_peaks[temp_number]
+        # ------------------------------------------------------------------------------------------------------------
+        # CALCULATING THE MATCHED FILTER SCORE ON THE BINNED WHITENED FLUX
+        # Matched-filtering of the folded binned flux with the templates corresponding to their expected values.
+        # Takes the original `whitened_templates_td` that were used fot the search, in their original time resolution,
+        # averages them over sub-bin shifts, and interpolates them (not integrates, which is in general wrong!)
+        # to the binned time `bins_time`. The binned template is normalized by the `bins_counts`, as well as the
+        # binned flux `bins_flux`, so that the expectations are consistent, and the variances are uniform.
+        # Then, the binned flux `bins_flux` is matched-filtered with the binned and the normalized templates
+        # The folded template is proportional to the counts, but the matched filtering should be done
+        # on the whitened template, and the standard deviation is proportional to the square root of counts.
+        # Important: template multiplied by counts is not shift-invariant because counts are different
+        # in every bin. Therefore, convolution cannot be used.
+        # ------------------------------------------------------------------------------------------------------------
+        # MATCHED_FILTERING OF THE RESIDUALS TO FIND SUSPICIOUS DEVIATIONS
+        # THE TEMPLATES DO NOT HAVE TO BE OUR TEMPLATE BANK, THEY CAN BE WHATEVER
+        if ignore_moving_template_shape:
+            rolling_arg = rolling_args[temp_number]
+            # GETTING THE RESIDUALS
+            residuals_flux_binned = flux_normalized_vars - amp_best_fit * np.roll(averaged_templates[temp_number], rolling_arg)
+            # Renormalizing to account for blueness:
+            residuals_flux_binned = af.renorm_noise_high_pass(data=residuals_flux_binned, dt=binwid, dt_pass=dt_steps_high_pass * dt_days)
+            mf_scores_resid = np.array([af.mf_high_pass(data=residuals_flux_binned, template=temp_interp, template_rolled=None,
+                                                        dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+                                                        renorm_psd_drift=False)[0]
+                                        for temp_interp in averaged_templates])
+            # -> We do not renormalize the PSD drift here because it will nto make the situation worse for normal triggers,
+            # but may make it better for bad triggers. Sometimes it will also make it worse for bad triggers though...
+            # The thing is that usually, the data misses flux at the low frequencies where the templates
+            # have most power, therefore the incorrectness makes the statistic smaller. Therefore good triggers will not
+            # turn to outliers. Bad triggers may be missed now, it is true. But from the other side, there are bad triggers
+            # which just have all the fold bad, not only a couple of outliers. And when they are renormalized, they
+            # create very good-looking histogram. Their bad places are not outliers, therefore calculating the
+            # outlier-free variance does not help it.
+        else:
+            # GETTING THE RESIDUALS
+            residuals_flux_binned = flux_normalized_vars - amp_best_fit * folded_templates_rolled[temp_number]
+            # Renormalizing to account for blueness:
+            residuals_flux_binned = af.renorm_noise_high_pass(data=residuals_flux_binned, dt=binwid, dt_pass=dt_steps_high_pass * dt_days)
+            mf_scores_resid = np.array([af.matched_filter_folded_fluxes(
+                template_number=template_number, whitened_templates_td=whitened_templates_td, n_time_templ=n_time_templ, binwid=binwid,
+                indices_of_templates=indices_of_templates, bins_time=bins_time, bins_counts=bins_counts,
+                flux_normalized_vars=residuals_flux_binned, dt_steps_high_pass=dt_steps_high_pass,
+                dt_days=dt_days, renorm_psd_drift=True)[0]
+                for template_number in range(len(indices_of_templates))])
+        # ------------------------------------------------------------------------------------------------------------
+        # Calculating p-values:
+        p_val_resid = 1 - (1 - chi2(df=1, scale=1).sf(np.max(residuals_flux_binned ** 2))) ** len(residuals_flux_binned)
+        p_val_mf = 1. - (1 - chi2(df=1, scale=1).sf(np.max(mf_scores_resid ** 2))) ** len(mf_scores_resid.flatten())
+        self.p_value_fold_residuals = p_val_resid
+        self.p_value_mf_fold_residuals = p_val_mf
+        if self.p_value_mf_fold_residuals < fn_fold_veto:  # or self.p_value_fold_residuals < fn_fold_veto:
+            self.is_bad_fold_residuals = True
+
+        # ------------------------------------------------------------------------------------------------------------
+        # Additional: looking at the Fourier transform of the residuals
+        # because if there is some very short periodicity, it may be missed by the matched filter, although it should not
+        if (np.max(np.abs(np.fft.rfft(residuals_flux_binned))**2) >
+                len(residuals_flux_binned) * chi2(df=1).isf(1 / len(residuals_flux_binned) * fn_fold_veto)):
+            self.is_bad_fold_residuals_fft = True
+            self.is_bad_fold_residuals = True
+
     def run_all_checks_exclusive(self):
         self.get_transit_times_info()
         self.check_transit_times_quality_flags()
         self.check_periodicity_contaminants()
+        self.seasonal_test()
         if (not self.too_few_valid_transits) and (not self.is_bad_periodicity):
             self.test_target_pixels_amplitudes()
             if not self.is_bad_bg_pixels:
                 self.test_centroid_transits_snr()
                 if not self.is_centroid_bad:
-                    self.estimate_biased_rp()
-                    self.is_good_pre_filtering = True
+                    self.veto_fold_residuals()
+                    if not self.is_bad_fold_residuals:
+                        self.estimate_biased_rp()
+                        self.is_good_pre_filtering = True
         if self.is_good_pre_filtering is not True:
             self.is_good_pre_filtering = False
 

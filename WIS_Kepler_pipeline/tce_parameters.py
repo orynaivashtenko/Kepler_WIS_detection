@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 
 os.environ["OMP_NUM_THREADS"] = "1"  #
@@ -7,10 +9,58 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import numpy as np
-
 import pipeline_parameters as pp
 
+
+# ################################################################################################
+# FILES
+# ################################################################################################
 Gaia_kepler_file = pp.Gaia_kepler_file
+Gaia_fields = [
+    'SOURCE_ID',
+    'ra',  # Barycentric right ascension of the source in ICRS at the reference epoch ref_epoch
+    'ra_error',
+    'dec',  # Barycentric declination of the source in ICRS at the reference epoch ref_epoch
+    'dec_error',
+    'parallax',
+    'parallax_error',
+    'pm',
+    'pmra',
+    'pmra_error',
+    'pmdec',
+    'pmdec_error',
+    'astrometric_excess_noise',
+    'astrometric_excess_noise_sig',
+    'pseudocolour',
+    'pseudocolour_error',
+    'astrometric_sigma5d_max',
+    'ruwe',
+    'phot_g_mean_flux',
+    'phot_g_mean_flux_error',
+    'phot_g_mean_mag',
+    'phot_bp_rp_excess_factor',
+    'bp_rp',
+    'bp_g',
+    'g_rp',
+    'radial_velocity',
+    'radial_velocity_error',
+    'rv_expected_sig_to_noise',
+    'rv_renormalised_gof',
+    'rv_chisq_pvalue',
+    'has_rvs',
+    'has_epoch_rv',
+    'vbroad',
+    'vbroad_error',
+    'non_single_star',
+    'phot_variable_flag',
+    'dist',
+    'rv_template_fe_h',
+    'rv_template_logg',
+    'rv_template_teff',
+    'teff_gspphot',
+    'logg_gspphot',
+    'rv_nb_transits'
+]
 Koi_dict_file = pp.Koi_dict_file
 Ttv_dict_file = pp.Ttv_dict_file
 Villanova_dict_file = pp.Villanova_dict_file
@@ -29,33 +79,59 @@ Table_koi_file = os.path.join(Kepler_files_folder, 'KOI_table_2024.csv')
 Initial_trigger_list_filename = pp.Threshold_crossing_list_filename
 Suspicious_frequency_reasons_triggers_filename = 'suspicious_frequency_reasons_triggers.npy'
 Suspicious_frequency_filtered_triggers_filename = 'suspicious_frequency_filtered_triggers.npy'
+Gaia_trigger_table_filename = 'gaia_trigger_table.ecsv'
 
 Initial_trigger_list_file = os.path.join(pp.Threshold_crossing_lists_folder, Initial_trigger_list_filename)
 Suspicious_frequency_reasons_triggers_file = os.path.join(pp.Threshold_crossing_lists_folder,
                                                           Suspicious_frequency_reasons_triggers_filename)
 Suspicious_frequency_filtered_triggers_file = os.path.join(pp.Threshold_crossing_lists_folder,
                                                            Suspicious_frequency_filtered_triggers_filename)
+Gaia_trigger_file = os.path.join(pp.Threshold_crossing_lists_folder, Gaia_trigger_table_filename)
 
-
+Neighbors_folder = os.path.join(pp.Triggers_output_location, 'Neighbors_run_' + pp.Run_name)
 Summary_tce_txt_filename_postfix = 'tce_summary.txt'
 Dict_tce_txt_filename_postfix = 'tce_class_dict.txt'
 Pickle_tce_small_attributes_filename_postfix = 'tce_class_small_attributes.pickle'
 Pickle_tce_all_attributes_filename_postfix = 'tce_class_all_attributes.pickle'
-
-# Veto target pixels parameters:
-Part_of_cumsum_2_targ_pix = 0.85
-Nsig_outliers_0_pos_tests = 5.
-Nsig_outliers_0_neg_tests = 15.
-Threshold_centroid_snr_2 = 45.
-Threshold_false_negative_bg_target_pixels_mean = 0.01
-Threshold_false_negative_bg_target_pixels_max = 0.01
+Problems_tce_txt_filename_postfix = 'tce_problems.txt'
 
 # ################################################################################################
+# TECHNICAL PARAMS
+# ################################################################################################
+Pixel_scale = 3.98  # arcsec
+Neighbors_search_radius_pix = 5  # how many pixels around to search for neighbors
+# ----------------------------------------------------------------------
+# PSF:
+# The resulting 95% encircled energy diameters range from 3.2 to 7.5 pixels
+# https://ntrs.nasa.gov/api/citations/20190028937/downloads/20190028937.pdf
+#
+# The Kepler field of view spans 115.6 square degrees over 95 million detector pixels, with a 3.98 x 3.98 arcsec
+# pixels and 3.1-7.5 arcsec FWHM imaging point spread function.
+# https://nexsci.caltech.edu/workshop/2012/keplergo/DataAnalysisProducts.shtml#:~:text=The%20Kepler
+# %20field%20of%20view,FWHM%20imaging%20point%20spread%20function.
+# ----------------------------------------------------------------------
+
 # CONSTANTS AND ARGUMENTS
 Quarter_16_end = 1557.9589375032883
 # Kepler time is measured in BJD - 2454833
 # Villanova phases are in BJD - 2400000
 # And we corrected for this
+
+
+# ################################################################################################
+# TESTS PARAMETERS
+# ################################################################################################
+# Veto target pixels parameters:
+Part_of_cumsum_2_targ_pix = 0.85
+Nsig_outliers_0_pos_tests = 5.
+Nsig_outliers_0_neg_tests = 15.
+Scaling_factor_centroid_flux = 10000.  # Multiplying centroid series by this to avoid numerical precision issues
+Threshold_centroid_snr_2 = 45.
+Threshold_false_negative_bg_target_pixels_mean = 0.01
+Threshold_false_negative_bg_target_pixels_max = 0.01
+Fn_fold_veto = 0.01
+Threshold_fraction_same_season = 0.76  # if 3 out of 4 transits are same season, it is yet ok
+
 # ################################################################################################
 # DEFINING HOW CLOSE TO KNOWN PERIODICITIES THE SIGNALS ARE ALLOWED TO BE
 # there are some harmonics which are fast:
@@ -64,14 +140,16 @@ Quarter_16_end = 1557.9589375032883
 Period_year = 370.  # 365.25 #year
 Period_quarter = 93.  # quarter
 # 30., #monthly downlink is very irregular and will be considered separately
-
 Period_error_year = 10.  # duty cycles as estimation for year period error
 Period_error_year_harm = 2.
 Period_error_quarter = 2.  # let it be for quarter
 Period_error_quarter_harm = 1.
-
 Period_error = 0.03  # days
 Phase_error = 0.07  # around 3 lc
+
+# Kepler time is measured in BJD - 2454833
+# Villanova phases are in BJD - 2400000
+# And we corrected for this
 
 Dict_bad_periodicity_reason_names = {
     'y': 'year',
@@ -89,8 +167,6 @@ Dict_bad_periodicity_reason_names = {
 # ERRORS AROUND SPECIFIC TIMES
 Timing_error_quarter_edge = 2.  # days. contamination from quarter edge can last. just a random estimate
 Timing_error_earth_downlink = 1.  # days. contamination from earth pointing and downlink can last. just a random estimate
-
-
 Min_fraction_valid_transits = 0.3  # this part of transits maximally can be at the quarter edges
 
 

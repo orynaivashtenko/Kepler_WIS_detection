@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+import numpy as np
+from tce_parameters import (Pixel_scale, Neighbors_search_radius_pix, Gaia_kepler_file,
+                            Gaia_fields, Neighbors_folder)
+
+from astropy import units
+# from astropy.io import fits
+from astropy.coordinates import SkyCoord  # , Angle
+# from astropy.time import Time
+from astropy.table import Table
+import warnings
+from astroquery.simbad import Simbad
+from astroquery.gaia import Gaia
+Gaia.MAIN_GAIA_TABLE = "gaiadr3.gaia_source"  # Select Data Release 3
+
+
+from catalog_functions import (ensure_list_str, read_gaia_kepler_table, read_gaia_kepler_crossmatch_table_for_target_id,
+                               read_trigger_table, get_neighbors_file_name, read_neighbor_info)
+
+
+def query_gaia_id_for_kepler_id(tid_list):
+    tid_list = ensure_list_str(tid_list)
+    gaia_text = 'Gaia DR3'
+    gaia_id_list = []
+    failed_tids_info = []
+    with warnings.catch_warnings():
+        warnings.filterwarnings('error')
+        for i_tid, tid in enumerate(tid_list):
+            try:
+                result_table = Simbad.query_objectids("KID " + tid)  # ("KIC " + tid)
+                res_gaia = [e[0] for e in result_table if gaia_text in e[0]]
+                if len(result_table.errors) > 0:
+                    failed_tids_info.append(tid + ' : Search failed')  # failed_tids.append(result_table.errors)
+                elif len(res_gaia) > 0:
+                    if len(res_gaia) > 1:
+                        failed_tids_info.append(tid + ' : More than one Gaia result!')
+                    else:
+                        gaia_id = res_gaia[0][len(gaia_text):].strip()
+                        gaia_id_list.append(gaia_id)
+                else:
+                    failed_tids_info.append(tid + ' : No Gaia ID found')
+            except:
+                failed_tids_info.append(tid + ' : Search failed')
+    return gaia_id_list, failed_tids_info
+
+
+def query_gaia_id(gaia_id_list):
+    gaia_id_list = ensure_list_str(gaia_id_list)
+    query = "SELECT * FROM gaiadr3.gaia_source gs WHERE gs.source_id in (" + ", ".join(gaia_id_list) + ");"
+    # job = Gaia.launch_job_async(query, verbose=False)
+    job = Gaia.launch_job(query, verbose=False)
+    table_gaia = job.get_results()
+    return table_gaia
+
+
+def get_gaia_id_from_gaia_kepler_crossmatch(tid_list):
+    tid_list = ensure_list_str(tid_list)
+    gaia_kepler_table = read_gaia_kepler_crossmatch_table_for_target_id(tid_list)
+    if 'SOURCE_ID' in gaia_kepler_table.keys():
+        return list(gaia_kepler_table['SOURCE_ID'])
+    elif 'source_id' in gaia_kepler_table.keys():
+        return list(gaia_kepler_table['source_id'])
+    else:
+        raise ValueError('`source_id` key not found in the table')
+
+
+def get_gaia_table_for_kepler_id(tid_list, write_to_file=False,
+                                 file_path='tids_table_gaia.ecsv', overwrite_file=True):
+    tid_list = ensure_list_str(tid_list)
+    gaia_id_list, failed_tids_info = query_gaia_id_for_kepler_id(tid_list)
+    failed_tids = [e[:9] for e in failed_tids_info]
+    tids_found = [tid for tid in tid_list if tid not in failed_tids]
+
+    failed_gaia_ids = get_gaia_id_from_gaia_kepler_crossmatch(failed_tids)
+    # # We checked that the coords here and in the gaia-kepler cross-match are the same.
+    # # Therefore we will use the results from the gaia-kepler cross-match for the not found tids.
+    gaia_id_list = np.concatenate((gaia_id_list, failed_gaia_ids))
+    gaia_id_list = gaia_id_list.astype(int)
+    combined_tid_list = np.concatenate((tids_found, failed_tids))
+    combined_tid_list = np.array([str(tid).rjust(9, '0') for tid in combined_tid_list])
+    inds = [np.where(combined_tid_list == tid)[0][0] for tid in tid_list]
+    # The full gaia_id list for all the tid_list in the correct order:
+    gaia_id_list = gaia_id_list[inds]
+
+    # Querying to get the full gaia info for those IDs:
+    table_gaia = query_gaia_id(gaia_id_list)
+    inds = [np.where(table_gaia['SOURCE_ID'] == int(gaia_id))[0][0] for gaia_id in gaia_id_list]
+    table_gaia = table_gaia[inds]
+    table_gaia.add_column(tid_list, name='kepid', index=0)
+
+    if write_to_file:
+        if os.path.splitext(file_path)[-1] == '.ecsv':
+            table_gaia.write(file_path, format='ascii.ecsv', overwrite=overwrite_file)
+        elif os.path.splitext(file_path)[-1] == '.csv':
+            table_gaia.write(file_path, format='.csv', overwrite=overwrite_file)
+        else:
+            table_gaia.write(file_path, overwrite=overwrite_file)
+
+    return table_gaia, failed_tids_info
+
+
+def query_neighbors(tids_table_gaia=None, target_id_list=None, search_radius_pix=Neighbors_search_radius_pix, pixel_scale=Pixel_scale,
+                    gaia_fields=Gaia_fields, neighbors_folder=Neighbors_folder):
+    search_radius_arcsec = search_radius_pix * pixel_scale * units.arcsec
+    # Getting the Gaia matches of those stars
+    if tids_table_gaia is None:
+        tids_table_gaia, failed_tids_reasons = get_gaia_table_for_kepler_id(target_id_list)
+        # failed_tids = [e[:9] for e in failed_tids_reasons]
+    # Query for every tid:
+    for i in range(len(tids_table_gaia)):
+        tid = tids_table_gaia['kepid'][i]
+        ra = tids_table_gaia['ra'][i]
+        dec = tids_table_gaia['dec'][i]
+
+        coords = str(ra) + ' ' + str(dec)  # ra and dec in degrees
+        coords = SkyCoord(coords, frame='icrs', unit=(units.deg, units.deg), obstime="J2000")
+
+        # do the cone search
+        job = Gaia.cone_search_async(coordinate=coords, radius=search_radius_arcsec, table_name='gaiadr3.gaia_source')
+        gaia_result = job.get_results()
+        gaia_result_relevant = Table([gaia_result.columns[nam] for nam in gaia_fields])
+        gaia_result_relevant.write(get_neighbors_file_name(target_id=tid, neighbors_folder=neighbors_folder,
+                                                           search_radius_pix=search_radius_pix), format='ascii.ecsv', overwrite=True)
+
+# scp -r /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/Neighbors_run_11_1
+# orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
+# scp /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/tids_table_gaia.ecsv
+# orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
+
+
+

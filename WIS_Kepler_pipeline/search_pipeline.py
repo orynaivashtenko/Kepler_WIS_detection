@@ -543,7 +543,7 @@ class KeplerLightCurve(object):
         self.best_stat_gaussianized = None
         """`self.stats_gaussianized_periodic_mar_temp` corresponding to the 
             maximal `self.stats_periodic_mar_temp`"""
-        self.best_integral_score = None
+        self.best_int_score = None
         """Sum of prior-weighted statistis around the maximal `self.stats_periodic_mar_temp`"""
         self.best_phase_index = None
         """Period index corresponding to the maximal `self.stats_periodic_mar_temp`"""
@@ -562,7 +562,7 @@ class KeplerLightCurve(object):
             `self.stats_gaussianized_periodic_mar_temp`"""
         self.best_g_stat_gaussianized = None
         """Maximal `self.stats_gaussianized_periodic_mar_temp` (that passed MES veto if it was applied)"""
-        self.best_g_integral_score = None
+        self.best_g_int_score = None
         """Sum of prior-weighted statistis around the maximal `self.stats_gaussianized_periodic_mar_temp`"""
         self.best_g_phase_index = None
         """Period index corresponding to the maximal `self.stats_gaussianized_periodic_mar_temp`"""
@@ -2280,7 +2280,7 @@ class KeplerLightCurve(object):
                 var_calc = np.fft.irfft(np.abs(self.whitened_templates_fd[k][q]) ** 2)[0]
                 # Zero-padding ends are not a problem because they are zeros, and the normalization is fixed by irfft
                 statmask = np.array(self.big_hole_masks[q][self.zero_padding_ends[q][0]:len(
-                    self.big_hole_masks[q]) - self.zero_padding_ends[q][1]]).astype(bool)
+                    self.big_hole_masks[q]) - self.zero_padding_ends[q][1]], dtype=bool)
 
                 eff_temp_wid = len(np.where(self.tb.templates_shifts[k] >= np.max(self.tb.templates_shifts[k]) / 2)[0])
                 gap_len = 2 * eff_temp_wid  # It was set empirically for typical data and templates
@@ -3261,7 +3261,7 @@ class KeplerLightCurve(object):
     def sum_periods(self, p_min=Pmin, p_max=Pmax, dp=None, duty_cycle=Duty_cycle, periods=None, safety_bins=P_bins_overlap):
         """
         Sums the statistics with all the possible periods and initial phases. Folds the statistics and their
-        variances and caclulates the score of the folded planet. Folds also single-event distribution corrections
+        variances and calculates the score of the folded planet. Folds also single-event distribution corrections
         and the gaussianized scores. The masks should be accounted for earlier. The masked statistics and variances
         should be set to zero.
         The search is done separately for the interleaved templates and the templates which do not require interleaving.
@@ -3979,7 +3979,7 @@ class KeplerLightCurve(object):
         self.best_ftt : First transit time corresponding to the best score
         self.best_template_index : Index of best template at the point of the best score
         self.best_stat_gaussianized : Gaussianized statistic at the position corresponding to `self.best_stat`
-        self.best_integral_score : The inegral over statistic with prior around the maximum
+        self.best_int_score : The inegral over statistic with prior around the maximum
         And the same with index _g_ for the maximum over the gaussianized score.
         """
         if not in_gaussianized:
@@ -4133,7 +4133,7 @@ class KeplerLightCurve(object):
                                                                             ind_phase=self.best_phase_index, period=self.best_period)
                 self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
                 self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
-                self.best_integral_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
+                self.best_int_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
                                                                           phase_ind_max=self.best_phase_index, gaussianized=False,
                                                                           use_occurrence_rate=True,
                                                                           log_baseline_integral_score_rate=log_baseline_integral_score_rate)
@@ -4143,7 +4143,7 @@ class KeplerLightCurve(object):
                 self.best_template_index = np.nan
                 self.best_stat = np.nan
                 self.best_stat_gaussianized = np.nan
-                self.best_integral_score = np.nan
+                self.best_int_score = np.nan
 
         else:
             self.best_g_per_index = best_per_index
@@ -4159,7 +4159,7 @@ class KeplerLightCurve(object):
                 self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
                 self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
                 self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
-                self.best_g_integral_score = self.get_integral_score_at_max(
+                self.best_g_int_score = self.get_integral_score_at_max(
                                                                         per_ind_max=self.best_g_per_index,
                                                                         phase_ind_max=self.best_g_phase_index, gaussianized=True,
                                                                         use_occurrence_rate=True,
@@ -4170,7 +4170,7 @@ class KeplerLightCurve(object):
                 self.best_g_stat = np.nan
                 self.best_g_stat_gaussianized = np.nan
                 self.best_g_ftt = np.nan
-                self.best_g_integral_score = np.nan
+                self.best_g_int_score = np.nan
 
     def make_best_periodic_scores(self):
         """
@@ -4181,7 +4181,7 @@ class KeplerLightCurve(object):
                                    [Best_per_results_index_ftt, self.best_ftt, self.best_g_ftt],
                                    [Best_per_results_index_stats, self.best_stat, self.best_g_stat],
                                    [Best_per_results_index_stats_gauss, self.best_stat_gaussianized, self.best_g_stat_gaussianized],
-                                   [Best_per_results_index_best_integral, self.best_integral_score, self.best_g_integral_score],
+                                   [Best_per_results_index_best_integral, self.best_int_score, self.best_g_int_score],
                                    [Best_per_results_index_template, self.best_template_index, self.best_g_template_index]]:
             best_periodic_scores_data[ind][0] = val
             best_periodic_scores_data[ind][1] = val_gaus
@@ -4285,7 +4285,7 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statis
 
 def get_minimal_processed_folded_klc(period, template_index='all', times=None, fluxes=None, target_id=None, get_data=False,
                                      nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos, delta_period=0.1,
-                                     data_location=None, output_location=None, cut_edge_nans=False):
+                                     data_location=None, output_location=None, cut_edge_nans=False, delete_fulls=True):
     klc = KeplerLightCurve(target_id=target_id, get_data=get_data, times=times, fluxes=fluxes, cut_edge_nans=cut_edge_nans,
                            data_location=data_location, output_location=output_location)
     klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
@@ -4296,7 +4296,7 @@ def get_minimal_processed_folded_klc(period, template_index='all', times=None, f
     klc.matched_filtering()
     klc.cut_zero_padding_ends()
     klc.connect_quarters()
-    klc.interleave_shifts()
+    klc.interleave_shifts(delete_fulls=delete_fulls)
     klc.sum_periods(p_min=period - delta_period, p_max=period + delta_period)
     # -> we do not marginalize, so statistics are still not in units of snr squared
     return klc

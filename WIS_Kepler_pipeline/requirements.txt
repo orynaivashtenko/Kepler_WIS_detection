@@ -1,3 +1,17 @@
+numpy~=1.26.4
+astropy~=6.1.0
+matplotlib~=3.8.4
+scipy~=1.13.0
+numba~=0.59.1
+wget~=3.2
+batman-package~=2.4.8
+multiprocess~=0.70.16  # 0.70.12.2
+setuptools~=70.0.0
+requests~=2.32.2
+wget~=3.2
+lightkurve~=2.4.0
+astroquery~=0.4.7
+
 numpy~=1.23.3
 astropy~=5.1
 matplotlib~=3.6.0

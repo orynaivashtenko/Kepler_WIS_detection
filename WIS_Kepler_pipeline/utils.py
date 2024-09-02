@@ -18,6 +18,12 @@ def nanargsort(array):
     return np.arange(len(array))[notnan_mask][argsort]
 
 
+def nansort(array):
+    array = np.array(array)
+    notnan_mask = ~np.isnan(array)
+    return np.sort(array[notnan_mask])
+
+
 def safe_div(numerators, denominators, fill_value=0.):
     numerators = np.array(numerators)
     denominators = np.array(denominators)
@@ -236,7 +242,7 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
             return mov_var, mask, tot_var
 
 
-def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128):
+def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128, renormalize=True):
     """
     Calculates the std of data without impact of outliers and excluding masked regions
     :param data: The data, may contain nans.
@@ -252,6 +258,9 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
     :type detrend: bool
     :param detr_len: If detrend, data will be detrended with this detrending length
     :type detr_len: int
+    :param renormalize: Account for the fact that when the outliers are cut, the expected result is smaller,
+        so that it needs to be renormalized to be an unbiased variance estimate
+    :type renormalize: bool
     :return: std of the data
     :rtype: float
     """
@@ -263,10 +272,15 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
     else:
         data1 = np.array(data)
 
+    var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
     for i in range(n_iterations):
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig * np.nanstd(data1[mask])
+        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig * var_calc ** 0.5
         mask = outlier_mask * mask
-    return np.nanstd(data[mask])
+        var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
+        if renormalize:
+            expected_power = norm(loc=0, scale=1).expect(func=lambda x: x ** 2, lb=-nsig, ub=nsig, conditional=False)
+            var_calc = var_calc / expected_power
+    return var_calc**0.5
 
 
 def get_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
