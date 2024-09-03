@@ -1027,7 +1027,7 @@ class KeplerTarget(object):
             self.is_bad_fft = True
             self.is_good_for_processing = False
 
-    def check_detectable_radius(self, stellar_radius=None, snr_thresh=Stat_candidate_search ** 0.5 - 1,
+    def check_detectable_radius(self, stellar_radius=None, snr_thresh=Score_candidate_search ** 0.5 - 1,
                                 rp_re_max=Rp_re_max, rp_rs_max=Rp_rs_max):
         """
         Finds (very approximately) whether there can be detectable planets in a target with
@@ -1767,7 +1767,7 @@ class KeplerTarget(object):
                 [best_periodic_scores[i][spip.Best_per_results_index_template][ind_gauss] for i in range(len(best_periodic_scores))])
 
             # Determining TCEs among [chunks maxima in non-gaussianized sense]
-            trigger_mask = integral_scores_res >= Stat_candidate_search
+            trigger_mask = integral_scores_res >= Score_candidate_search
             triggering_int_scores = integral_scores_res[trigger_mask]
             triggering_stats = stats_res[trigger_mask]
             triggering_periods = periods_res[trigger_mask]
@@ -1798,7 +1798,7 @@ class KeplerTarget(object):
 
             # Determining TCEs among [chunks maxima in gaussianized sense]
             # SAME FOR GAUSS BUT A DIFFERENT ORDER OF SAVING: GAUSS STAT GOES FIRST< AND THE INTEGRAL WAS ALSO MADE ON GAUSS
-            g_trigger_mask = g_int_scores_res >= Stat_candidate_search
+            g_trigger_mask = g_int_scores_res >= Score_candidate_search
             g_triggering_int_scores = g_int_scores_res[g_trigger_mask]
             g_triggering_stats = g_stats_res[g_trigger_mask]
             g_triggering_periods = g_periods_res[g_trigger_mask]
@@ -1943,8 +1943,8 @@ class KeplerTarget(object):
             self.best_g_gauss_stat = np.nan
             self.best_g_temp = np.nan
 
-    def save_best_candidate(self, candidate_threshold=Stat_candidate_search,
-                            period_threshold=Per_min_candidate,
+    def save_best_candidate(self, candidate_threshold=Score_candidate_search,
+                            period_threshold=None,  # Per_min_candidate  #* not doing period limitation here, will do in post-process
                             threshold_crossing_list_file=None,
                             threshold_crossing_list_location=None, threshold_crossing_list_filename=None,
                             threshold_g_crossing_list_file=None, threshold_g_crossing_list_filename=None,
@@ -1987,7 +1987,7 @@ class KeplerTarget(object):
 
     def run_main_search(self, p_min=P_min_search, p_max=P_max_search,
                         per_phases_per_chunk=Per_phases_per_chunk,
-                        candidate_threshold=Stat_candidate_search,
+                        candidate_threshold=Score_candidate_search,
                         min_quarters_to_process=Min_quarters_to_process,
                         mask_koi_planet=True,
                         save_conditioned_data=True,
@@ -2000,7 +2000,7 @@ class KeplerTarget(object):
                         save_to_threshold_crossing_list=True,
                         threshold_crossing_list_file=None,
                         threshold_g_crossing_list_file=None,
-                        threshold_crossing_list_location=Threshold_crossing_lists_folder,
+                        threshold_crossing_list_location=Run_root_folder,
                         threshold_crossing_list_filename=Threshold_crossing_list_filename,
                         threshold_g_crossing_list_filename=Threshold_g_crossing_list_filename,
                         save_multiple_triggers=False,
@@ -2010,7 +2010,8 @@ class KeplerTarget(object):
                         clean_problems_file=True, stop_if_bad=True,
                         seeds_scrambling_run_file=Seeds_scrambling_run_file,
                         scramble=False, allow_load_connected_klc=False,
-                        connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix):
+                        connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
+                        print_message_to_history=True):
 
         """
         Runs the ses-search and the periodicity search. See `self.run_ses_search` and `run_periodicity_search`.
@@ -2174,6 +2175,24 @@ class KeplerTarget(object):
         if not scramble:
             self.pickle_small_attributes()
             self.print_dict_file()
+
+            if print_message_to_history:
+                # Print message to the history file:
+                message = ''
+                if self.is_too_short:
+                    message += 'is_too_short '
+                elif self.is_bad_fft:
+                    message += 'is_bad_fft '
+                elif not self.is_good_for_processing:
+                    message += 'not is_good_for_processing '
+                elif self.ses_search_failed:
+                    message += 'ses_search_failed '
+                elif not self.is_threshold_crossing:
+                    message += 'not is_threshold_crossing, score ' + str(self.best_int_score) + ', per ' + str(self.best_per)
+                else:
+                    message += 'is_threshold_crossing, score ' + str(self.best_int_score) + ', per ' + str(self.best_per)
+                with open(Search_history_targets_file, 'a') as fil:
+                    print(self.target_id, message, file=fil)
 
     def run_timeslides(self, n_slides=N_slides_chunk, central_period=None, mask_koi_planet=True,
                        n_chunks_around_best=1, per_wing_slides=None,

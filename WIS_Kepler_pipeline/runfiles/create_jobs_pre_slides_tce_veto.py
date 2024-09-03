@@ -6,13 +6,13 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 import file_operations as fop
 from runfiles_parameters import *
-from pipeline_parameters import Threshold_crossing_list_filename, Threshold_crossing_lists_folder
+from pipeline_parameters import Threshold_crossing_list_filename, Run_root_folder
 from trigger_functions import Index_tid
 
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--trigger_list_file", type=str, nargs=1, help="path to file where to take triggers",
-                    default=os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_list_filename))
+                    default=os.path.join(Run_root_folder, Threshold_crossing_list_filename))
 args = parser.parse_args()
 trigger_list_file = args.trigger_list_file[0]
 

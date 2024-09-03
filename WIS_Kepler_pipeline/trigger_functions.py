@@ -15,6 +15,9 @@ Index_ftt = 4
 Index_stat_gauss = 5
 Index_template = 6
 Trigger_len = 7
+Indices_dict = {'target_id': Index_tid, 'int_score': Index_integral,
+                'stat': Index_stat, 'per': Index_per, 'ftt': Index_ftt,
+                'gauss_stat': Index_stat_gauss, 'template': Index_template}
 
 
 def load_triggers(file, sep=' '):
@@ -56,7 +59,15 @@ def print_triggers(target_ids=None, integral_scores=None, stats=None, pers=None,
 
 
 def list_from_trigger_fields(target_id=None, integral_score=None, stat=None, per=None, ftt=None,
-                             gauss_stat=None, template=None):
+                             gauss_stat=None, template=None, to_tuple=True):
+    """ Index_tid = 0
+        Index_integral = 1
+        Index_stat = 2
+        Index_per = 3
+        Index_ftt = 4
+        Index_stat_gauss = 5
+        Index_template = 6
+        Trigger_len = 7"""
     list1 = ['' for _ in range(Trigger_len)]
     list1[Index_tid] = target_id
     list1[Index_integral] = integral_score
@@ -65,6 +76,8 @@ def list_from_trigger_fields(target_id=None, integral_score=None, stat=None, per
     list1[Index_ftt] = ftt
     list1[Index_stat_gauss] = gauss_stat
     list1[Index_template] = template
+    if to_tuple:
+        list1 = tuple(list1)
     return list1
 
 
@@ -78,9 +91,12 @@ def line_from_trigger_fields(target_id=None, integral_score=None, stat=None, per
 
 
 def print_trigger_line(target_id=None, integral_score=None, stat=None, per=None, ftt=None, gauss_stat=None,  template=None,
-                       file=None, sep=' ', end='\n'):
-    list1 = list_from_trigger_fields(target_id=target_id, integral_score=integral_score, stat=stat, per=per, ftt=ftt,
-                                     gauss_stat=gauss_stat, template=template)
+                       trigger_as_list=None, file=None, sep=' ', end='\n'):
+    if trigger_as_list is None:
+        list1 = list_from_trigger_fields(target_id=target_id, integral_score=integral_score, stat=stat, per=per, ftt=ftt,
+                                         gauss_stat=gauss_stat, template=template)
+    else:
+        list1 = trigger_as_list
     print(*list1, sep=sep, end=end, file=file)
 
 
@@ -105,6 +121,25 @@ def trigger_from_line(line, sep=' '):
     target_id, integral_score, stat, per, ftt, gauss_stat, template = trigger_fields_from_line(line=line, sep=sep)
     return Trigger(target_id=target_id, integral_score=integral_score, stat=stat, per=per, ftt=ftt,
                    gauss_stat=gauss_stat, template=template)
+
+
+def get_trigger_from_target_id(target_id, trigger_list_file):
+    target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates = load_triggers(file=trigger_list_file)
+    index = np.where(target_ids == target_id)[0][0]
+    integral_score = integral_scores[index]
+    stat = stats[index]
+    per = pers[index]
+    ftt = ftts[index]
+    gauss_stat = gauss_stats[index]
+    template = templates[index]
+    return list_from_trigger_fields(target_id=target_id, integral_score=integral_score, stat=stat, per=per, ftt=ftt,
+                                    gauss_stat=gauss_stat, template=template)
+
+
+def copy_trigger_between_files(target_id, source_file, destination_file):
+    trigger_as_list = get_trigger_from_target_id(target_id, source_file)
+    with open(destination_file, 'a') as fil:
+        print_trigger_line(trigger_as_list=trigger_as_list, file=fil)
 
 
 # def select_one_trigger_per_star(triggers_file='slidable_triggers_run_11.txt'):

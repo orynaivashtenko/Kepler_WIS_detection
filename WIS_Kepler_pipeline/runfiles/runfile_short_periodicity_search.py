@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import target_class
 import search_pipeline as spip
 import pipeline_parameters as pp
-from trigger_functions import print_trigger_line
+from trigger_functions import print_trigger_line, get_trigger_from_target_id, Indices_dict, copy_trigger_between_files
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -70,7 +70,7 @@ best_candidates_concat, failures = targ.search_periodicity_over_chunks(
 
 np.save(os.path.join(targ.output_location, targ.target_id + pp.Best_short_periodic_scores_filename_postfix),
         np.array(best_candidates_concat, dtype=object), allow_pickle=True)
-targ.save_best_candidate(candidate_threshold=pp.Stat_candidate_search,
+targ.save_best_candidate(candidate_threshold=pp.Score_candidate_search,
                          threshold_crossing_list_file=None,
                          threshold_crossing_list_location=None,
                          threshold_crossing_list_filename=None,
@@ -87,5 +87,12 @@ with open(Saving_maximal_g_scores_file, 'a') as fil1:  # will save here these go
     print_trigger_line(target_id=targ.target_id, integral_score=targ.best_g_int_score, stat=targ.best_g_stat, per=targ.best_g_per,
                        ftt=targ.best_g_ftt, gauss_stat=targ.best_g_gauss_stat, template=targ.best_g_temp,
                        file=fil1, sep=' ', end='\n')
+
+trigger_main_search = get_trigger_from_target_id(Target_id, trigger_list_file=pp.Threshold_crossing_list_file)
+int_score_main = trigger_main_search[Indices_dict['int_score']]
+if int_score_main > targ.best_int_score:
+    copy_trigger_between_files(target_id=Target_id, source_file=pp.Threshold_crossing_list_file,
+                               destination_file=pp.Triggers_for_slides_injections_file)
+
 
 # bsub -q physics-short -R "rusage[mem=3.9GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_short_periodicity_search.py --target_id

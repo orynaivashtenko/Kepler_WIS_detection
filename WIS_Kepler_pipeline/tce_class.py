@@ -1168,20 +1168,41 @@ class KeplerTCE(object):
             self.is_bad_fold_residuals_fft = True
             self.is_bad_fold_residuals = True
 
-    def run_all_checks_exclusive(self):
+    def run_all_checks_exclusive(self, print_message_to_history=True):
         self.get_transit_times_info()
         self.check_transit_times_quality_flags()
         self.check_periodicity_contaminants()
         self.seasonal_test()
-        if (not self.too_few_valid_transits) and (not self.is_bad_periodicity):
-            self.test_target_pixels_amplitudes()
-            if not self.is_bad_bg_pixels:
-                self.test_centroid_transits_snr()
-                if not self.is_centroid_bad:
-                    self.veto_fold_residuals()
-                    if not self.is_bad_fold_residuals:
+        if (not self.too_few_valid_transits) and (not self.is_bad_periodicity) and (not self.is_bad_seasons):
+            self.veto_fold_residuals(ignore_moving_template_shape=True)  # ignoring moving template shape makes it quick
+            if not self.is_bad_fold_residuals:
+                self.test_target_pixels_amplitudes()
+                if not self.is_bad_bg_pixels:
+                    self.test_centroid_transits_snr()
+                    if not self.is_centroid_bad:
                         self.estimate_biased_rp()
                         self.is_good_pre_filtering = True
         if self.is_good_pre_filtering is not True:
             self.is_good_pre_filtering = False
+
+        if print_message_to_history:
+            # Print message to the history file:
+            message = ''
+            if self.too_few_valid_transits:
+                message += 'too_few_valid_transits '
+            elif self.is_bad_periodicity:
+                message += 'is_bad_periodicity '
+            elif self.is_bad_seasons:
+                message += 'not is_bad_seasons '
+            elif self.is_bad_fold_residuals:
+                message += 'is_bad_fold_residuals '
+            elif self.is_bad_bg_pixels:
+                message += 'is_bad_bg_pixels '
+            elif self.is_centroid_bad:
+                message += 'is_centroid_bad '
+            elif self.is_good_pre_filtering:
+                message += 'is_good_pre_filtering '
+
+            with open(pp.Pre_filtering_history_targets_filename, 'a') as fil:
+                print(self.target_id, message, file=fil)
 

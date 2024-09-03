@@ -180,7 +180,8 @@ Per_phases_per_chunk = 1200000  # It was 1300000 in run 12, but injection search
 # N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
 # N_periods_per_chunk = 80  # Now I run for the full bank
 # I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
-Stat_candidate_search = 40.  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
+Score_candidate_search = 40.  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
+Score_candidate_postprocess = 49.
 # The following `close` parameters are for the maximal score selection. Sometimes the maximal integral corresponds
 # to the chunk that does not capture the true peak. But the integral does capture the true peak because of the
 # period overlapping. We check whether there is a score which is no less
@@ -210,7 +211,6 @@ Data_location = os.path.join(os.getcwd(), 'light_curves')  # in this directory, 
 Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a file named after target_id will be created
 Triggers_output_location = os.path.join(os.getcwd(), 'triggers_outputs')
 Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
-Threshold_crossing_lists_folder = os.path.join(os.getcwd(), 'outputs')
 Run_root_folder = os.path.join(os.getcwd(), 'outputs')
 Problems_folder = None
 Run_name = 'run_11'
@@ -226,7 +226,6 @@ if Working_place == 'Marvin':
     Data_location = '/Collaboration-Kepler/KeplerData'
     Output_location = '/Collaboration-Kepler/orynai/output_' + str(Run_name)
     Triggers_output_location = '/Collaboration-Kepler/orynai/triggers_output_' + str(Run_name)
-    Threshold_crossing_lists_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Run_root_folder = '/SMALLDATA/orynai/' + str(Run_name)
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
 
@@ -235,7 +234,6 @@ if Working_place == 'WEXAC':
     Output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/output_' + str(Run_name)
     Triggers_output_location = '/home/labs/barakz/Collaboration-Kepler/orynai/triggers_output_' + str(Run_name)
     # Kepler_files_folder = '/home/labs/barakz/Collaboration-Kepler/KeplerFiles'
-    Threshold_crossing_lists_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Run_root_folder = '/home/labs/barakz/orynai/' + str(Run_name)
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
     Problems_folder = '/home/labs/barakz/orynai/' + str(Run_name) + '/problems_stars'
@@ -268,6 +266,9 @@ if force_data_output_locations_creation:
     if not os.path.isdir(Output_location):
         os.mkdir(Output_location)
 
+Search_history_targets_filename = 'search_history_targets.txt'
+Pre_filtering_history_targets_filename = 'pre_filtering_history_targets.txt'
+
 Threshold_crossing_list_filename = 'threshold_crossing_kid_info.txt'
 Threshold_g_crossing_list_filename = 'threshold_g_crossing_kid_info.txt'
 Threshold_crossing_list_multiple_triggers_filename = 'threshold_crossing_list_multiple.txt'
@@ -288,20 +289,27 @@ Threshold_g_crossing_scrambled_list_filename = 'threshold_g_crossing_scrambled_k
 Threshold_crossing_scrambled_list_multiple_triggers_filename = 'threshold_crossing_scrambled_list_multiple.txt'
 Threshold_g_crossing_scrambled_list_multiple_triggers_filename = 'threshold_g_crossing_scrambled_list_multiple.txt'
 
-Threshold_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_list_filename)
-Threshold_g_crossing_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_g_crossing_list_filename)
-Triggers_for_slides_injections_file = os.path.join(Threshold_crossing_lists_folder, Triggers_for_slides_injections_filename)
-Triggers_g_for_slides_injections_file = os.path.join(Threshold_crossing_lists_folder, Triggers_g_for_slides_injections_filename)
-Target_ids_prefiltered_file = os.path.join(Threshold_crossing_lists_folder, Target_ids_prefiltered_filename)
-Target_ids_g_prefiltered_file = os.path.join(Threshold_crossing_lists_folder, Target_ids_g_prefiltered_filename)
-Maximal_short_periodicity_triggers_file = os.path.join(Threshold_crossing_lists_folder, Maximal_short_periodicity_triggers_filename)
-Maximal_short_periodicity_g_triggers_file = os.path.join(Threshold_crossing_lists_folder, Maximal_short_periodicity_g_triggers_filename)
-Triggers_short_periodicity_filtered_file = os.path.join(Threshold_crossing_lists_folder, Triggers_short_periodicity_filtered_filename)
-Triggers_g_short_periodicity_filtered_file = os.path.join(Threshold_crossing_lists_folder, Triggers_g_short_periodicity_filtered_filename)
-Non_slidable_tids_short_period_file = os.path.join(Threshold_crossing_lists_folder, Non_slidable_tids_short_period_filename)
-Seeds_scrambling_run_file = os.path.join(Threshold_crossing_lists_folder, Seeds_scrambling_run_filename)
-Threshold_crossing_scrambled_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_crossing_scrambled_list_filename)
-Threshold_g_crossing_scrambled_list_file = os.path.join(Threshold_crossing_lists_folder, Threshold_g_crossing_scrambled_list_filename)
+Search_history_targets_file = os.path.join(Run_root_folder, Search_history_targets_filename)
+Pre_filtering_history_targets_file = os.path.join(Run_root_folder, Pre_filtering_history_targets_filename)
+# 1) Pipeline selects the threshold-crossing events:
+Threshold_crossing_list_file = os.path.join(Run_root_folder, Threshold_crossing_list_filename)
+Threshold_g_crossing_list_file = os.path.join(Run_root_folder, Threshold_g_crossing_list_filename)
+# 2) Pre-filtering vetos check those events:
+Triggers_prefiltered_file = os.path.join(Run_root_folder, Target_ids_prefiltered_filename)
+Triggers_g_prefiltered_file = os.path.join(Run_root_folder, Target_ids_g_prefiltered_filename)
+# 3) There is a short periodicity search for the pre-filtered events:
+Maximal_short_periodicity_triggers_file = os.path.join(Run_root_folder, Maximal_short_periodicity_triggers_filename)
+Maximal_short_periodicity_g_triggers_file = os.path.join(Run_root_folder, Maximal_short_periodicity_g_triggers_filename)
+Triggers_short_periodicity_filtered_file = os.path.join(Run_root_folder, Triggers_short_periodicity_filtered_filename)
+Triggers_g_short_periodicity_filtered_file = os.path.join(Run_root_folder, Triggers_g_short_periodicity_filtered_filename)
+# 4) After the short periodicity search, triggers are selected for the slides and injections:
+Triggers_for_slides_injections_file = os.path.join(Run_root_folder, Triggers_for_slides_injections_filename)
+Triggers_g_for_slides_injections_file = os.path.join(Run_root_folder, Triggers_g_for_slides_injections_filename)
+Non_slidable_tids_short_period_file = os.path.join(Run_root_folder, Non_slidable_tids_short_period_filename)
+# x) If there is a scrambled run:
+Seeds_scrambling_run_file = os.path.join(Run_root_folder, Seeds_scrambling_run_filename)
+Threshold_crossing_scrambled_list_file = os.path.join(Run_root_folder, Threshold_crossing_scrambled_list_filename)
+Threshold_g_crossing_scrambled_list_file = os.path.join(Run_root_folder, Threshold_g_crossing_scrambled_list_filename)
 
 
 Summary_target_txt_filename_postfix = 'target_summary.txt'

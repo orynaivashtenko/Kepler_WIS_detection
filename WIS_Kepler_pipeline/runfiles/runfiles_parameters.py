@@ -10,18 +10,20 @@ from pipeline_parameters import Run_name
 
 
 Run_files_folder = os.path.dirname(__file__)
-Run_foldername = Run_name
-Run_jobs_outputs_folder = '/home/labs/barakz/orynai'
+Core_folder = os.path.join('/home/labs/barakz/orynai', Run_name)
+Run_jobs_outputs_folder = os.path.join(Core_folder, 'hpc')
 
-Job_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/jobs'
-Output_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/outputfiles'
-Error_files_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/errorfiles'
-Output_stars_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/outputs_stars'
-Other_errors_folder = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/other_errors'
+Job_files_folder = os.path.join(Run_jobs_outputs_folder, 'jobs')
+Submitted_jobs_folder = os.path.join(Run_jobs_outputs_folder, 'submitted_jobs')
+Failed_jobs_folder = os.path.join(Run_jobs_outputs_folder, 'failed_jobs')
+Output_files_folder = os.path.join(Run_jobs_outputs_folder, 'outputfiles')
+Error_files_folder = os.path.join(Run_jobs_outputs_folder, 'errorfiles')
+Output_stars_folder = os.path.join(Run_jobs_outputs_folder, 'outputs_stars')
 Star_full_output_filename_postfix = 'full_output.txt'
 
-Error_list_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/error_list.txt'
-List_of_exited_jobs_file = Run_jobs_outputs_folder + '/' + str(Run_foldername) + '/exited_jobs.txt'
+Error_list_file = os.path.join(Run_jobs_outputs_folder, 'error_list.txt')
+List_of_failed_jobs_file = os.path.join(Run_jobs_outputs_folder, 'failed_jobs_list.txt')
+List_of_success_jobs_file = os.path.join(Run_jobs_outputs_folder, 'success_jobs_list.txt')
 
 # Queue_submit = 'physics-short'  # 'risk'
 Queue_submit = 'risk'  # '"short medium risk"'  # dynamic queue submission

@@ -11,7 +11,7 @@ import file_operations as fop
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--tids_list_file", type=str, nargs=1, help="path to file where to take tids",
-                    default=os.path.join(pp.Threshold_crossing_lists_folder, pp.Tids_that_did_not_run_filename))
+                    default=os.path.join(pp.Run_root_folder, pp.Tids_that_did_not_run_filename))
 parser.add_argument("--runfile", type=str, nargs=1, help="whether main or alternative runfile (differs by output location)",
                     default="main")
 args = parser.parse_args()

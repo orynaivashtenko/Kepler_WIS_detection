@@ -13,7 +13,7 @@ os.environ["MKL_NUM_THREADS"] = core_num  # export MKL_NUM_THREADS=6
 os.environ["VECLIB_MAXIMUM_THREADS"] = core_num  # export VECLIB_MAXIMUM_THREADS=4
 os.environ["NUMEXPR_NUM_THREADS"] = core_num  # export NUMEXPR_NUM_THREADS=6
 
-import numpy as np
+# import numpy as np
 import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
@@ -26,8 +26,7 @@ parser.add_argument("--tids_list_file", type=str, nargs=1,
                     help="path to file where to take tids. If empty, will go over all the folders",
                     default='')
 parser.add_argument("--not_run_tids_file", type=str, nargs=1, help="path to file where to save non-run tids",
-                    default=os.path.join(pp.Threshold_crossing_lists_folder, pp.Tids_that_did_not_run_filename))
-
+                    default=os.path.join(pp.Run_root_folder, pp.Tids_that_did_not_run_filename))
 parser.add_argument("--output_folder", type=str, nargs=1, help="path to the place where outputs of the pipeline are saved",
                     default=pp.Output_location)
 parser.add_argument("--keyword_output", type=str, nargs=1, help="path to the place where outputs of the pipeline are saved",

@@ -81,12 +81,12 @@ Suspicious_frequency_reasons_triggers_filename = 'suspicious_frequency_reasons_t
 Suspicious_frequency_filtered_triggers_filename = 'suspicious_frequency_filtered_triggers.npy'
 Gaia_trigger_table_filename = 'gaia_trigger_table.ecsv'
 
-Initial_trigger_list_file = os.path.join(pp.Threshold_crossing_lists_folder, Initial_trigger_list_filename)
-Suspicious_frequency_reasons_triggers_file = os.path.join(pp.Threshold_crossing_lists_folder,
+Initial_trigger_list_file = os.path.join(pp.Run_root_folder, Initial_trigger_list_filename)
+Suspicious_frequency_reasons_triggers_file = os.path.join(pp.Run_root_folder,
                                                           Suspicious_frequency_reasons_triggers_filename)
-Suspicious_frequency_filtered_triggers_file = os.path.join(pp.Threshold_crossing_lists_folder,
+Suspicious_frequency_filtered_triggers_file = os.path.join(pp.Run_root_folder,
                                                            Suspicious_frequency_filtered_triggers_filename)
-Gaia_trigger_file = os.path.join(pp.Threshold_crossing_lists_folder, Gaia_trigger_table_filename)
+Gaia_trigger_file = os.path.join(pp.Run_root_folder, Gaia_trigger_table_filename)
 
 Neighbors_folder = os.path.join(pp.Triggers_output_location, 'Neighbors_run_' + pp.Run_name)
 Summary_tce_txt_filename_postfix = 'tce_summary.txt'
