@@ -232,7 +232,7 @@ class WisTCE(object):
         if first_transit_time is None:
             first_transit_time = self.best_ftt
         if template is None:
-            template = self.best_temp
+            template = int(self.best_temp)
         if data_location is None:
             data_location = self.data_location
         if output_location is None:
@@ -276,29 +276,30 @@ class WisTCE(object):
         file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
                                             filename_postfix=pickle_target_small_attributes_filename_postfix, file_format='pickle')
 
-        dict_of_old_locations = {}
-        for key in Location_attributes:
-            if key in self.__dict__.keys():
-                dict_of_old_locations[key] = self.__dict__[key]
-
-        if overwrite_existing:
-            dict_old = None
-        else:
-            dict_old = copy.deepcopy(self.__dict__)
-
-        with open(file_path, 'rb') as pickle_file:
-            dict1 = pickle.load(pickle_file)
-            self.__dict__.update(dict1.items())
-
-        if not overwrite_existing:
-            for key in dict_old:
-                if dict_old[key] is not None:
-                    self.__dict__[key] = dict_old[key]
-
-        if not overwrite_location_parameters:
+        if os.path.exists(file_path):
+            dict_of_old_locations = {}
             for key in Location_attributes:
                 if key in self.__dict__.keys():
-                    self.__dict__[key] = dict_of_old_locations[key]
+                    dict_of_old_locations[key] = self.__dict__[key]
+
+            if overwrite_existing:
+                dict_old = None
+            else:
+                dict_old = copy.deepcopy(self.__dict__)
+
+            with open(file_path, 'rb') as pickle_file:
+                dict1 = pickle.load(pickle_file)
+                self.__dict__.update(dict1.items())
+
+            if not overwrite_existing:
+                for key in dict_old:
+                    if dict_old[key] is not None:
+                        self.__dict__[key] = dict_old[key]
+
+            if not overwrite_location_parameters:
+                for key in Location_attributes:
+                    if key in self.__dict__.keys():
+                        self.__dict__[key] = dict_of_old_locations[key]
 
     def pickle_small_attributes(self, output_location=None,
                                 pickle_small_attributes_filename_postfix=Pickle_tce_small_attributes_filename_postfix):
@@ -307,7 +308,7 @@ class WisTCE(object):
         :param pickle_small_attributes_filename_postfix:
         :type pickle_small_attributes_filename_postfix:
         :param output_location:
-        :type output_location
+        :type output_location:
         :return:
         """
         if output_location is None:
@@ -344,10 +345,11 @@ class WisTCE(object):
                 overwrite_location_parameters=overwrite_location_parameters,
                 overwrite_existing=overwrite_existing_by_target, output_location=output_location)
 
-        file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
-                                            filename_postfix=pickle_tce_small_attributes_filename_postfix, file_format='pickle')
-        if os.path.exists(file_path):
-            with open(file_path, 'rb') as pickle_file:
+        file_path_unpickling = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
+                                                       filename_postfix=pickle_tce_small_attributes_filename_postfix,
+                                                       file_format='pickle')
+        if os.path.exists(file_path_unpickling):
+            with open(file_path_unpickling, 'rb') as pickle_file:
                 dict1 = pickle.load(pickle_file)
                 self.__dict__.update(dict1.items())
 
@@ -356,11 +358,14 @@ class WisTCE(object):
                 if key in self.__dict__.keys():
                     self.__dict__[key] = dict_of_old_locations[key]
 
+        if self.best_temp is not None:
+            self.best_temp = int(self.best_temp)
+
     def pickle_all_attributes(self, output_location=None,
                               pickle_all_attributes_filename_postfix=Pickle_tce_all_attributes_filename_postfix):
         """
         Pickles all attributes which are of type str, float, int, np.float, np.integer, np.ndarray, list, dict
-        TODO: we should avoid pickling too long arrays
+        TODO: unclear whether to ever use it because if we have attributes like klc, we do not want to pickle them, it will take too much
 
         :param pickle_all_attributes_filename_postfix:
         :type pickle_all_attributes_filename_postfix:
@@ -460,7 +465,7 @@ class WisTCE(object):
                 self.best_stat = return_array[spip.Best_per_results_index_stats][ind_max]
                 self.best_per = return_array[spip.Best_per_results_index_per][ind_max]
                 self.best_ftt = return_array[spip.Best_per_results_index_ftt][ind_max]
-                self.best_temp = return_array[spip.Best_per_results_index_template][ind_max]
+                self.best_temp = int(return_array[spip.Best_per_results_index_template][ind_max])
                 self.best_gauss_stat = return_array[spip.Best_per_results_index_stats_gauss][ind_max]
         if return_lists:
             return return_array
@@ -496,7 +501,7 @@ class WisTCE(object):
         if period is None:
             period = self.best_per
         if template_index is None:
-            template_index = self.best_temp
+            template_index = int(self.best_temp)
         if first_transit_time is None:
             first_transit_time = self.best_ftt
 
@@ -776,31 +781,15 @@ class WisTCE(object):
                 orig_quarters = af.get_orig_quarters(transit_times)
                 seasons = np.array(orig_quarters) % 4
 
-            # Converting to units of SNR:
-            statistics_full[stat_vars_full > 0] = statistics_full[stat_vars_full > 0] / (stat_vars_full[stat_vars_full > 0]) ** 0.5
-
-            if indices_of_templates[temp][-1] - indices_of_templates[temp][0] > 1:
-                statistic_full = np.nanmin(statistics_full[indices_of_templates[temp][0]: indices_of_templates[temp][-1]], axis=0)
-                # -> minimizing over subbing shifts to find the worst
-            else:
-                statistic_full = statistics_full[indices_of_templates[temp][0]]
-
-            # Since the centroid can be rather bad, we renormalize by the outlier-free total variance
-            statistic_full = statistic_full / ut.outlier_free_std(statistic_full, n_iterations=1, nsig=3, renormalize=True)
+            # Converting to units of SNR and minimizing over the template sub-bin shifts
+            statistic_full = af.get_shift_reduced_full_stat_snr(statistics_full=statistics_full, stat_vars_full=stat_vars_full,
+                                                                temp_index=temp, indices_of_templates=indices_of_templates,
+                                                                shift_reduction='minimize', renormalize=True)
+            # -> Since the centroid can be rather bad, we renormalize by the outlier-free total variance
 
             times_near_transit_pieces, near_transit_pieces, snr_peaks = af.get_near_transit_pieces_from_full_time(
                 transit_times=transit_times, time_full=time_full, data_full=statistic_full,
                 time_wing_days=time_wing_days, peak_is_min=True)
-
-            # snr_peaks = []
-            # near_transit_pieces = []
-            # times_near_transit_pieces = []
-            # for trans_tim in transit_times:
-            #     ind_0 = np.nanargmin(np.abs(time_full - (trans_tim - time_wing_days)))
-            #     ind_1 = np.nanargmin(np.abs(time_full - (trans_tim + time_wing_days)))
-            #     near_transit_pieces.append(statistic_full[ind_0:ind_1])
-            #     times_near_transit_pieces.append(time_full[ind_0:ind_1])
-            #     snr_peaks.append(np.min(statistic_full[ind_0:ind_1]))  # ! Minimization over broad range!
 
             centr_coords_snr_peaks.append(snr_peaks)
             centr_coords_snr_near_transit_pieces.append(near_transit_pieces)
@@ -1146,7 +1135,7 @@ class WisTCE(object):
             self.rp_to_r_earth_std = np.nan
         else:
             tb = tm.TemplateBank(templates=None, shifts=None, template_index='all', load_essentials=True)
-            ti_sh = tb.indices_of_templates[self.best_temp][0]
+            ti_sh = tb.indices_of_templates[int(self.best_temp)][0]
             templ_max = np.max(np.abs(tb.templates_shifts[ti_sh]))
             (ppm, ppm_std, ppm_variability, ppms, ppms_stds,
              ampl, ampl_std, ampl_variability, ampls, ampls_stds,
@@ -1207,9 +1196,9 @@ class WisTCE(object):
         binwid = klc.dt_days  # min(self.templates_durations_hours[temp_number] / 24 / 40, 0.1)
         bins_time, bins_flux, bins_counts, folds_times, folds_fluxes = af.fold_fluxes(
             times=klc.times, fluxes=klc.whitened_fluxes_td, period=period_fold, first_time=self.best_ftt,
-            masks=klc.big_hole_masks, binwid=binwid, time_fold=period_fold,
-            dt=klc.dt_days, means=None, template=None, return_std=False,
-            normalize_by_counts=False)  # np.array(self.klc.templates[self.klc.indices_of_templates[temp_number][0]]))
+            masks=klc.big_hole_masks, binwid=binwid, dt=klc.dt_days, means=None,
+            template=None, return_std=False, normalize_by_counts=False)
+        # np.array(self.klc.templates[self.klc.indices_of_templates[temp_number][0]]))
         flux_normalized_vars = np.zeros(len(bins_flux))
         flux_normalized_vars[bins_counts > 0] = bins_flux[bins_counts > 0] / bins_counts[bins_counts > 0] ** 0.5
         # -> this will have the same variance for all the bins
@@ -1288,7 +1277,7 @@ class WisTCE(object):
             # -> We do not renormalize the PSD drift here because it will nto make the situation worse for normal triggers,
             # but may make it better for bad triggers. Sometimes it will also make it worse for bad triggers though...
             # The thing is that usually, the data misses flux at the low frequencies where the templates
-            # have most power, therefore the incorrectness makes the statistic smaller. Therefore good triggers will not
+            # have most power, therefore the incorrectness makes the statistic smaller. Therefore, good triggers will not
             # turn to outliers. Bad triggers may be missed now, it is true. But from the other side, there are bad triggers
             # which just have all the fold bad, not only a couple of outliers. And when they are renormalized, they
             # create very good-looking histogram. Their bad places are not outliers, therefore calculating the
@@ -1339,9 +1328,9 @@ class WisTCE(object):
 
     def estimate_transit_duration(self, in_folded_template=True):
         if in_folded_template and self.best_temp_folded is not None:
-            template_number = self.best_temp_folded
+            template_number = int(self.best_temp_folded)
         else:
-            template_number = self.best_temp
+            template_number = int(self.best_temp)
         self.transit_duration_hours = tm.Durations[template_number] * 24.  # in hours
 
     def get_target_gaia_table(self, file_path=Gaia_trigger_file):
@@ -1355,7 +1344,9 @@ class WisTCE(object):
 
     def run_all_checks_exclusive(self, print_message_to_history=True,
                                  pre_filtering_history_targets_file=locs.Pre_filtering_history_targets_file,
-                                 save_byproducts_to_file=False):
+                                 save_byproducts_to_file=False, produce_plots=False, save_plots=False,
+                                 plots_output_location=locs.Triggers_plots_location, no_show=False,
+                                 update_pickling=True):
         self.is_good_pre_filtering = False
         self.get_transit_times_info()
         self.veto_short_periodicity()
@@ -1364,7 +1355,8 @@ class WisTCE(object):
         self.check_koi_status()
         self.check_tce_status()
         self.seasonal_test()
-        if (not self.too_few_valid_transits) and (not self.is_bad_periodicity) and (not self.is_bad_seasons):
+        transits_were_bad = self.too_few_valid_transits or self.is_bad_periodicity or self.is_bad_seasons
+        if not transits_were_bad:
             self.veto_fold_residuals(save_byproducts_to_file=save_byproducts_to_file,
                                      ignore_moving_template_shape=True)  # ignoring moving template shape makes it quick
             if not self.is_bad_fold_residuals:
@@ -1375,6 +1367,19 @@ class WisTCE(object):
                         self.estimate_transit_duration(in_folded_template=True)
                         self.estimate_biased_rp()
                         self.is_good_pre_filtering = True
+        if update_pickling:
+            self.pickle_small_attributes()
+            self.print_dict_file()
+
+        if produce_plots:
+            from plotting_functions import plot_all_postprocessing
+            plot_all_postprocessing(self, save_fig=save_plots, no_show=no_show,
+                                    plots_output_location=plots_output_location,
+                                    fluxes_and_stats=True,
+                                    folding_residuals=(not transits_were_bad),
+                                    bg_star_pixels=(not transits_were_bad) and (not self.is_bad_fold_residuals),
+                                    centroid_plots=((not transits_were_bad) and (not self.is_bad_fold_residuals)
+                                                    and (not self.is_bad_bg_pixels)))
 
         if print_message_to_history:
             # Print message to the history file:

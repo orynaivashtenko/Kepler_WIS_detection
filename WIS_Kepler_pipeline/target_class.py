@@ -384,6 +384,8 @@ class KeplerTarget(object):
         """List of injected planetary radii in units of stellar radius of injections which were successfully detected"""
         self.first_transit_time_inj_success = None
         """List of injected first transit times of injections which were successfully detected"""
+        self.dur_inj_success = None
+        """Approximate duration of the injected transit of injections which were successfully detected"""
         self.retrieved_stat_success = None
         """List of detected statistics of injections which were successfully detected"""
         self.retrieved_period_success = None
@@ -421,6 +423,8 @@ class KeplerTarget(object):
         """List of injected periastron arguments in degrees of injections which were missed by the search"""
         self.rp_inj_bad = None
         """List of injected planetary radii in units of stellar radius of injections which were missed by the search"""
+        self.dur_inj_bad = None
+        """Approximate duration of the injected transit of injections which were missed by the search"""
         self.first_transit_time_inj_bad = None
         """List of injected first transit times of injections which were missed by the search"""
         self.retrieved_stat_bad = None
@@ -3418,5 +3422,5 @@ class KeplerTarget(object):
         if detect_single_transits:
             self.klc.detect_single_transits()
         self.klc.load_connected_stats()
-        self.klc.interleave_shifts()
+        self.klc.interleave_shifts(delete_fulls=False)
         self.klc.get_summed_values(first_transit_time=self.best_ftt, period=self.best_per, template=self.best_temp)

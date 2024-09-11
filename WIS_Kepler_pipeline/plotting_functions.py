@@ -9,7 +9,9 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = core_num
 os.environ["NUMEXPR_NUM_THREADS"] = core_num
 
 import numpy as np
-from auxiliary_functions import fold_fluxes, get_average_stat_template, get_average_whitened_template
+from auxiliary_functions import (fold_fluxes, get_average_stat_template, get_average_whitened_template,
+                                 get_shift_reduced_full_stat_snr, get_near_transit_pieces_from_full_time,
+                                 get_near_transit_pieces_of_whitened_flux)
 import utils as ut
 import pickle
 import pipeline_parameters as pp
@@ -29,7 +31,8 @@ from plotting_parameters import *
 class PlotWrapper(object):
     def __init__(self, save_fig=Save_fig, no_show=No_show, ax=None, figsize=None, target_id=None,
                  filename_postfix='plot.png', plot_output_location=locs.Triggers_plots_location, dpi=Plots_dpi,
-                 grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid, which_grid='both'):
+                 grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid, which_grid='both',
+                 allow_plot_folder_creation=False):
         self.save_fig = save_fig
         self.no_show = no_show
         self.plot_output_location = plot_output_location
@@ -39,7 +42,8 @@ class PlotWrapper(object):
         self.grid_linewidth = linewidth_grid
         self.which_grid = which_grid
         if self.save_fig:
-            tid_folder = get_correct_tid_folder(target_id=target_id, location=plot_output_location, allow_creation=False, with_prefix_folder=False)
+            tid_folder = get_correct_tid_folder(target_id=target_id, location=plot_output_location,
+                                                allow_creation=allow_plot_folder_creation, with_prefix_folder=False)
             self.file_saving_path = get_saving_file_path(output_location=tid_folder,
                                                          target_id=target_id,
                                                          filename_postfix=filename_postfix,
@@ -71,7 +75,7 @@ class SubplotsWrapper(object):
                  save_fig=Save_fig, no_show=No_show, figsize=Figsize, target_id=None,
                  filename_postfix='plot.png', plot_output_location=locs.Triggers_plots_location, dpi=Plots_dpi,
                  grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid,
-                 zero_lines=True, zero_lines_linewidth=Linewidth_zero_level):
+                 zero_lines=True, zero_lines_linewidth=Linewidth_zero_level, allow_plot_folder_creation=False):
         self.nrows = nrows
         self.ncols = ncols
         self.save_fig = save_fig
@@ -85,7 +89,7 @@ class SubplotsWrapper(object):
         self.zero_lines_linewidth = zero_lines_linewidth
         if self.save_fig:
             tid_folder = get_correct_tid_folder(target_id=target_id, location=plot_output_location,
-                                                allow_creation=False, with_prefix_folder=False)
+                                                allow_creation=allow_plot_folder_creation, with_prefix_folder=False)
             self.file_saving_path = get_saving_file_path(output_location=tid_folder,
                                                          target_id=target_id,
                                                          filename_postfix=filename_postfix,
@@ -277,8 +281,12 @@ def plot_whitened_fluxes(target, colors=Flux_quarters_colors, plot_trigger=True,
 
 def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=False, zoom_wing=Zoom_wing_folded_plots,
                          ax=None, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
-                         figsize=Figsize_flux, filename_postfix=locs.Folded_statistics_plot_filename_postfix,
+                         figsize=Figsize_flux,
+                         filename_postfix=locs.Folded_statistics_plot_filename_postfix,
+                         filename_postfix_zoomed=locs.Folded_statistics_zoomed_plot_filename_postfix,
                          template_linewidth=Linewidth):
+    if zoomed:
+        filename_postfix = filename_postfix_zoomed
     prepare_target_for_plotting(target, initialize_templates=False,
                                 condition_templates=False, detect_single_transits=False)
     if temp_number is None:
@@ -291,7 +299,7 @@ def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=Fals
     binwid = min(target.templates_durations_hours[temp_number] / 24 / 5, 0.1)
     bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
         times=time, fluxes=statistics, period=target.best_per, first_time=target.best_ftt,
-        masks=mask, binwid=binwid, time_fold=target.best_per,  # self.templates_durations_hours[temp_number] / 24 * 10,
+        masks=mask, binwid=binwid,  # self.templates_durations_hours[temp_number] / 24 * 10,
         dt=target.klc.dt_days, means=None, template=None, return_std=True,
         normalize_by_counts=True)  # np.array(self.klc.templates[self.klc.indices_of_templates[temp_number][0]]))
 
@@ -342,8 +350,12 @@ def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=Fals
 
 def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed=False, zoom_wing=Zoom_wing_folded_plots,
                               ax=None, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
-                              figsize=Figsize_flux, filename_postfix=locs.Folded_whitened_fluxes_plot_filename_postfix,
+                              figsize=Figsize_flux,
+                              filename_postfix=locs.Folded_whitened_fluxes_plot_filename_postfix,
+                              filename_postfix_zoomed=locs.Folded_whitened_fluxes_zoomed_plot_filename_postfix,
                               template_linewidth=Linewidth):
+    if zoomed:
+        filename_postfix = filename_postfix_zoomed
     prepare_target_for_plotting(target, initialize_templates=False,
                                 condition_templates=False, detect_single_transits=False)
     if temp_number is None:
@@ -352,8 +364,7 @@ def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed
     binwid = min(target.templates_durations_hours[temp_number] / 24 / 5, 0.1)
     bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
         times=target.klc.times, fluxes=target.klc.whitened_fluxes_td, period=target.best_per, first_time=target.best_ftt,
-        masks=target.klc.big_hole_masks,
-        binwid=binwid, time_fold=target.best_per,  # self.templates_durations_hours[temp_number] / 24 * 10,
+        masks=target.klc.big_hole_masks, binwid=binwid, # self.templates_durations_hours[temp_number] / 24 * 10,
         dt=target.klc.dt_days, means=None, template=None, return_std=True,
         normalize_by_counts=True)  # np.array(self.klc.templates[self.klc.indices_of_templates[temp_number][0]]))
     n_time_templ = int(np.round(target.best_per / target.klc.dt_days))
@@ -399,6 +410,87 @@ def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed
         title = get_target_title(target, score=None, per=None, temp=temp_number)
         axx.set_title(title)
         axx.legend(loc='upper right')
+
+
+def plot_snrs_and_wh_fluxes_per_season(target, time_wing_days=Seasonal_plotting_wing_days,
+                                       save_fig=Save_fig, no_show=No_show, figsize=Figsize_season_pieces,
+                                       filename_postfix_snr=locs.Season_pieces_snr_plot_filename_postfix,
+                                       filename_postfix_wh_flux=locs.Season_pieces_wh_flux_plot_filename_postfix,
+                                       plot_output_location=locs.Triggers_plots_location, dpi=Plots_dpi,
+                                       markersize_folds=0.7, markersize_bins=2, linewidth=Linewidth_very_thin):
+    prepare_target_for_plotting(target, initialize_templates=False, condition_templates=False, detect_single_transits=False)
+    transit_times = target.klc.summed_times
+    seasons = get_seasons(tce=None, transit_times=transit_times)
+
+    if np.array([len(target.klc.whitened_fluxes_td[q]) == target.klc.support
+                 for q in range(len(target.klc.whitened_fluxes_td))]).all():
+        unpad = True
+        zero_padding_ends = target.klc.zero_padding_ends
+    else:
+        unpad = False
+        zero_padding_ends = None
+
+    times_near_transit_pieces_wh_flux, wh_fluxes_near_transit_pieces, masks_near_transit_pieces_flux, _ = (
+        (get_near_transit_pieces_of_whitened_flux(
+            transit_times=transit_times, times=target.klc.times, whitened_fluxes_td=target.klc.whitened_fluxes_td,
+            masks=target.klc.big_hole_masks, time_wing_days=time_wing_days,
+            unpad=unpad, zero_padding_ends=zero_padding_ends, dt_days=target.klc.dt_days)))
+
+    statistic_full, stat_mask_full = get_shift_reduced_full_stat_snr(
+        statistics_full=target.klc.statistics_full,
+        stat_vars_full=target.klc.stat_vars_full,
+        stat_masks_full=target.klc.stat_masks_full, temp_index=target.best_temp,
+        indices_of_templates=target.klc.indices_of_templates, shift_reduction='average',
+        renormalize=False, return_mask=True)
+    times_near_transit_pieces_snr, near_transit_pieces_snr, mask_near_pieces_snr, _ = get_near_transit_pieces_from_full_time(
+        transit_times=transit_times, time_full=target.klc.time_full, data_full=statistic_full,
+        mask_full=stat_mask_full, time_wing_days=time_wing_days, peak_is_min=True, return_mask=True)
+
+    # -----------------------------------------------------------------------------------------------
+    # The actual plotting of the two plots
+    for times_near_transit_pieces, data_near_transit_pieces, mask_near_transit_pieces, filename_postfix, ylabel, title in [
+        [times_near_transit_pieces_wh_flux, wh_fluxes_near_transit_pieces, masks_near_transit_pieces_flux, filename_postfix_wh_flux,
+         'Whitened flux', 'Whitened flux slices near transits by season'],
+        [times_near_transit_pieces_snr, near_transit_pieces_snr, mask_near_pieces_snr, filename_postfix_snr,
+         'Single-transit statistic in units of $SNR$', 'Single-transit statistic slices near transits by season']]:
+        with SubplotsWrapper(nrows=2, ncols=2, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw,
+                             save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=target.target_id,
+                             filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=dpi,
+                             grid=True, zero_lines=True, zero_lines_linewidth=Linewidth_zero_level) as (fig, axs):
+            seasons_labeled = np.zeros(len(seasons)).astype(bool)
+            for i in range(len(transit_times)):
+                season = seasons[i]
+                ax = axs[season // 2, season % 2]
+                label = 'S' + str(season) if not seasons_labeled[season] else None
+                col = (0.5, 0.5, 0.5)
+                ax.plot((times_near_transit_pieces[i] - transit_times[i])[mask_near_transit_pieces[i]],
+                        data_near_transit_pieces[i][mask_near_transit_pieces[i]], linestyle='',
+                        marker='o', markersize=markersize_folds, color=col, zorder=10,
+                        label=label)
+
+                bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
+                    times=copy.deepcopy(times_near_transit_pieces_wh_flux),
+                    fluxes=copy.deepcopy(wh_fluxes_near_transit_pieces),
+                    period=target.best_per,
+                    first_time=target.best_ftt,
+                    masks=copy.deepcopy(masks_near_transit_pieces_flux),
+                    binwid=target.klc.dt_days, dt=target.klc.dt_days, means=None, template=None, return_std=True,
+                    normalize_by_counts=True)
+                col = 'k'
+                ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0],
+                            xerr=None, markersize=markersize_bins, fmt='o', markerfacecolor=col, markeredgecolor=col,
+                            ecolor=col, elinewidth=linewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
+                            xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                            label=None)
+                seasons_labeled[season] = True
+
+            for season in seasons:
+                ax = axs[season // 2, season % 2]
+                ax.legend(loc='upper left')
+
+            axs[-1, 0].set_xlabel('Time from transit, days')
+            axs[-1, 0].set_ylabel(ylabel)
+            fig.suptitle(get_target_title(target) + '\n' + title, y=1)
 
 
 def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_extrapolation=True,
@@ -846,12 +938,7 @@ def plot_bg_star_pixels_ppm(tce, save_fig=Save_fig, no_show=No_show, plot_output
                             linewidth=Linewidth_coarse, linewidth_thin=Linewidth_thin,
                             linewidth_zero_level=Linewidth_zero_level,
                             markersize=Markersize):
-    if tce.transit_seasons is None:
-        from auxiliary_functions import get_orig_quarters
-        seasons = np.array(get_orig_quarters(tce.summed_transit_times)) % 4
-    else:
-        seasons = tce.transit_seasons
-
+    seasons = get_seasons(tce=tce)
     with SubplotsWrapper(nrows=2, ncols=1, sharex=False, sharey=False, gridspec_kw={'top': 0.88, 'bottom': 0.05, 'hspace': 0.25},
                          save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=tce.target_id,
                          filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=dpi,
@@ -875,12 +962,12 @@ def plot_bg_star_pixels_ppm(tce, save_fig=Save_fig, no_show=No_show, plot_output
         seasons = seasons.astype(float)
         for i in range(4):
             seasons[seasons == i] += np.linspace(-0.1, 0.1, len(seasons[seasons == i]))
-        ax.errorbar(tce.star_pixels_ppms, seasons + np.random.normal(0, 0.01, len(seasons)),
-                    xerr=tce.star_pixels_stds_of_ppms,
+        ax.errorbar(tce.star_pixels_ppms, seasons, xerr=tce.star_pixels_stds_of_ppms,
                     marker='o', linestyle='', markersize=markersize, label='star', linewidth=linewidth_thin,
                     capsize=3, elinewidth=linewidth_thin, capthick=linewidth_thin)
-        ax.errorbar(tce.bg_pixels_ppms, seasons + np.random.normal(0, 0.01, len(seasons)),
-                    xerr=tce.bg_pixels_stds_of_ppms,
+        for i in range(4):
+            seasons[seasons == i] -= np.linspace(-0.05, 0.05, len(seasons[seasons == i]))
+        ax.errorbar(tce.bg_pixels_ppms, seasons, xerr=tce.bg_pixels_stds_of_ppms,
                     marker='o', linestyle='', markersize=markersize, label='bg', linewidth=linewidth_thin,
                     capsize=3, elinewidth=linewidth_thin, capthick=linewidth_thin)
         ax.set_yticks([0, 1, 2, 3])
@@ -1018,12 +1105,8 @@ def produce_centroid_plots(tce, save_fig=Save_fig, no_show=No_show, plot_output_
     (centr_coords_snr_peaks, centr_coords_snr_near_transit_pieces, centr_coords_times_near_transit_pieces,
      centr_snr2_near_transit_pieces, time_total, seasons) = tce.load_centroid_near_transit_pieces(time_wing_days=time_wing_days)
     (ftts_total, stats_2_max_periodic_total, ftts_coords, stats_2_max_periodic_coords, ftt_center) = tce.load_centroid_periodic_results()
-    if tce.transit_seasons is None:
-        from auxiliary_functions import get_orig_quarters
-        seasons = np.array(get_orig_quarters(tce.summed_transit_times)) % 4
-    else:
-        seasons = tce.transit_seasons
-    plot_centroids_stat_periodic(tce=None, target_id=None,
+    seasons = get_seasons(tce=tce)
+    plot_centroids_stat_periodic(tce=None, target_id=tce.target_id,
                                  ftts_total=ftts_total, stats_2_max_periodic_total=stats_2_max_periodic_total,
                                  ftts_coords=ftts_coords,
                                  stats_2_max_periodic_coords=stats_2_max_periodic_coords, ftt_center=ftt_center,
@@ -1055,6 +1138,42 @@ def produce_centroid_plots(tce, save_fig=Save_fig, no_show=No_show, plot_output_
                                     filename_postfix=locs.Centroid_cloud_plot_filename_postfix)
 
 
+def plot_all_postprocessing(tce, save_fig=Save_fig, no_show=No_show, fluxes_and_stats=True,
+                            folding_residuals=True, bg_star_pixels=True, centroid_plots=True,
+                            plots_output_location=locs.Triggers_plots_location):
+    import target_class
+    target = target_class.KeplerTarget(tce.target_id, data_location=tce.data_location, output_location=tce.output_location,
+                                       problems_folder=None)
+    target.fetch_saved_lightcurve()
+    if fluxes_and_stats:
+        plot_orig_fluxes(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+        plot_fluxes(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+        plot_stats(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+        plot_whitened_fluxes(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+        plot_folded_stat_snr(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location, zoomed=False)
+        plot_folded_stat_snr(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location, zoomed=True)
+        plot_folded_whitened_flux(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location, zoomed=False)
+        plot_folded_whitened_flux(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location, zoomed=True)
+        plot_snrs_and_wh_fluxes_per_season(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    if folding_residuals:
+        plot_folding_residuals_histograms(tce, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    if bg_star_pixels:
+        plot_bg_star_pixels_ppm(tce, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    if centroid_plots:
+        produce_centroid_plots(tce, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+
+
+def plots_all_after_slides_injections(tce, save_fig=Save_fig, no_show=No_show):
+    import target_class
+    target = target_class.KeplerTarget(tce.target_id, data_location=tce.data_location, output_location=tce.output_location,
+                                       problems_folder=None)
+    target.fetch_saved_lightcurve()
+    plot_significance_histograms(target, save_fig=save_fig, no_show=no_show)
+    plot_periodogram_chunks(target, save_fig=save_fig, no_show=no_show)
+    plot_injections_corners(target, save_fig=save_fig, no_show=no_show)
+    plot_injections_radii_durations_score(target, save_fig=save_fig, no_show=no_show)
+
+
 # ##########################################################################################################
 # AUXILIARY FUNCTIONS
 # ##########################################################################################################
@@ -1073,6 +1192,18 @@ def prepare_target_for_plotting(target, initialize_templates=False,
     if go_fetch:
         target.fetch_saved_lightcurve(initialize_templates=initialize_templates, condition_templates=condition_templates,
                                       detect_single_transits=detect_single_transits)
+
+
+def get_seasons(tce=None, transit_times=None):
+    from auxiliary_functions import get_orig_quarters
+    if tce is not None:
+        if tce.transit_seasons is None:
+            seasons = np.array(get_orig_quarters(tce.summed_transit_times)) % 4
+        else:
+            seasons = tce.transit_seasons
+    else:
+        seasons = np.array(get_orig_quarters(transit_times)) % 4
+    return seasons
 
 
 def set_axes_limits_fold(ax, bins_flux, bins_time, folds_fluxes, folds_times, best_per, plot_twice=False,
@@ -1181,12 +1312,12 @@ def plot_points_at_times(times, values, point_times, ax=None, **kwargs):
         ax.plot(tms, vals, 'o', **kwargs)
 
 
-def plot_vlines(times, ax=None, kwargs=(('color', 'k'), ('linewidth', Linewidth_vlines))):
+def plot_vlines(times, ax=None, zorder=0, kwargs=(('color', 'k'), ('linewidth', Linewidth_vlines))):
     kwargs = dict(kwargs)
     if ax is None:
         ax = plt.gca()
     for tim in times:
-        ax.axvline(tim, **kwargs)
+        ax.axvline(tim, zorder=zorder, **kwargs)
 
 
 def plot_many(times, values=None, zero_padding_ends=None, exclusion_masks=None, scatter_masks=None,

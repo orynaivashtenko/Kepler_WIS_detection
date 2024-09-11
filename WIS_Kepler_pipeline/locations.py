@@ -231,14 +231,13 @@ Default_effective_wf_fd_filename = 'effective_whitening_filter_fourier_domain.np
 Background_injection_histograms_plot_filename_postfix = 'background_injection_histograms.png'
 Orig_fluxes_plot_filename_postfix = 'orig_fluxes.png'
 Red_fluxes_plot_filename_postfix = 'red_fluxes.png'
-Whitened_fluxes_plot_filename_postfix = 'Whitened_fluxes.png'
+Whitened_fluxes_plot_filename_postfix = 'whitened_fluxes.png'
 Single_event_statistics_plot_filename_postfix = 'single_event_statistics.png'
-Folded_red_fluxes_plot_filename_postfix = 'folded_red_fluxes.png'
 Folded_whitened_fluxes_plot_filename_postfix = 'folded_whitened_fluxes.png'
 Folded_whitened_fluxes_zoomed_plot_filename_postfix = 'folded_whitened_fluxes_zoomed.png'
 Folded_statistics_plot_filename_postfix = 'folded_statistics.png'
+Folded_statistics_zoomed_plot_filename_postfix = 'folded_statistics_zoomed.png'
 Periodogram_chunks_plot_filename_postfix = 'periodogram_chunks.png'
-Ppm_star_background_plot_filename_postfix = 'ppm_star_background.png'
 Residuals_fold_veto_histogram_plot_filename_postfix = 'residuals_fold_veto_histogram.png'
 Neighbor_maps_plot_filename_postfix = 'neighbor_maps.png'
 Injections_radii_durations_score_plot_filename_postfix = 'inj_radii_dur_score.png'
@@ -250,10 +249,8 @@ Centroid_periodic_plot_filename_postfix = 'centroid_periodic.png'
 Centroid_coordinate_pieces_plot_filename_postfix = 'centroid_coordinate_pieces.png'
 Centroid_snr2_seasons_plot_filename_postfix = 'centroid_snr2_seasons.png'
 Star_bg_pixels_ppm_plot_filename_postfix = 'star_bg_pixels_ppm.png'
+Season_pieces_snr_plot_filename_postfix = 'season_pieces_snr.png'
+Season_pieces_wh_flux_plot_filename_postfix = 'season_pieces_wh_flux.png'
 
 # locs.Folded_red_fluxes_plot_filename_postfix
-# locs.Folded_whitened_fluxes_zoomed_plot_filename_postfix
-# locs.Periodogram_chunks_plot_filename_postfix
-# locs.Ppm_star_background_plot_filename_postfix
-# locs.Centroid_cloud_plot_filename_postfix
 # locs.Neighbor_maps_plot_filename_postfix

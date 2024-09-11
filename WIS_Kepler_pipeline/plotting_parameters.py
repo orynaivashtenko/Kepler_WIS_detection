@@ -41,9 +41,11 @@ Figsize_centroid_coordinate_pieces = (8, 5)
 Figsize_centroid_cloud = (5, 4.5)
 Figsize_residuals_hist = (10, 4)
 Figsize_star_bg_pixels_ppm = (10, 6)
+Figsize_season_pieces = (16, 7)
 
 Linewidth_coarse = 1.5
 Linewidth_thin = 1
+Linewidth_very_thin = 0.5
 Linewidth_zero_level = 0.5
 Linewidth_vlines = 0.5
 Linewidth_grid = 0.5
@@ -56,5 +58,6 @@ Whitening_time = 128 * 0.02
 Zoom_wing_folded_plots = 1.5 * Whitening_time
 Centroid_ftt_wing_days_plotting = 4 * Durations[-1]
 Centroid_time_wing_days_plotting = 5 * Durations[-1]
+Seasonal_plotting_wing_days = 5 * Durations[-1]
 
 

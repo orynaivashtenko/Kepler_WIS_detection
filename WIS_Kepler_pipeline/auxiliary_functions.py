@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import copy
 import os
 os.environ["OMP_NUM_THREADS"] = "1"  #
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -304,7 +304,7 @@ def check_dict_keyword(target_id, output_folder, keyword='is_good_for_processing
 
 
 def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 * 3,
-                time_fold=400 * 0.0204336, dt=0.0204336, means=None, template=None, return_std=False,
+                dt=0.0204336, means=None, template=None, return_std=False,
                 normalize_by_counts=True):
     if not hasattr(times[0], "__len__"):
         times = [times]
@@ -316,6 +316,7 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
     elif not hasattr(masks[0], "__len__"):
         masks = [masks]
 
+    time_fold = period
     n_timesteps = int(np.round(time_fold / dt))
     # time_fold = n_timesteps * dt
     time_max = np.nanmax(times[-1])
@@ -1030,21 +1031,117 @@ def get_shift_averaged_rolled_template_normalized_by_bins(whitened_templates_td,
     return folded_template_rolled
 
 
+def get_shift_reduced_full_stat_snr(statistics_full, stat_vars_full, temp_index, stat_masks_full=None,
+                                    indices_of_templates=None, shift_reduction='minimize', renormalize=False,
+                                    return_mask=False):
+    """
+    :param statistics_full:
+    :type statistics_full:
+    :param stat_vars_full:
+    :type stat_vars_full:
+    :param temp_index: Index of the desired template
+    :type temp_index: int
+    :param indices_of_templates:
+    :type indices_of_templates:
+    :param shift_reduction: 'select', 'minimize' or 'average'
+    :type shift_reduction:
+    :param renormalize: Whether to renormalize the final result by the outlier-free variance
+    :type renormalize: bool
+    :param stat_masks_full:
+    :type stat_masks_full:
+    :param return_mask:
+    :type return_mask:
+    :return:
+    :rtype:
+    """
+    statistics_full = copy.deepcopy(statistics_full)
+    if indices_of_templates is None:
+        from template_bank.template_module import Indices_of_templates
+
+    # Converting to units of SNR:
+    statistics_full[stat_vars_full > 0] = statistics_full[stat_vars_full > 0] / (stat_vars_full[stat_vars_full > 0]) ** 0.5
+
+    if stat_masks_full is None:
+        stat_masks_full = [np.ones(len(statistics_full[k]), dtype=bool) for k in range(len(statistics_full))]
+    stat_masks_full = [stat_masks_full[k] & (stat_vars_full[k] > 0) for k in range(len(statistics_full))]
+
+    if indices_of_templates[temp_index][-1] - indices_of_templates[temp_index][0] > 1:
+        if shift_reduction == 'minimize':  # -> minimizing over subbing shifts to find the worst
+            statistic_full = np.nanmin(statistics_full[indices_of_templates[temp_index][0]: indices_of_templates[temp_index][-1]], axis=0)
+        elif shift_reduction == 'average':  # -> averaging over subbing shifts to find the mean
+            statistic_full = np.nanmean(statistics_full[indices_of_templates[temp_index][0]: indices_of_templates[temp_index][-1]], axis=0)
+        else:  # -> selecting over subbing shifts to find something
+            statistic_full = np.nanmean(statistics_full[indices_of_templates[temp_index][0][0]], axis=0)
+        stat_mask_full = np.sum(stat_masks_full[indices_of_templates[temp_index][0]: indices_of_templates[temp_index][-1]],
+                                axis=0).astype(bool)
+    else:
+        statistic_full = statistics_full[indices_of_templates[temp_index][0]]
+        stat_mask_full = stat_masks_full[indices_of_templates[temp_index][0]]
+
+
+    # The stat can be rather bad, we may renormalize by the outlier-free total variance:
+    if renormalize:
+        statistic_full = statistic_full / ut.outlier_free_std(statistic_full[stat_mask_full], n_iterations=1, nsig=3, renormalize=True)
+    if not return_mask:
+        return statistic_full
+    else:
+        return statistic_full, stat_mask_full
+
+
 def get_near_transit_pieces_from_full_time(transit_times, time_full, data_full, time_wing_days,
-                                           peak_is_min=True):
+                                           mask_full=None, peak_is_min=True, return_mask=False):
+    if mask_full is None:
+        mask_full = np.ones(len(time_full), dtype=bool)
+
     times_near_transit_pieces = []
     data_near_transit_pieces = []
     piece_peaks = []
+    mask_near_transit_pieces = []
     for trans_tim in transit_times:
         ind_0 = np.nanargmin(np.abs(time_full - (trans_tim - time_wing_days)))
         ind_1 = np.nanargmin(np.abs(time_full - (trans_tim + time_wing_days)))
         data_near_transit_pieces.append(data_full[ind_0:ind_1])
         times_near_transit_pieces.append(time_full[ind_0:ind_1])
+        mask_near_transit_pieces.append(mask_full[ind_0:ind_1])
         if peak_is_min:
-            piece_peaks.append(np.nanmin(data_full[ind_0:ind_1]))  # ! Minimization over broad range!
+            piece_peaks.append(np.nanmin(data_full[ind_0:ind_1][mask_full[ind_0:ind_1]]))  # ! Minimization over broad range!
         else:
-            piece_peaks.append(np.nanmax(data_full[ind_0:ind_1]))  # ! Maximization over broad range!
-    return times_near_transit_pieces, data_near_transit_pieces, piece_peaks
+            piece_peaks.append(np.nanmax(data_full[ind_0:ind_1][mask_full[ind_0:ind_1]]))  # ! Maximization over broad range!
+    if not return_mask:
+        return times_near_transit_pieces, data_near_transit_pieces, piece_peaks
+    else:
+        return times_near_transit_pieces, data_near_transit_pieces, mask_near_transit_pieces, piece_peaks
+
+
+def get_near_transit_pieces_of_whitened_flux(transit_times, times, whitened_fluxes_td, time_wing_days,
+                                             masks=None, unpad=False, zero_padding_ends=None, dt_days=None):
+    if dt_days is None:
+        from template_bank.template_module import dt_lc as dt_days
+    times = copy.deepcopy(times)
+    whitened_fluxes_td = copy.deepcopy(whitened_fluxes_td)
+    if masks is not None:
+        masks = copy.deepcopy(masks)
+    if unpad:
+        for q in range(len(whitened_fluxes_td)):
+            if len(times[q]) == len(whitened_fluxes_td[q]):
+                times[q] = times[q][zero_padding_ends[q][0]: len(times[q]) - zero_padding_ends[q][1]]
+            if masks is not None:
+                if len(masks[q]) == len(whitened_fluxes_td[q]):
+                    masks[q] = masks[q][zero_padding_ends[q][0]: len(masks[q]) - zero_padding_ends[q][1]]
+            whitened_fluxes_td[q] = whitened_fluxes_td[q][zero_padding_ends[q][0]: len(whitened_fluxes_td[q]) - zero_padding_ends[q][1]]
+    time_full, whitened_flux_td_full = connect_quarters_fun(times, whitened_fluxes_td,
+                                                            zero_padding_ends=None, is_data_cut=True,
+                                                            is_time_cut=True, dt=dt_days, fill_gaps_by_nan=True)
+    if masks is not None:
+        mask_full = (connect_quarters_fun(times, masks, zero_padding_ends=None, is_data_cut=True,
+                                          is_time_cut=True, dt=dt_days, fill_gaps_by_nan=False)[1]).astype(bool)
+    else:
+        mask_full = None
+    times_near_transit_pieces, fluxes_near_transit_pieces, masks_near_transit_pieces, piece_peaks = (
+        get_near_transit_pieces_from_full_time(
+            transit_times=transit_times, time_full=time_full, data_full=whitened_flux_td_full, mask_full=mask_full,
+            time_wing_days=time_wing_days, peak_is_min=True, return_mask=True))
+    return times_near_transit_pieces, fluxes_near_transit_pieces, masks_near_transit_pieces,  piece_peaks
 
 
 def get_orig_quarters(times):
