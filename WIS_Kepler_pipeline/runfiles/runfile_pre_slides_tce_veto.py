@@ -35,10 +35,10 @@ per_search = trigger_main_search[Indices_dict['per']]
 
 # Only if the score and the period are good enough for postprocessing, do the postprocessing:
 if int_score_search >= Score_candidate_postprocess and per_search >= Per_min_candidate:
-    tce = tce_class.KeplerTCE(target_id=Target_id,
-                              output_location=Output_location, data_location=Data_location,
-                              target_pixels_location=Target_pixels_location,
-                              load_pickled_attributes=False, load_target_attributes=False)
+    tce = tce_class.WisTCE(target_id=Target_id,
+                           output_location=Output_location, data_location=Data_location,
+                           target_pixels_location=Target_pixels_location,
+                           load_pickled_attributes=False, load_target_attributes=False)
     tce.unpickle_small_attributes(load_target_attributes=True, overwrite_existing_by_target=True,
                                   overwrite_location_parameters=False)
 

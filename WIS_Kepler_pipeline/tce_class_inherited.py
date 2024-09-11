@@ -23,7 +23,7 @@
 # # from astropy.table import Table
 #
 #
-# class KeplerTCE(target_class.KeplerTarget):
+# class WisTCE(target_class.KeplerTarget):
 #     def __init__(self, target_id='003097222',
 #                  data_location=pp.Data_location, output_location=pp.Output_location,
 #                  target_pixels_location=Target_pixels_location,

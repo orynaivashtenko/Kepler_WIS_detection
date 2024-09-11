@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 import os
+
+import auxiliary_functions
+
 os.environ["OMP_NUM_THREADS"] = "1"  #
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"  #
@@ -14,6 +17,7 @@ import target_class
 import search_pipeline as spip
 import pipeline_parameters as pp
 from trigger_functions import print_trigger_line, get_trigger_from_target_id, Indices_dict, copy_trigger_between_files
+from auxiliary_functions import get_saving_file_path
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -68,8 +72,9 @@ best_candidates_concat, failures = targ.search_periodicity_over_chunks(
     report_exceptions=True, problem_description='Short: ',
     return_failures=True, save_search_time=False, save_veto_masks=False)
 
-np.save(os.path.join(targ.output_location, targ.target_id + pp.Best_short_periodic_scores_filename_postfix),
-        np.array(best_candidates_concat, dtype=object), allow_pickle=True)
+file_path = get_saving_file_path(output_location=targ.output_location, target_id=targ.target_id,
+                                 filename_postfix=pp.Best_short_periodic_scores_filename_postfix, file_format='npy')
+np.save(file_path, np.array(best_candidates_concat, dtype=object), allow_pickle=True)
 targ.save_best_candidate(candidate_threshold=pp.Score_candidate_search,
                          threshold_crossing_list_file=None,
                          threshold_crossing_list_location=None,

@@ -26,7 +26,7 @@ parser.add_argument("--tids_list_file", type=str, nargs=1,
                     help="path to file where to take tids. If empty, will go over all the folders",
                     default='')
 parser.add_argument("--not_run_tids_file", type=str, nargs=1, help="path to file where to save non-run tids",
-                    default=os.path.join(pp.Run_root_folder, pp.Tids_that_did_not_run_filename))
+                    default=os.path.join(pp.Run_technical_folder, pp.Tids_that_did_not_run_filename))
 parser.add_argument("--output_folder", type=str, nargs=1, help="path to the place where outputs of the pipeline are saved",
                     default=pp.Output_location)
 parser.add_argument("--keyword_output", type=str, nargs=1, help="path to the place where outputs of the pipeline are saved",

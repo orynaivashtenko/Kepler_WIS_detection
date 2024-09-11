@@ -15,7 +15,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 from runfiles_parameters import *
 from file_operations import check_number_of_submitted_jobs
-from pipeline_parameters import Run_root_folder
+from pipeline_parameters import Run_technical_folder
 
 # ################################################################################################
 # LAUNCH MANAGER WHICH DOES NOT MOVE OR DELETE OUTPUTFILES AND ERRORFILES AND DOES NOT MOVE JOB FILES
@@ -36,8 +36,8 @@ time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to
 while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):
     if time.time() - time_last > minutes_between_checks * 60:  # check every 10 min
         time_last = time.time()
-        # wc = check_number_of_submitted_jobs(output_dir=Run_root_folder)
-        wcs = check_number_of_submitted_jobs(output_dir=Run_root_folder, queues=queues)
+        # wc = check_number_of_submitted_jobs(output_dir=Run_technical_folder)
+        wcs = check_number_of_submitted_jobs(output_dir=Run_technical_folder, queues=queues)
         if hasattr(wcs, '__len__'):
             wc = sum(wcs)
         else:

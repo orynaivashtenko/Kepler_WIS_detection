@@ -6,7 +6,6 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"  #
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
-import matplotlib.pyplot as plt
 import warnings
 from scipy.optimize import minimize
 import gzip
@@ -15,11 +14,11 @@ import requests
 import wget
 from astropy.io import fits
 
-import search_pipeline as spip
 import utils
 import utils as ut
 from search_pipeline_parameters import *
 import pipeline_parameters as pp
+import locations as locs
 
 # TODO: some functions are copied from the old pipeline useful_functions.py. They shadow some methods of the search_pieline,
 # TODO: for example pad_by_zeros, measure_psd, psd2wf. I need to reorganize them nicely.
@@ -85,7 +84,7 @@ def find_indices(time, first_time, period, first_index=None, return_times=False)
     if first_time is None:
         first_time = time[first_index]
     max_time = np.nanmax(time)
-    expected_times = [first_time + i * period for i in range(int(np.ceil((max_time - first_time) / period)))]
+    expected_times = ut.get_transit_times(first_transit_time=first_time, period=period, max_time=max_time)
     found_indices = [np.nanargmin(np.abs(time - expected_times[i])) for i in range(len(expected_times))]
     if not return_times:
         return found_indices
@@ -190,7 +189,7 @@ def get_values_from_txt(file_dir=None, filename=None):
     return res
 
 
-def get_correct_tid_folder(target_id, location, allow_creation=False):
+def get_correct_tid_folder(target_id, location, allow_creation=False, with_prefix_folder=True):
     """
     Looks around the given folder and finds or creates the correct directory,
     so that the structure is General_all_stars_folder/target_id[:4]/target_id[:4]
@@ -200,52 +199,65 @@ def get_correct_tid_folder(target_id, location, allow_creation=False):
     :type location:
     :param allow_creation: Whether the function is allowed to create the needed folder if it does not exist
     :type allow_creation: bool
+    :param with_prefix_folder:
+    :type with_prefix_folder:
     :return:
     :rtype:
     """
     target_id = str(target_id).rjust(9, '0')
-
-    if allow_creation:
-        if os.path.split(location)[-1] == target_id:
-            pass
-        elif os.path.split(location)[-1] == target_id[:4]:
-            if target_id not in os.listdir(location):
-                os.mkdir(os.path.join(location, target_id))
-            location = os.path.join(location, target_id)
-        else:
-            if target_id[:4] not in os.listdir(location):
-                os.mkdir(os.path.join(location, target_id[:4]))
-            location = os.path.join(location, target_id[:4])
-            if target_id not in os.listdir(location):
-                os.mkdir(os.path.join(location, target_id))
-            location = os.path.join(location, target_id)
-        if not os.path.exists(location):
-            os.mkdir(location)
-        return location
-    else:
-        if os.path.split(location)[-1] == target_id:
-            pass
-        elif os.path.split(location)[-1] == target_id[:4]:
-            if target_id not in os.listdir(location):
-                raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
-            else:
+    if with_prefix_folder:
+        if allow_creation:
+            if os.path.split(location)[-1] == target_id:
+                pass
+            elif os.path.split(location)[-1] == target_id[:4]:
+                if target_id not in os.listdir(location):
+                    os.mkdir(os.path.join(location, target_id))
                 location = os.path.join(location, target_id)
-        else:
-            if target_id[:4] not in os.listdir(location):
-                raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id[:4]))
             else:
+                if target_id[:4] not in os.listdir(location):
+                    os.mkdir(os.path.join(location, target_id[:4]))
                 location = os.path.join(location, target_id[:4])
+                if target_id not in os.listdir(location):
+                    os.mkdir(os.path.join(location, target_id))
+                location = os.path.join(location, target_id)
+            if not os.path.exists(location):
+                os.mkdir(location)
+            return location
+        else:
+            if os.path.split(location)[-1] == target_id:
+                pass
+            elif os.path.split(location)[-1] == target_id[:4]:
                 if target_id not in os.listdir(location):
                     raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
                 else:
                     location = os.path.join(location, target_id)
+            else:
+                if target_id[:4] not in os.listdir(location):
+                    raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id[:4]))
+                else:
+                    location = os.path.join(location, target_id[:4])
+                    if target_id not in os.listdir(location):
+                        raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
+                    else:
+                        location = os.path.join(location, target_id)
+            return location
+    else:
+        if os.path.split(location)[-1] == target_id:
+            pass
+        else:
+            if target_id not in os.listdir(location):
+                if allow_creation:
+                    os.mkdir(os.path.join(location, target_id))
+                else:
+                    raise FileNotFoundError('No such file or directory: ' + os.path.join(location, target_id))
+            location = os.path.join(location, target_id)
         return location
 
 
-def get_saving_file_path(output_location, target_id, filename_postfix, file_format):
+def get_saving_file_path(output_location, target_id, filename_postfix, file_format, insert_after_postfix=None):
     """
 
-    :param output_location: The directory in which the output of this tarhet is saved
+    :param output_location: The directory in which the output of this target is saved
     :type output_location: str
     :param target_id:
     :type target_id: str
@@ -253,6 +265,8 @@ def get_saving_file_path(output_location, target_id, filename_postfix, file_form
     :type filename_postfix: str
     :param file_format:
     :type file_format: str
+    :param insert_after_postfix:
+    :type insert_after_postfix: str or None
     :return:
     :rtype:
     """
@@ -261,10 +275,14 @@ def get_saving_file_path(output_location, target_id, filename_postfix, file_form
         file_format = '.' + file_format
     if filename_postfix[-len(file_format):] != file_format:
         filename_postfix = filename_postfix + file_format
+
+    if insert_after_postfix is not None:
+        filename_postfix = filename_postfix[:-len(file_format)] + insert_after_postfix + filename_postfix[-len(file_format):]
+
     if target_id is not None:
         file_dir = os.path.join(output_location, str(target_id) + '_' + filename_postfix)
     else:
-        file_dir = os.path.join(output_location, str(target_id) + '_' + filename_postfix)
+        file_dir = os.path.join(output_location, filename_postfix)
     return file_dir
 
 
@@ -339,7 +357,10 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
         bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
         # estimate of the variance of the measurements:
         bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
-        bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        if normalize_by_counts:
+            bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        else:
+            bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
         # See notebook from 22/08/24 for the explanation of the formula above
 
         # For the ones where there is not enough counts for unbiased estimate of variance:
@@ -348,7 +369,10 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
             bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
             # estimate of the variance of the measurements:
             bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / bins_counts[inds1]
-            bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+            if normalize_by_counts:
+                bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+            else:
+                bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
 
         bins_std = bins_flux_2**0.5
         if normalize_by_counts:
@@ -369,16 +393,14 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
         else:
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes
     else:
+        # Warning: the template produced here is not multiplied by counts, so it is not the real expectation
+        # value of the flux if the flux is not count-normalized!
         template_cropped = np.zeros(n_timesteps)
         half_len = min(len(template) // 2, n_timesteps // 2)
         template_cropped[n_timesteps // 2 - half_len: n_timesteps // 2 + half_len] = template[len(template) // 2 - half_len: len(
             template) // 2 + half_len]
         tem_center = np.nanargmax(np.abs(template_cropped))
         time_template = np.concatenate((np.arange(tem_center) - tem_center, np.arange(len(template_cropped) - tem_center))) * dt
-        # time_template = (np.arange(n_timesteps) - np.argmax(np.abs(template_cropped))) * dt
-        # time_template = np.arange(len(template_cropped)) * dt - time_fold / 2
-        # template_cropped = template[len(template) // 2 - n_timesteps // 2:len(template) // 2 + n_timesteps // 2]
-        # time_template = np.arange(len(template_cropped)) * dt - time_fold / 2
         if return_std:
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std
         else:
@@ -600,6 +622,122 @@ def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
         raise AssertionError('Please finish the code for rfft=False !')
 
 
+def get_best_int_score_and_stat_index(int_scores, stats,
+                                      delta_stat_close=pp.Delta_stat_close, delta_integral_close=pp.Delta_integral_close):
+    int_argmax = np.nanargmax(int_scores)
+    int_max = int_scores[int_argmax]
+    stat_at_int_max = stats[int_argmax]
+    best_arg = int_argmax
+
+    close_inds_check = []
+    if int_argmax > 0:
+        close_inds_check.append(int_argmax - 1)
+    if int_argmax < len(int_scores) - 1:
+        close_inds_check.append(int_argmax + 1)
+
+    for ind_new in close_inds_check:
+        if (not np.isnan(int_scores[ind_new])) and (not np.isnan(stats[ind_new])):
+            delta_integral = int_scores[ind_new] - int_max  # < 0
+            delta_stat = stats[ind_new] - stat_at_int_max  # may be > 0
+            if delta_stat > - delta_integral * (delta_stat_close / delta_integral_close):
+                best_arg = ind_new
+                int_max = int_scores[best_arg]
+                stat_at_int_max = stats[best_arg]
+    return best_arg, int_max, stat_at_int_max
+
+
+def get_periodicity_results(target_id, output_location, short_periodicity=True,
+                            best_periodic_scores_filename_postfix=locs.Best_periodic_scores_filename_postfix,
+                            best_short_periodic_scores_filename_postfix=locs.Best_short_periodic_scores_filename_postfix):
+    filename_postfix = best_short_periodic_scores_filename_postfix if short_periodicity else best_periodic_scores_filename_postfix
+    stats = []
+    ints = []
+    pers = []
+    ftts = []
+    temps = []
+    gauss_stats = []
+    file_path = get_saving_file_path(output_location=output_location, target_id=target_id,
+                                     filename_postfix=filename_postfix, file_format='npy')
+    best_periodic_scores = np.load(file_path, allow_pickle=True)
+    for i_chunk in range(len(best_periodic_scores)):
+        stats.append(best_periodic_scores[i_chunk][Best_per_results_index_stats][0])
+        ints.append(best_periodic_scores[i_chunk][Best_per_results_index_best_integral][0])
+        pers.append(best_periodic_scores[i_chunk][Best_per_results_index_per][0])
+        ftts.append(best_periodic_scores[i_chunk][Best_per_results_index_ftt][0])
+        temps.append(best_periodic_scores[i_chunk][Best_per_results_index_template][0])
+        gauss_stats.append(best_periodic_scores[i_chunk][Best_per_results_index_stats_gauss][0])
+
+    return_array = np.zeros((6, len(ints)))
+    return_array[Best_per_results_index_stats] = stats
+    return_array[Best_per_results_index_best_integral] = ints
+    return_array[Best_per_results_index_per] = pers
+    return_array[Best_per_results_index_ftt] = ftts
+    return_array[Best_per_results_index_template] = temps
+    return_array[Best_per_results_index_stats_gauss] = gauss_stats
+    return return_array
+
+
+def get_connected_stats_from_file(file_path=None, output_location=None, target_id=None,
+                                  filename_postfix=Connected_statistic_data_filename_postfix,
+                                  return_only_stats=False):
+    """
+    Load all the connected stats and other fields which will be used in periodicity search or timeslides.
+    :param file_path: The exact local file which to load. Overrides `filename_postfix` and `path`
+    :type file_path: str or None
+    :param filename_postfix: Used in the name convention "target_id + filename_postfix" in
+        case `file` is not specified. The location will be `self.output_location`
+    :type filename_postfix: str
+    :param output_location:
+    :type output_location: str or None
+    :param target_id:
+    :type target_id: str or None
+    :param return_only_stats:
+    :type return_only_stats: bool
+    """
+    if file_path is None:
+        file_path = get_saving_file_path(output_location=output_location, target_id=target_id,
+                                         filename_postfix=filename_postfix, file_format='npy')
+    assert os.path.getsize(file_path) > 0, f"File {file_path} is empty"
+    connected_data = np.load(file_path, allow_pickle=True)
+
+    num_temp_shifts = (len(connected_data) - 3) // 5  # int(connected_data[0, 0])
+    time_full = connected_data[0, 1:]
+    big_hole_masks_full = (connected_data[2, 1:]).astype(bool)
+    templates_of_indices = []
+    line_num_0 = 3
+
+    statistics_full = np.zeros((num_temp_shifts, len(time_full)), dtype=Dtype_r)
+    stat_vars_full = np.zeros((num_temp_shifts, len(time_full)), dtype=Dtype_r)
+    stat_masks_full = np.zeros((num_temp_shifts, len(time_full)), dtype=bool)
+    corrections_full = np.zeros((num_temp_shifts, len(time_full)), dtype=Dtype_r)
+    statistics_gaussianized_full = np.zeros((num_temp_shifts, len(time_full)), dtype=Dtype_r)
+
+    for kk in range(num_temp_shifts):
+        templates_of_indices.append(connected_data[line_num_0 + kk, 0])
+        statistics_full[kk] = connected_data[line_num_0 + kk, 1:]
+        stat_masks_full[kk] = (connected_data[line_num_0 + 1 * num_temp_shifts + kk, 1:]).astype(bool)
+        stat_vars_full[kk] = connected_data[line_num_0 + 2 * num_temp_shifts + kk, 1:]
+        corrections_full[kk] = connected_data[line_num_0 + 3 * num_temp_shifts + kk, 1:]
+        statistics_gaussianized_full[kk] = connected_data[line_num_0 + 4 * num_temp_shifts + kk, 1:]
+
+    # making indices_of_templates
+    temp_now = templates_of_indices[0]
+    indices_of_templates = [[0]]
+    for i, temp in enumerate(templates_of_indices):
+        if temp != temp_now:
+            indices_of_templates[-1].append(i)
+            indices_of_templates.append([i])
+            temp_now = temp
+    indices_of_templates[-1].append(len(templates_of_indices))
+    indices_of_templates = np.array(indices_of_templates)
+    templates_of_indices = np.array(templates_of_indices)
+
+    if return_only_stats:
+        return time_full, statistics_full, stat_masks_full, stat_vars_full, big_hole_masks_full, indices_of_templates
+    else:
+        return (time_full, statistics_full, stat_masks_full, stat_vars_full, big_hole_masks_full, corrections_full,
+                statistics_gaussianized_full, indices_of_templates, templates_of_indices)
+
 # ####################################################################################################
 # FUNCTIONS FOR VETO FOLDED
 # ####################################################################################################
@@ -732,8 +870,8 @@ def renorm_noise_high_pass(data, dt, dt_pass):
 
 
 def matched_filter_folded_fluxes_still_too_much_memory(template_number, whitened_templates_td, n_time_templ, binwid,
-                                 indices_of_templates, bins_time, bins_counts, flux_normalized_vars,
-                                 dt_steps_high_pass, dt_days):
+                                                       indices_of_templates, bins_time, bins_counts, flux_normalized_vars,
+                                                       dt_steps_high_pass, dt_days):
     """
     # ------------------------------------------------------------------------------------------------------------
     # CALCULATING THE MATCHED FILTER SCORE ON THE BINNED WHITENED FLUX
@@ -794,7 +932,6 @@ def matched_filter_folded_fluxes_still_too_much_memory(template_number, whitened
     # del mf_scores  # for memory
     # del ampl_scores
     return mf_score_peak, ampl_score_peak, rolling_arg, folded_template_rolled[rolling_arg]
-
 
 
 def matched_filter_folded_fluxes(template_number, whitened_templates_td, n_time_templ, binwid,
@@ -893,6 +1030,23 @@ def get_shift_averaged_rolled_template_normalized_by_bins(whitened_templates_td,
     return folded_template_rolled
 
 
+def get_near_transit_pieces_from_full_time(transit_times, time_full, data_full, time_wing_days,
+                                           peak_is_min=True):
+    times_near_transit_pieces = []
+    data_near_transit_pieces = []
+    piece_peaks = []
+    for trans_tim in transit_times:
+        ind_0 = np.nanargmin(np.abs(time_full - (trans_tim - time_wing_days)))
+        ind_1 = np.nanargmin(np.abs(time_full - (trans_tim + time_wing_days)))
+        data_near_transit_pieces.append(data_full[ind_0:ind_1])
+        times_near_transit_pieces.append(time_full[ind_0:ind_1])
+        if peak_is_min:
+            piece_peaks.append(np.nanmin(data_full[ind_0:ind_1]))  # ! Minimization over broad range!
+        else:
+            piece_peaks.append(np.nanmax(data_full[ind_0:ind_1]))  # ! Maximization over broad range!
+    return times_near_transit_pieces, data_near_transit_pieces, piece_peaks
+
+
 def get_orig_quarters(times):
     from tce_parameters import get_quarter_start_end_times
     quarter_start_times, quarter_end_times = get_quarter_start_end_times()
@@ -906,182 +1060,73 @@ def get_orig_quarters(times):
     return np.array(orig_quarters)
 
 
-def plot_many(list_times, list_values=None, first_index=0, prefix='quarter',
-              legend=True, xlabel='', ylabel='', title='', separate=False, first_quarter=0):
+def get_kepler_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
     """
-    Plots a list of values as function of a list of arguments. If they overlap, can
-    separate them from each other. Is designed to plot different quarters of
-    Kepler data. The legend can be created depicting the numeration of the quarters.
 
-    Parameters
-    ----------
-    list_times : list of numpy.arrays or lists
-        List of arrays of arguments. If list_values is None, will be used as a
-        list of values to plot.
-    list_values : list of numpy.arrays or lists, optional
-        List of arrays of values to plot. If None, the list_times will be
-        used as list of arrays of values to plot.
-    first_index : int
-        The index from which to start the slice of data to be plotted. Will be
-        used for all the arrays in the list of data. Is relevant for example to
-        plot in the rfft space without displaying the zeroth sample.
-    prefix : str
-        Prefix for the caption in the legend for all the entries in the data list.
-    legend : bool
-        Whether to add the legend to the plot.
-    xlabel : str
-        Caption of the x-axis of the plot.
-    ylabel : str
-        Caption of the y-axis of the plot.
-    title : str
-        Title of the plot.
-    separate : bool
-        If true, the plots will be shifted in y-direction in order not to overlap.
-    first_quarter : int
-        Index of the first quarter of data in the list (needed only for captions)
-
-    Returns
-    -------
-    None.
-
+    ra and dec are in decimal degrees
     """
-    if list_values is not None:
-        if separate == False:
-            sep = np.zeros(len(list_times))
-        elif separate == True:
-            sep = [0]
-            for i in range(len(list_times) - 1):
-                sep.append(sep[-1] + np.max(list_values[i]) - np.min(list_values[i + 1]))
-        else:
-            sep = [i * separate for i in range(len(list_times))]
-        for i in range(len(list_times)):
-            plt.plot(np.real((list_times[i])[first_index:]),
-                     np.real(sep[i] + (list_values[i])[first_index:]), label=f'{prefix}:{i + first_quarter}')
-        plt.xlabel(xlabel)
-        plt.ylabel(ylabel)
-        plt.title(title)
-        if legend:
-            plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    # import lightkurve as lk
+    from lightkurve import targetpixelfile as tpf
 
-    else:
-        if separate == False:
-            sep = np.zeros(len(list_times))
-        elif separate == True:
-            sep = [0]
-            for i in range(len(list_times) - 1):
-                sep.append(sep[-1] + np.max(list_times[i]) - np.min(list_times[i + 1]))
-        else:
-            sep = [i * separate for i in range(len(list_times))]
-        for i in range(len(list_times)):
-            plt.plot(np.real(sep[i] + (list_times[i])[first_index:]), label=f'{prefix}:{i + first_quarter}')
-        plt.ylabel(ylabel)
-        plt.title(title)
-        if legend:
-            plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
+    target_id = str(target_id).rjust(9, "0")
+    data_folder = get_correct_tid_folder(target_id=target_id, location=data_location)
+
+    # noinspection DuplicatedCode
+    if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
+        download_target_pixel_files(target_id, data_folder)
+
+    tp_fits_filenames = [ff for ff in os.listdir(data_folder) if '.fits' in ff]
+    assert len(tp_fits_filenames) >= 1, 'There are no files!'
+
+    times = []
+    time_masks = []
+    for tp_fits_filename in tp_fits_filenames:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
+            time_tpf = tpf1.time.value
+
+        mask = np.array(tpf1.quality_mask)
+        time = np.zeros(len(mask)) * np.nan
+
+        time[mask] = time_tpf
+
+        times.append(time)
+        time_masks.append(mask)
+
+    # noinspection DuplicatedCode
+    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
+    argsort = np.argsort(reference_times)
+    times = [times[ind] for ind in argsort]
+    time_masks = [time_masks[ind] for ind in argsort]
+
+    if remove_zeroth_quarter:
+        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
+            times = times[1:]
+            time_masks = time_masks[1:]
+
+    if len(times) < 1:
+        raise AssertionError('There is no data to process!')
+
+    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
+        if ((1570 >= np.nanmin(times[-1])) & (
+                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
+            times = times[:-1]
+            time_masks = time_masks[:-1]
+
+    if cut_edge_nans:
+        for q in range(len(times)):
+            non_nans = np.where(~np.isnan(times[q]))[0]
+            times[q] = times[q][non_nans[0]: non_nans[-1] + 1]
+            time_masks[q] = time_masks[q][non_nans[0]: non_nans[-1] + 1]
+
+    # times, fluxes, sky_coords, time_masks, aperture_masks
+    return times, time_masks
 
 
-def histogram(data, n=25, edgelist=None, edgemin=None, edgemax=None, xscale=None, yscale=None,
-              density=False, normalize=True, ylogshift=True, logzeros='zero',
-              return_results=False, plot=True, new_figure=True, ax=None, figsize=(9, 6), show=False,
-              xlabel=None, ylabel=None, title=None, xlim=None, ylim=None,
-              color='b', linestyle='solid', marker='', linewidth=None, alpha=0.9, label=None,
-              loc_legend=None, plot_type='plot',
-              ):
-    """
-    xscale : str, None, 'square', 'log',
-    yscale : str, None, 'square', 'log'
-    plot_type: str, 'bar', 'plot'
-    logzeros : what to do with log(counts) where counts==0.
-        Options: 'zero' : put to zero
-                 'nan' : put to np.nan
-                  None : to do nothing, they will give -np.inf
-
-    """
-    # TODO: fix scale in the log counts
-    data = np.array(data[~np.isnan(data)])
-    if xscale == 'square' or xscale == 'log':
-        data = np.abs(data)
-
-    if edgelist is None:
-        if edgemin is None:
-            edgemin = np.min(data)
-        if edgemax is None:
-            edgemax = np.max(data)
-        edgelist = [edgemin + (edgemax - edgemin) / n * i for i in range(n + 1)]
-
-    counts, bins = np.histogram(data, bins=edgelist, density=density)
-    bins = np.delete(bins, -1) + (bins[1] - bins[0]) / 2
-
-    if xscale == 'square':
-        bins = np.abs(np.array(bins)) ** 2
-    elif xscale == 'log':
-        bins = np.log(np.abs(np.array(bins)))
-
-    if (not density) and normalize:
-        counts = counts / np.sum(counts)
-
-    indzeros = None
-    if yscale == 'square':
-        counts = counts ** 2
-    elif yscale == 'log':
-        if logzeros == 'zero':
-            indzeros = np.where(counts == 0)[0]
-            logcounts = np.zeros(len(counts))
-            logcounts[counts != 0] = np.log(counts[counts != 0])
-            logcounts[counts == 0] = 0.
-            counts = logcounts
-        elif logzeros == 'nan':
-            logcounts = np.zeros(len(counts))
-            logcounts[counts != 0] = np.log(counts[counts != 0])
-            logcounts[counts == 0] = np.nan
-            counts = logcounts
-        elif logzeros is None:
-            counts = np.log(counts)
-        else:
-            raise AssertionError('Undefined logzeros parameter specified!')
-        if ylogshift:
-            sh = np.nanmin(counts[counts != -np.inf]) - (
-                        np.nanmax(counts[counts != -np.inf]) - np.nanmin(counts[counts != -np.inf])) / 20
-            counts = counts - sh
-            if logzeros == 'zero':
-                counts[indzeros] = 0
-
-    if plot:
-        if new_figure:
-            plt.figure(figsize=figsize)
-        if ax is None:
-            ax = plt.gca()
-
-        if plot_type == 'plot':
-            ax.plot(bins, counts, color=color, linestyle=linestyle, marker=marker, linewidth=linewidth, alpha=alpha,
-                    label=label)
-        elif plot_type == 'bar':
-            # binwids = (edgelist[-1]-edgelist[0])/(len(edgelist)-1)
-            # ax.bar(Bins, counts, width=binwids ,color=color, alpha=alpha, label=label)
-            # plt.step(Bins, counts, where='mid', color=color, alpha=alpha, label=label)
-            plt.fill_between(bins, counts, step="mid", color=color, alpha=alpha)
-
-        if label is not None:
-            if loc_legend is not None:
-                ax.legend(loc=loc_legend)
-            else:
-                ax.legend()
-        if xlabel is not None:
-            ax.set_xlabel(xlabel)
-        if ylabel is not None:
-            ax.set_ylabel(ylabel)
-        if xlim is not None:
-            ax.set_xlim(xlim)
-        if ylim is not None:
-            ax.set_ylim(ylim)
-        if title is not None:
-            ax.set_title(title)
-        if show:
-            plt.show()
-
-    if return_results:
-        return bins, counts
-
+# ##########################################################################################################################
+# TARGET PIXEL FUNCTIONS
+# ##########################################################################################################################
 
 def get_target_pixel_data_fun(target_id, data_folder, remove_zeroth_quarter=False, remove_quarter_17=False, return_aperture_masks=False,
                               dtype=np.float64):
@@ -1338,70 +1383,6 @@ def get_tpf_fiducial_frame(tpf):
     return fiducial_frame
 
 
-def get_kepler_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
-    """
-
-    ra and dec are in decimal degrees
-    """
-    # import lightkurve as lk
-    from lightkurve import targetpixelfile as tpf
-
-    target_id = str(target_id).rjust(9, "0")
-    data_folder = get_correct_tid_folder(target_id=target_id, location=data_location)
-
-    # noinspection DuplicatedCode
-    if len([ff for ff in os.listdir(data_folder) if '.fits' in ff]) < 1:
-        download_target_pixel_files(target_id, data_folder)
-
-    tp_fits_filenames = [ff for ff in os.listdir(data_folder) if '.fits' in ff]
-    assert len(tp_fits_filenames) >= 1, 'There are no files!'
-
-    times = []
-    time_masks = []
-    for tp_fits_filename in tp_fits_filenames:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
-            tpf1 = tpf.KeplerTargetPixelFile(path=os.path.join(data_folder, tp_fits_filename))
-            time_tpf = tpf1.time.value
-
-        mask = np.array(tpf1.quality_mask)
-        time = np.zeros(len(mask)) * np.nan
-
-        time[mask] = time_tpf
-
-        times.append(time)
-        time_masks.append(mask)
-
-    # noinspection DuplicatedCode
-    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
-    argsort = np.argsort(reference_times)
-    times = [times[ind] for ind in argsort]
-    time_masks = [time_masks[ind] for ind in argsort]
-
-    if remove_zeroth_quarter:
-        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
-            times = times[1:]
-            time_masks = time_masks[1:]
-
-    if len(times) < 1:
-        raise AssertionError('There is no data to process!')
-
-    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
-        if ((1570 >= np.nanmin(times[-1])) & (
-                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
-            times = times[:-1]
-            time_masks = time_masks[:-1]
-
-    if cut_edge_nans:
-        for q in range(len(times)):
-            non_nans = np.where(~np.isnan(times[q]))[0]
-            times[q] = times[q][non_nans[0]: non_nans[-1] + 1]
-            time_masks[q] = time_masks[q][non_nans[0]: non_nans[-1] + 1]
-
-    # times, fluxes, sky_coords, time_masks, aperture_masks
-    return times, time_masks
-
-
 def download_target_pixel_files(target_id, saving_folder):
     """
     # tp_fits_file = fits.open(os.path.join(data_folder, tp_fits_filename))
@@ -1490,40 +1471,72 @@ def get_sap_from_pixels(target_pixel_fluxes, bit_aperture_masks=None, custom_mas
     return sap_fluxes
 
 
-def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None, part_of_cumsum_2=0.8, part_of_light=None):
+def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None, part_of_peak=0.3,
+                                  part_of_cumsum_2=0.8, part_of_light=None):
+    """
+
+    :param target_pixel_fluxes:
+    :type target_pixel_fluxes:
+    :param number_of_pixels_cut:
+    :type number_of_pixels_cut:
+    :param part_of_peak: Selects the brightest pixels, which are greater or equal then `part_of_peak` of the peak,
+        are a connected component to the peak, and form a descending array around the peak. This helps to avoid
+        including contaminant stars to the mask.
+    :type part_of_peak: None or float
+    :param part_of_cumsum_2:
+    :type part_of_cumsum_2:
+    :param part_of_light:
+    :type part_of_light:
+    :return:
+    :rtype:
+    """
     star_part_sap_fluxes = []
     bg_part_sap_fluxes = []
     for q in range(len(target_pixel_fluxes)):
-        with warnings.catch_warnings():
+        with warnings.catch_warnings():  # there can be full-nan slices
             warnings.simplefilter("ignore", category=RuntimeWarning)
             mean_stamp = np.nanmean(target_pixel_fluxes[q], axis=0)
-        flatten_mean_stamp = mean_stamp.flatten()
-        nanmask = ~np.isnan(flatten_mean_stamp)
-        good_flatten_indices = np.argsort(flatten_mean_stamp[nanmask])[::-1]
-        good_flatten_mean_stamp = flatten_mean_stamp[nanmask][good_flatten_indices]
-        selected_indices = np.arange(len(nanmask))[nanmask][good_flatten_indices]
+        if part_of_peak is not None:
 
-        if number_of_pixels_cut is not None:
-            sep_ind = number_of_pixels_cut
-        elif part_of_cumsum_2 is not None:
-            cmsm_lght_nrm = np.cumsum(good_flatten_mean_stamp ** 2)
-            cmsm_lght_nrm = cmsm_lght_nrm / cmsm_lght_nrm[-1]
-            sep_ind = np.argmin(np.abs(cmsm_lght_nrm - part_of_cumsum_2))
+            arg_max = np.nanargmax(mean_stamp)
+            peak_coords = arg_max // mean_stamp.shape[-1], arg_max % mean_stamp.shape[-1]
+            inclusion_mask = ut.get_indices_of_influence(vals=mean_stamp, ind_center_0=peak_coords[0], ind_center_1=peak_coords[1],
+                                                         part_peak=part_of_peak, abs_diff_val=None,
+                                                         abs_thresh=None, rel_thresh=None, forbid_diagonal=True, descending=True)
+            with warnings.catch_warnings():  # there can be full-nan slices
+                warnings.simplefilter("ignore", category=RuntimeWarning)
+                star_part_sap_flux = np.nansum(target_pixel_fluxes[q][:, inclusion_mask], axis=-1)
+                bg_part_sap_flux = np.nansum(target_pixel_fluxes[q][:, ~inclusion_mask], axis=-1)
         else:
-            cmsm_lght_nrm = np.cumsum(good_flatten_mean_stamp)
-            cmsm_lght_nrm = cmsm_lght_nrm / cmsm_lght_nrm[-1]
-            sep_ind = np.argmin(np.abs(cmsm_lght_nrm - part_of_light))
-        star_part_indices = selected_indices[:sep_ind + 1]
-        bg_part_indices = selected_indices[sep_ind + 1:]
+            flatten_mean_stamp = mean_stamp.flatten()
+            nanmask = ~np.isnan(flatten_mean_stamp)
+            good_flatten_indices = np.argsort(flatten_mean_stamp[nanmask])[::-1]
+            good_flatten_mean_stamp = flatten_mean_stamp[nanmask][good_flatten_indices]
+            selected_indices = np.arange(len(nanmask))[nanmask][good_flatten_indices]
 
-        sh0 = target_pixel_fluxes[q].shape
-        tpf_rsh = target_pixel_fluxes[q].reshape((sh0[0], sh0[1] * sh0[2]))
+            if number_of_pixels_cut is not None:
+                sep_ind = number_of_pixels_cut
+            elif part_of_cumsum_2 is not None:
+                cmsm_lght_nrm = np.cumsum(good_flatten_mean_stamp ** 2)
+                cmsm_lght_nrm = cmsm_lght_nrm / cmsm_lght_nrm[-1]
+                sep_ind = np.argmin(np.abs(cmsm_lght_nrm - part_of_cumsum_2))
+            else:
+                cmsm_lght_nrm = np.cumsum(good_flatten_mean_stamp)
+                cmsm_lght_nrm = cmsm_lght_nrm / cmsm_lght_nrm[-1]
+                sep_ind = np.argmin(np.abs(cmsm_lght_nrm - part_of_light))
+            star_part_indices = selected_indices[:sep_ind + 1]
+            bg_part_indices = selected_indices[sep_ind + 1:]
 
-        star_part_sap_flux = np.nansum(tpf_rsh[:, star_part_indices], axis=-1)
+            sh0 = target_pixel_fluxes[q].shape
+            tpf_rsh = target_pixel_fluxes[q].reshape((sh0[0], sh0[1] * sh0[2]))
+
+            star_part_sap_flux = np.nansum(tpf_rsh[:, star_part_indices], axis=-1)
+            bg_part_sap_flux = np.nansum(tpf_rsh[:, bg_part_indices], axis=-1)
+
         nanind = np.where(star_part_sap_flux == 0)[0]
         if len(nanind) > 0:
             star_part_sap_flux[nanind] = star_part_sap_flux[nanind] * np.nan
-        bg_part_sap_flux = np.nansum(tpf_rsh[:, bg_part_indices], axis=-1)
+
         nanind = np.where(bg_part_sap_flux == 0)[0]
         if len(nanind) > 0:
             bg_part_sap_flux[nanind] = star_part_sap_flux[nanind] * np.nan
@@ -1588,19 +1601,30 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
                              + (mean_trend_std * ampls / flux_trend)**2)**0.5
     ppms[not_missed_transit_mask] = (ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask] * templ_max * 1e6)
 
-    ampl = (np.nanmean((ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask]))
-            * np.nanmean(flux_trend[not_missed_transit_mask]))
-    ppm = np.nanmean(ppms[not_missed_transit_mask])
+    # ampl = (np.nanmean((ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask]))
+    #         * np.nanmean(flux_trend[not_missed_transit_mask]))
+    ampl, ampl_std, ampl_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(
+        data=ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask],
+        stds=ampls_stds[not_missed_transit_mask] / flux_trend[not_missed_transit_mask], mask=None)
+    ampl = ampl * np.nanmean(flux_trend[not_missed_transit_mask])
+    ampl_std = ampl_std * np.nanmean(flux_trend[not_missed_transit_mask])
+    ampl_variability = ampl_variability * np.nanmean(flux_trend[not_missed_transit_mask])
+
     ppms_stds[not_missed_transit_mask] = np.abs(ppms[not_missed_transit_mask]) * (
             (ampls_stds[not_missed_transit_mask] / ampls[not_missed_transit_mask])**2
             + (trends_std[not_missed_transit_mask] / flux_trend[not_missed_transit_mask])**2)**0.5
+    # ppm = np.nanmean(ppms[not_missed_transit_mask])
+    ppm, ppm_std, ppm_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(data=ppms[not_missed_transit_mask],
+                                                                                 stds=ppms_stds[not_missed_transit_mask], mask=None)
     # ppms_stds[not_missed_transit_mask] = (ppms[not_missed_transit_mask])**2 * (
     #     (ampls_stds[not_missed_transit_mask])**2 / (ampls[not_missed_transit_mask])**2
     #     + np.var(flux_trend[not_missed_transit_mask]) / (flux_trend[not_missed_transit_mask])**2)
     # ppms_stds[not_missed_transit_mask] = ((1 / summed_stat_vars[not_missed_transit_mask] / (flux_trend[not_missed_transit_mask]) ** 2
     #                                        + np.var(flux_trend[not_missed_transit_mask])
     #                                        / flux_trend[not_missed_transit_mask] ** 4 * templ_max ** 2 * 1e12) ** 0.5)
-    return ampl, ppm, ampls, ampls_stds, normalized_ampls, normalized_ampls_stds, ppms, ppms_stds
+    return (ppm,  ppm_std,  ppm_variability, ppms, ppms_stds,
+            ampl, ampl_std, ampl_variability, ampls, ampls_stds,
+            normalized_ampls, normalized_ampls_stds)
 
 
 def get_centroid_series(target_pixel_fluxes, sky_coords=None, aperture_masks=None, time_masks=None, dtype=np.float64):

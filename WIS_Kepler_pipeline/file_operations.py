@@ -73,57 +73,6 @@ def is_boolable(string):
         return False
 
 
-def variables_from_file(filename):
-    """
-    Opens the file with a list of variable names and values. Recognizes the data
-    types of the values. Creates GLOBAL variables with corresponding names and assigns
-    them the values. Format of the file (example):
-        dummy_coefficient = 1.
-        curse='hann'
-
-        best_number=13
-        is_life_great = True
-
-    :param filename: Full path to the file from which the variables should be read.
-    :type filename:
-    :return: None
-    :rtype: None
-    """
-    with open(filename, 'r') as f:
-        lines = f.readlines()
-
-    for line in lines:
-        if '=' in line:
-            text = line.split('#')[0]  # remove comments
-            text = text.split('\\')[0]  # remove endlines
-            name, val = text.split('=')[0:2]
-            name = name.strip()
-            val = val.strip()
-            if (name != '') and (val != ''):
-                if val == 'None':
-                    val = None
-                elif val == 'True':
-                    val = True
-                elif val == 'False':
-                    val = False
-                elif is_int(val):
-                    val = int(val)
-                elif is_float(val):
-                    val = float(val)
-                else:
-                    assert (((val[0] == '"') and (val[-1] == '"')) or ((val[0] == "'") and (val[-1] == "'"))), \
-                        'Undefined type of value: not int, bool, float, str or None! ( line "' + str(line) + '" )'
-                    val = val[1:-1]
-
-                assert ((65 <= ord(name[0]) <= 90) or (97 <= ord(name[0]) <= 122) or name[
-                    0] == '_'), 'Incorrect variable name specified!'
-                if len(name) > 1:
-                    for e in name[1:]:
-                        assert ((48 <= ord(e) <= 57) or (65 <= ord(e) <= 90) or (
-                                97 <= ord(e) <= 122) or e == '_'), 'Incorrect variable name specified!'
-                globals()[name] = val
-
-
 # noinspection PyTypeChecker
 def read_quarters_from_file(file_name, location='', dimension=2, to_array=True):
     """
@@ -144,8 +93,7 @@ def read_quarters_from_file(file_name, location='', dimension=2, to_array=True):
 
     Returns
     -------
-    res : list
-        List (possibly with nested lists) of data read from the file.
+    res : List (possibly with nested lists) of data read from the file.
 
     """
     # noinspection DuplicatedCode

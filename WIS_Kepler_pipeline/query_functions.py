@@ -1,5 +1,53 @@
 #!/usr/bin/env python3
 
+"""
+This module contains functions for querying the Gaia database for Kepler targets. It is used to get the
+Gaia info for the targets and to query for the neighbors of the targets.
+--------------------------------------------------------------------------------------------
+This file is to be used only on the machine which supports querying Gaia (Marvin and Wexac do not).
+--------------------------------------------------------------------------------------------
+This module uses functions from the `catalog_functions.py` file. The module `catalog_functions.py`
+does not involve querying, it will operate with the tables obtained from querying done here.
+This module should be used once to get those tables, and then not used again.
+
+To copy the tables to Marvin or Wexac:
+--------------------------------------------------------------------------------------------
+scp -r -O /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/Neighbors_run_11_1
+orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
+# use -O option if it refuses to copy the folder. This is to use the old version of scp which for
+# some reason did not have this problem.
+scp /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/tids_table_gaia.ecsv
+orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
+--------------------------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------------------------
+# GAIA TARGET INFO
+# To get the Gaia info for the target ids listed in `target_id_list`, do the following:
+    tids_table_gaia, failed_tids_reasons = get_gaia_table_for_kepler_id(target_id_list)
+    tids_table_gaia.write('tids_table_gaia.ecsv', format='ascii.ecsv', overwrite=True)
+
+# To read this table:
+tids_table_gaia = Table.read('tids_table_gaia.ecsv', format="ascii.ecsv")  #, fill_values=None)
+# BE CAREFUL ABOUT MASKED
+
+# If the catalog was saved as astropy.Table with csv format:
+trigger_table = Table.read('trlist_df.csv', format="csv")
+
+# Can (and preferred) to use the `read_trigger_table` function from `catalog_functions.py`
+
+# --------------------------------------------------------------------------------------------
+# NEIGHBORS
+# To query for the neighbors, do the following:
+    query_neighbors(tids_table_gaia=None, target_id_list=None, search_radius_pix=Neighbors_search_radius_pix, pixel_scale=Pixel_scale,
+                    gaia_fields=Gaia_fields, neighbors_folder=Neighbors_folder)
+
+# To read the neighbors table:
+    neighbors_file = [os.path.join(neighbors_folder, ff) for ff in os.listdir(neighbors_folder) if tid in ff][0]
+    neighbors_table = Table.read(neighbors_file, format="ascii.ecsv")  #, fill_values=None)
+    # BE CAREFUL ABOUT MASKED
+
+"""
+
 import os
 os.environ["OMP_NUM_THREADS"] = "1"  #
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -8,13 +56,11 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import numpy as np
-from tce_parameters import (Pixel_scale, Neighbors_search_radius_pix, Gaia_kepler_file,
-                            Gaia_fields, Neighbors_folder)
+from tce_parameters import (Pixel_scale, Neighbors_search_radius_pix, Gaia_fields, Neighbors_folder,
+                            Gaia_trigger_table_filename)
 
 from astropy import units
-# from astropy.io import fits
-from astropy.coordinates import SkyCoord  # , Angle
-# from astropy.time import Time
+from astropy.coordinates import SkyCoord
 from astropy.table import Table
 import warnings
 from astroquery.simbad import Simbad
@@ -22,11 +68,18 @@ from astroquery.gaia import Gaia
 Gaia.MAIN_GAIA_TABLE = "gaiadr3.gaia_source"  # Select Data Release 3
 
 
-from catalog_functions import (ensure_list_str, read_gaia_kepler_table, read_gaia_kepler_crossmatch_table_for_target_id,
-                               read_trigger_table, get_neighbors_file_name, read_neighbor_info)
+from catalog_functions import (ensure_list_str, read_gaia_kepler_crossmatch_table_for_target_id,
+                               get_neighbors_file_name)
 
 
 def query_gaia_id_for_kepler_id(tid_list):
+    """
+    Query the Gaia database for the Gaia ID of the Kepler targets.
+    :param tid_list:
+    :type tid_list:
+    :return:
+    :rtype:
+    """
     tid_list = ensure_list_str(tid_list)
     gaia_text = 'Gaia DR3'
     gaia_id_list = []
@@ -73,7 +126,7 @@ def get_gaia_id_from_gaia_kepler_crossmatch(tid_list):
 
 
 def get_gaia_table_for_kepler_id(tid_list, write_to_file=False,
-                                 file_path='tids_table_gaia.ecsv', overwrite_file=True):
+                                 file_path=Gaia_trigger_table_filename, overwrite_file=True):
     tid_list = ensure_list_str(tid_list)
     gaia_id_list, failed_tids_info = query_gaia_id_for_kepler_id(tid_list)
     failed_tids = [e[:9] for e in failed_tids_info]
@@ -109,11 +162,32 @@ def get_gaia_table_for_kepler_id(tid_list, write_to_file=False,
 
 def query_neighbors(tids_table_gaia=None, target_id_list=None, search_radius_pix=Neighbors_search_radius_pix, pixel_scale=Pixel_scale,
                     gaia_fields=Gaia_fields, neighbors_folder=Neighbors_folder):
+    """
+    Query the Gaia database for the neighbors of the Kepler targets.
+    :param tids_table_gaia: Table containing the Gaia info for the targets. Can be obtained from `get_gaia_table_for_kepler_id`.
+        Should contain the columns 'kepid', 'ra', 'dec'. If None, it will be queried for the list `target_id_list`
+    :type tids_table_gaia: astropy.Table
+    :param target_id_list: List of Kepler IDs for which to query the neighbors. Superseded by `tids_table_gaia`.
+        Will be used if `tids_table_gaia` is None.
+    :type target_id_list: array-like
+    :param search_radius_pix: Search radius to query the neighbors, in pixels
+    :type search_radius_pix: float
+    :param pixel_scale: Size of one pixel in arcsec.
+    :type pixel_scale: float
+    :param gaia_fields: The fields from the Gaia table which will be saved
+    :type gaia_fields: List of str
+    :param neighbors_folder: Where to put all the tables for the neighbors
+    :type neighbors_folder: str
+    :return: Writes the astropy.Table tables for the neighbors in the `neighbors_folder`.
+    :rtype: astropy.Table for every neighbor
+    """
     search_radius_arcsec = search_radius_pix * pixel_scale * units.arcsec
+    # ------------------------------------------------------------------
     # Getting the Gaia matches of those stars
     if tids_table_gaia is None:
         tids_table_gaia, failed_tids_reasons = get_gaia_table_for_kepler_id(target_id_list)
         # failed_tids = [e[:9] for e in failed_tids_reasons]
+    # ------------------------------------------------------------------
     # Query for every tid:
     for i in range(len(tids_table_gaia)):
         tid = tids_table_gaia['kepid'][i]
@@ -123,17 +197,10 @@ def query_neighbors(tids_table_gaia=None, target_id_list=None, search_radius_pix
         coords = str(ra) + ' ' + str(dec)  # ra and dec in degrees
         coords = SkyCoord(coords, frame='icrs', unit=(units.deg, units.deg), obstime="J2000")
 
-        # do the cone search
+        # Do the cone search for the neighbors:
         job = Gaia.cone_search_async(coordinate=coords, radius=search_radius_arcsec, table_name='gaiadr3.gaia_source')
         gaia_result = job.get_results()
         gaia_result_relevant = Table([gaia_result.columns[nam] for nam in gaia_fields])
+        # Writing the file for every target neighbors:
         gaia_result_relevant.write(get_neighbors_file_name(target_id=tid, neighbors_folder=neighbors_folder,
                                                            search_radius_pix=search_radius_pix), format='ascii.ecsv', overwrite=True)
-
-# scp -r /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/Neighbors_run_11_1
-# orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
-# scp /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/tids_table_gaia.ecsv
-# orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
-
-
-

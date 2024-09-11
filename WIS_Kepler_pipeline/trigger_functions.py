@@ -183,7 +183,7 @@ class Trigger(object):
         self.per = per
         self.ftt = ftt
         self.gauss_stat = gauss_stat
-        self.integral_score = integral_score
+        self.int_score = integral_score
         self.template = template
 
     def from_line(self, line, sep=' '):
@@ -193,12 +193,12 @@ class Trigger(object):
         self.per = per
         self.ftt = ftt
         self.gauss_stat = gauss_stat
-        self.integral_score = integral_score
+        self.int_score = integral_score
         self.template = template
 
     def print_trigger(self, file=None):
         print_trigger_line(target_id=self.target_id, stat=self.stat, per=self.per, ftt=self.ftt, gauss_stat=self.gauss_stat,
-                           integral_score=self.integral_score, template=self.template, file=file)
+                           integral_score=self.int_score, template=self.template, file=file)
 
 
 # #####################################################################################################################
@@ -233,7 +233,7 @@ class FullTrigger(object):
         self.per = per
         self.ftt = ftt
         self.gauss_stat = gauss_stat
-        self.integral_score = integral_score
+        self.int_score = integral_score
         self.template = template
         self.g_stat = g_stat
         self.g_per = g_per
@@ -244,7 +244,7 @@ class FullTrigger(object):
 
     def print_trigger(self, file=None):
         print_full_trigger(target_id=self.target_id, stat=self.stat, per=self.per, ftt=self.ftt, gauss_stat=self.gauss_stat,
-                           integral_score=self.integral_score, template=self.template,
+                           integral_score=self.int_score, template=self.template,
                            g_stat=self.g_stat, g_per=self.g_per, g_ftt=self.g_ftt, g_gauss_stat=self.g_gauss_stat,
                            g_int_score=self.g_int_score, g_template=self.g_template,
                            file=file)

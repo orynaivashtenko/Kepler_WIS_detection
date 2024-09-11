@@ -20,9 +20,19 @@ if isinstance(trigger_list_file, list):
 
 with open(trigger_list_file, 'r') as tlf:
     trigs = tlf.readlines()
-trig_ids = [trig.split()[Index_tid] for trig in trigs]
-periods = [float(trig.split()[Index_per]) for trig in trigs]
-ftts = [float(trig.split()[Index_ftt]) for trig in trigs]
+trig_ids_0 = [trig.split()[Index_tid] for trig in trigs]
+periods_0 = [float(trig.split()[Index_per]) for trig in trigs]
+ftts_0 = [float(trig.split()[Index_ftt]) for trig in trigs]
+
+# Select unique:
+trig_ids = []
+periods = []
+ftts = []
+for i_tid, tid in enumerate(trig_ids_0):
+    if tid not in trig_ids:
+        trig_ids.append(tid)
+        periods.append(periods_0[i_tid])
+        ftts.append(ftts_0[i_tid])
 
 # # noinspection DuplicatedCode
 for ii in range(len(trig_ids)):

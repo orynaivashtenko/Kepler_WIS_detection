@@ -20,7 +20,7 @@ from pipeline_parameters import (Koi_dict_filename, Ttv_dict_filename, Villanova
 
 from tce_parameters import (Earth_pointing_times_file, Quarter_start_times_file, Quarter_end_times_file,
                             Villanova_catalog_file, Table_koi_file, Suspicious_frequency_reasons_triggers_file,
-                            Initial_trigger_list_file, Suspicious_frequency_filtered_triggers_file,
+                            Threshold_crossing_list_file, Suspicious_frequency_filtered_triggers_file,
                             Villanova_periods_phases_kmags_relevant_filename)
 
 Default_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/KeplerFiles'

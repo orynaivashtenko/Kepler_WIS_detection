@@ -22,7 +22,7 @@ Target_id = args.target_id[0]
 
 targ = target_class.KeplerTarget(target_id=Target_id,
                                  load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
-# targ.clean_output_directory()
+targ.clean_output_directory()  # !!! CAREFUL !!!
 
 if not targ.is_good_for_processing:  # is villanova binary or is not in Gaia
     targ.print_dict_file()

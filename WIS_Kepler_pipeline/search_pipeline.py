@@ -61,13 +61,6 @@ Naming notations
 ##############################################################################
 # TODO: write note about template indexing, about vocabulary (raw score, units of snr, full stats,
 # interleaved stats, periodic stats, corrections etc.
-# TODO Plan:
-# finish with todos
-# check everything works
-# check other files
-# check these functions of non-vetted fluxes and all the other stuff
-# maybe save more stuff to save some time
-# make new time estimate and chunk splitting
 
 # TODO: ideas and maybe update things:
 # what if the template is not symmetric
@@ -91,7 +84,7 @@ class KeplerLightCurve(object):
         Initializes a kepler light curve object. See the description in the attribute comments in the __init__.
         :param target_id: Kepler ID of the target. A 9-digit number, where some first digits may be zero.
             May be specified as integer or as string, should only contain digits.
-            If get_data==True, target_id must be specified, it cannot be None.
+            If `get_data`==True, target_id must be specified, it cannot be None.
         :type target_id: str or None
         :param times: List of photometry times for different quarters. Time inside quarters must be evenly
             sampled. If there is no quarters subdivision, formatting has single quarter: time=[time]
@@ -111,7 +104,7 @@ class KeplerLightCurve(object):
             If folder is not found, it will be created.
         :type data_location: str
         :param output_location: Directory where the output is to be saved. The target ID named folder
-            will be created if it is not there. See the descripition in naming notations.
+            will be created if it is not there. See the description in naming notations.
         :type output_location: str
         :param remove_zeroth_quarter: Whether to remove quarter 0. This quarter is small and often bad,
             not intended for science.
@@ -129,10 +122,15 @@ class KeplerLightCurve(object):
             target_id = str(target_id).rjust(9, "0")  # Convert Kepler ID to string of appropriate length
         else:
             target_id = '0'.rjust(9, "0")
+            get_data = False
 
         if data_location is not None:
-            data_location = af.get_correct_tid_folder(target_id, data_location,
-                                                      allow_creation=allow_data_folder_creation)
+            if get_data and not simulated_star:  # if there is no need to download the data, no need in the folder
+                data_location = af.get_correct_tid_folder(target_id, data_location,
+                                                          allow_creation=allow_data_folder_creation)
+            else:
+                data_location = None
+
         if output_location is not None:
             output_location = af.get_correct_tid_folder(target_id, output_location,
                                                         allow_creation=allow_output_folder_creation)
@@ -752,7 +750,7 @@ class KeplerLightCurve(object):
         These fluxes will be used for detection.
         """
 
-    def save_conditioned_data(self, file=None, path=None, filename_postfix=Default_conditioned_data_filename_postfix):
+    def save_conditioned_data(self, file=None, path=None, filename_postfix=Conditioned_data_filename_postfix):
         """
         ATTENTION WARNING if you change this function, make sure to change load_mean_rel_wf_fds in the target_class
         Saves the essential conditioning results as .npy file that can be read
@@ -811,7 +809,7 @@ class KeplerLightCurve(object):
         else:
             np.save(os.path.join(path, filename_postfix), np.array(conditioned_data, dtype=object), allow_pickle=True)
 
-    def load_conditioned_data(self, file=None, filename_postfix=Default_conditioned_data_filename_postfix,
+    def load_conditioned_data(self, file=None, filename_postfix=Conditioned_data_filename_postfix,
                               path=None, no_zero_padding=False):
         """
         Loads the previosly prepared conditioned data needed for the single-event search.
@@ -906,7 +904,7 @@ class KeplerLightCurve(object):
         self.is_zero_padded = True
         self.is_template_whitened = True
 
-    def save_mean_psd_for_injections(self, file=None, filename_postfix=Default_psd_for_injections_filename_postfix, path=None):
+    def save_mean_psd_for_injections(self, file=None, filename_postfix=Psd_for_injections_filename_postfix, path=None):
         """
         Take the mean of the psds pf all the quarters to get the average noise. Will be used in estimations
         :param file: Local directory where to save the result. Overrides `filename_postfix`
@@ -927,18 +925,18 @@ class KeplerLightCurve(object):
                                            filename_postfix=filename_postfix, file_format='npy')
         np.save(file, np.mean(self.psds, axis=0) / self.mean_total ** 2, allow_pickle=True)
 
-    def save_connected_stats(self, filename_postfix=Default_connected_statistic_data_filename_postfix, path=None):
+    def save_connected_stats(self, filename_postfix=Connected_statistic_data_filename_postfix, output_location=None):
         """
         Saving all the connected stats and other fields which will be used in periodicity search or timeslides.
         :param filename_postfix: Used in the name convention "target_id + filename_postfix" in
             case `file` is not specified. The location will be `self.output_location`
         :type filename_postfix: str
-        :param path: Where to save the result if `file` is not specified. if None, the
+        :param output_location: Where to save the result if `file` is not specified. if None, the
             location will be `self.output_location`
-        :type path: str or None
+        :type output_location: str or None
         """
-        if path is None:
-            path = self.output_location
+        if output_location is None:
+            output_location = self.output_location
         num_temp_shifts = len(self.statistics_full)
         len_one = len(self.time_full)
         connected_data = np.zeros((3 + num_temp_shifts * 5, len_one + 1), dtype=Dtype_r)
@@ -954,11 +952,11 @@ class KeplerLightCurve(object):
             connected_data[line_num_0 + 3 * num_temp_shifts + kk, 1:] = self.corrections_full[kk]
             connected_data[line_num_0 + 4 * num_temp_shifts + kk, 1:] = self.statistics_gaussianized_full[kk]
 
-        file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
+        file_path = af.get_saving_file_path(output_location=output_location, target_id=self.target_id,
                                             filename_postfix=filename_postfix, file_format='npy')
         np.save(file_path, connected_data, allow_pickle=True)
 
-    def save_no_veto_no_score_cor_stats(self, filename_postfix=Default_no_veto_no_score_cor_stats_filename_postfix):
+    def save_no_veto_no_score_cor_stats(self, filename_postfix=No_veto_no_score_cor_stats_filename_postfix):
         """
         Save statistics and their moving variances before veto or gaussianization were applied
         :param filename_postfix: Used in the name convention "target_id + filename_postfix".
@@ -971,7 +969,7 @@ class KeplerLightCurve(object):
         np.save(file_path, np.array([self.stats_raw_no_veto_no_score_cor,
                                      self.stat_moving_vars], dtype=object), allow_pickle=True)
 
-    def load_no_veto_no_score_cor_stats(self, filename_postfix=Default_no_veto_no_score_cor_stats_filename_postfix):
+    def load_no_veto_no_score_cor_stats(self, filename_postfix=No_veto_no_score_cor_stats_filename_postfix):
         """
         Save statistics and their moving variances before veto or gaussianization were applied
         :param filename_postfix: Used in the name convention "target_id + filename_postfix".
@@ -983,7 +981,7 @@ class KeplerLightCurve(object):
                                             filename_postfix=filename_postfix, file_format='npy')
         self.stats_raw_no_veto_no_score_cor, self.stat_moving_vars = np.load(file_path, allow_pickle=True)
 
-    def load_connected_stats(self, file_path=None, filename_postfix=Default_connected_statistic_data_filename_postfix, path=None):
+    def load_connected_stats(self, file_path=None, filename_postfix=Connected_statistic_data_filename_postfix, path=None):
         """
         Load all the connected stats and other fields which will be used in periodicity search or timeslides.
         :param file_path: The exact local file which to load. Overrides `filename_postfix` and `path`
@@ -1186,11 +1184,11 @@ class KeplerLightCurve(object):
         Subtracts mean value from each quarter's original flux
         Mean values of the flux are subtracted to have signal centered around zero.
         Means are saved in self.orig_means:
-        :param save_means: Whether to create a new attribure self.orig_means and save the mean
+        :param save_means: Whether to create a new attribute self.orig_means and save the mean
             values of the fluxes there. The default is True.
         :type save_means: bool
         :param method: which function to use in calculating the average
-        :type method: str, 'mean' or 'median
+        :type method: str, 'mean' or 'median'
         :param masks: which points to use in the average calculation
         :type masks: list of numpy.ndarrays 1d o bool. True means to take this point, False means to exclude
         """
@@ -1235,8 +1233,8 @@ class KeplerLightCurve(object):
         the amplitudes of all the fluxes are supposed to be the same. The data is corrected for the crowding metric,
         so that should really be true. All the formulae are now simplified because we do not have to drag the changing
         mean flux trends. The actual value of the mean anyway cancels in the final formula. We do renormalize the fluxes by the
-        new mean though because we do not wnat to work with too small numbers. We note that this changes also the values of
-        the PSDs etc!
+        new mean though because we do not what to work with too small numbers. We note that this changes also the values of
+        the PSDs etc.
         :return:
         :rtype:
         """
@@ -1317,11 +1315,11 @@ class KeplerLightCurve(object):
                     self.clean_masks[q] *= clean_mask
 
     def fill_additional_outliers(self, nsig=Nsig_outliers_0, nsig_positive=Nsig_outliers_0_pos,
-                           nsig_negative=Nsig_outliers_0_neg, nsig_clean=Nsig_outliers_psd,
-                           detr_length_outliers=Detr_length_outliers, detr_method_outliers=Detr_method_outliers,
-                           detr_endmethod_outliers=Detr_endmethod_outliers,
-                           detr_ends_outliers=Detr_ends_outliers, detr_endlen_outliers=Detr_endlen_outliers,
-                           in_whitened_fluxes=False, modify_clean_masks=True, interpolate_clean_fluxes=True):
+                                 nsig_negative=Nsig_outliers_0_neg, nsig_clean=Nsig_outliers_psd,
+                                 detr_length_outliers=Detr_length_outliers, detr_method_outliers=Detr_method_outliers,
+                                 detr_endmethod_outliers=Detr_endmethod_outliers,
+                                 detr_ends_outliers=Detr_ends_outliers, detr_endlen_outliers=Detr_endlen_outliers,
+                                 in_whitened_fluxes=False, modify_clean_masks=True, interpolate_clean_fluxes=True):
         """
         Detects outliers of the flux with respect to the trend and interpolates them without changing the interpolation
         that was dona before in the pre-existing mask. Modifies only the points of the new outliers if any.
@@ -1453,8 +1451,6 @@ class KeplerLightCurve(object):
             be masked in days. Overriding all the other parameters which are used if it is None.
             This is useful when there are TTVs and TDVs.
         :type time_edges_to_mask: list[list[float]] or ndarray
-        :return: None
-        :rtype: None
         """
         self.masks, self.big_hole_masks = af.mask_ephemeris(times=self.times, quarters=self.quarters, masks=self.masks,
                                                             big_hole_masks=self.big_hole_masks, dt_days=self.dt_days,
@@ -2132,8 +2128,8 @@ class KeplerLightCurve(object):
         self.template_len : int
             Size of the initial templates
 
-        :param templates: Vectors to be used as a template (time domain). Should be
-            all of the same length. The working part of the template is
+        :param templates: Vectors to be used as a template (time domain). Should all be
+            of the same length. The working part of the template is
             supposed to be in the center (the transit peak is in the center of
             the array). The ends will be padded by zeros to match self.support.
         :type templates: list of numpy.array 1d of float
@@ -2281,7 +2277,6 @@ class KeplerLightCurve(object):
                 # Zero-padding ends are not a problem because they are zeros, and the normalization is fixed by irfft
                 statmask = np.array(self.big_hole_masks[q][self.zero_padding_ends[q][0]:len(
                     self.big_hole_masks[q]) - self.zero_padding_ends[q][1]], dtype=bool)
-
                 eff_temp_wid = len(np.where(self.tb.templates_shifts[k] >= np.max(self.tb.templates_shifts[k]) / 2)[0])
                 gap_len = 2 * eff_temp_wid  # It was set empirically for typical data and templates
                 gap_len = max(ngap_moving_var_min, gap_len)
@@ -2305,6 +2300,8 @@ class KeplerLightCurve(object):
                 # movvar_meas *= var_snr  # we make the variance estimate exact in order for the snr to be N(0,1)
 
                 # Making positive values unit variance:
+                # We do not do the outlier-free here assuming that the effect of the transits will be small. This
+                # means that if the effect of the transits is not small, they will be impacted.
                 indices_sign = statmask & (stat > 0)
                 var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
                 movvar_meas[indices_sign] *= var_snr_indices
@@ -2958,7 +2955,7 @@ class KeplerLightCurve(object):
             # Warning: if there is a hole in the beginning or the end, it may (?) be treated incorrectly and the
             # length of the scrambled data will be effectively bigger
             self.tot_hole_len_scramble = len(self.time_full) - np.sum([ip[1] - ip[0] for ip in inds_pieces_scramble])
-            self.inds_pieces_scramble = inds_pieces_scramble
+            self.inds_pieces_scramble = np.array(inds_pieces_scramble)
             np.random.shuffle(self.inds_pieces_scramble)
         else:
             numbers_shuffle = np.arange(len(self.inds_pieces_scramble)).astype(int)
@@ -3382,6 +3379,24 @@ class KeplerLightCurve(object):
                     self.stats_gaussianized_periodic_not_interleaved[p][t][denomsq[p][t] == 0] = np.nan
                     self.stats_gaussianized_periodic_not_interleaved[p][t][denomsq[p][t] != 0] /= denomsq[p][t][denomsq[p][t] != 0] ** 0.5
 
+    def save_statistics_periodic(self, output_location=None, filename_postfix=Periodic_stats_filename_postfix, specify_periods=True):
+        if output_location is None:
+            output_location = self.output_location
+        ftts_interleaved = self._phases_interleaved + self.tmin
+        ftts_not_interleaved = self._phases_not_interleaved + self.tmin
+        arr_save = np.array([self.periods, ftts_interleaved, ftts_not_interleaved,
+                             self.statistics_periodic_interleaved, self.statistics_periodic_not_interleaved,
+                             self.corrections_periodic_interleaved, self.corrections_periodic_not_interleaved], dtype=object)
+        if specify_periods:
+            insert_after_postfix = '_p_'+str(int(np.round(self.pmin)))+'_'+str(int(np.round(self.pmax)))
+        else:
+            insert_after_postfix = None
+        file_path = af.get_saving_file_path(target_id=self.target_id, output_location=output_location,
+                                            filename_postfix=filename_postfix,
+                                            insert_after_postfix=insert_after_postfix,
+                                            file_format='npy')
+        np.save(file_path, arr_save, allow_pickle=True)
+
     def downsample_interleaved(self, delete_periodic_interleaved=True):
         """
         Downsamples the resolution of the interleaved templates to match them in their size to the
@@ -3733,7 +3748,7 @@ class KeplerLightCurve(object):
                 per_ind_max = self.best_per_index
             if phase_ind_max is None:
                 phase_ind_max = self.best_phase_index
-            peak_val = self.stats_periodic_mar_temp[per_ind_max, phase_ind_max]
+            # peak_val = self.stats_periodic_mar_temp[per_ind_max, phase_ind_max]
             per_ind_left = max(0, per_ind_max - dpi)
             phase_ind_left = max(0, phase_ind_max - dphi)
             per_ind_right = min(per_ind_max + dpi, self.stats_periodic_mar_temp.shape[0])
@@ -3744,7 +3759,7 @@ class KeplerLightCurve(object):
                 per_ind_max = self.best_g_per_index
             if phase_ind_max is None:
                 phase_ind_max = self.best_g_phase_index
-            peak_val = self.stats_gaussianized_periodic_mar_temp[per_ind_max, phase_ind_max]
+            # peak_val = self.stats_gaussianized_periodic_mar_temp[per_ind_max, phase_ind_max]
             per_ind_left = max(0, per_ind_max - dpi)
             phase_ind_left = max(0, phase_ind_max - dphi)
             per_ind_right = min(per_ind_max + dpi, self.stats_gaussianized_periodic_mar_temp.shape[0])
@@ -3754,8 +3769,8 @@ class KeplerLightCurve(object):
         vals = vals[per_ind_left:per_ind_right][:, phase_ind_left:phase_ind_right]
         peak_coords_relative = per_ind_max - per_ind_left, phase_ind_max - phase_ind_left
 
-        inds_sum = ut.get_indices_of_influence(vals=vals, per_ind_center=peak_coords_relative[0],
-                                               ftt_ind_center=peak_coords_relative[1], part_snr_2=0.5)
+        inds_sum = ut.get_indices_of_influence(vals=vals, ind_center_0=peak_coords_relative[0], ind_center_1=peak_coords_relative[1],
+                                               part_peak=0.5)
 
         # ambient_val = np.nanmedian(vals)
         # inds_sum = (vals > ambient_val + 0.5 * (peak_val - ambient_val))
@@ -3928,7 +3943,6 @@ class KeplerLightCurve(object):
                          minimal_trackable_score=20.25, d_snr_2_tail=10,
                          dpi=D_period_integral_score, dphi=D_phase_integral_score):
         """
-        TODO: write
         :param apply_veto_mes:
         :type apply_veto_mes:
         :param fn_threshold:
@@ -3979,7 +3993,7 @@ class KeplerLightCurve(object):
         self.best_ftt : First transit time corresponding to the best score
         self.best_template_index : Index of best template at the point of the best score
         self.best_stat_gaussianized : Gaussianized statistic at the position corresponding to `self.best_stat`
-        self.best_int_score : The inegral over statistic with prior around the maximum
+        self.best_int_score : The integral over statistic with prior around the maximum
         And the same with index _g_ for the maximum over the gaussianized score.
         """
         if not in_gaussianized:
@@ -4008,6 +4022,8 @@ class KeplerLightCurve(object):
         if apply_veto_mes:
             if save_veto_masks:
                 veto_mes_masks = np.ones_like(stats_periodic_mar_temp).astype(bool)
+            else:
+                veto_mes_masks = None
             influence_matrix = np.zeros_like(stats_periodic_mar_temp, dtype=np.float32)
             assert statistics_periodic is not None, 'self.statistics_periodic needed for finding the best template'
             best_per_index = None
@@ -4054,19 +4070,6 @@ class KeplerLightCurve(object):
                     # WARNING: we are zeroing the statistic which did not pass the veto for
                     # this statistic not to impact the integral score
 
-                    # # #
-                    # mat = ut.select_influence_parallelogram(per_ind_center=best_per_index,
-                    #                                         ftt_ind_center=best_phase_index,
-                    #                                         per_center=best_period,
-                    #                                         d_per=self.periods[1] - self.periods[0],
-                    #                                         d_ftt=self._phases[1] - self._phases[0],
-                    #                                         part_snr_2=0.6,
-                    #                                         t_mission=self.t_mission,
-                    #                                         dur_max_templ=tm.Durations[-1],
-                    #                                         score_center=stats_periodic_mar_temp[best_per_index, best_phase_index],
-                    #                                         n_pers=None, n_ftts=None,
-                    #                                         influence_matrix=influence_matrix)
-
                     if to_mark_influence:
                         # Selecting the influence region of this peak and if someone is found to be just caused by the
                         # tail of this bad trigger (and if it is not big because big triggers not be not tail but actual good thing),
@@ -4092,10 +4095,11 @@ class KeplerLightCurve(object):
                             # If it is None, then select
                             abs_diff_snr_2 = None
                             part_snr_2 = 0.3
-                        influence_matrix_selected = ut.get_indices_of_influence(vals_selected, per_ind_center=peak_coords_relative[0],
-                                                                                ftt_ind_center=peak_coords_relative[1],
-                                                                                part_snr_2=part_snr_2,  # used if abs_diff_snr_2 is None
-                                                                                abs_diff_snr_2=abs_diff_snr_2)
+                        influence_matrix_selected = ut.get_indices_of_influence(vals_selected, ind_center_0=peak_coords_relative[0],
+                                                                                ind_center_1=peak_coords_relative[1],
+                                                                                part_peak=part_snr_2,
+                                                                                abs_diff_val=abs_diff_snr_2)
+                        # -> part_snr_2 is only used if abs_diff_snr_2 is None
                         # Updating the influence matrix with the new trigger:
                         influence_matrix[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right] = np.max([
                             influence_matrix[per_ind_left:per_ind_right:, phase_ind_left:phase_ind_right],
@@ -4134,9 +4138,9 @@ class KeplerLightCurve(object):
                 self.best_stat = self.stats_periodic_mar_temp[self.best_per_index, self.best_phase_index]
                 self.best_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_per_index, self.best_phase_index]
                 self.best_int_score = self.get_integral_score_at_max(per_ind_max=self.best_per_index,
-                                                                          phase_ind_max=self.best_phase_index, gaussianized=False,
-                                                                          use_occurrence_rate=True,
-                                                                          log_baseline_integral_score_rate=log_baseline_integral_score_rate)
+                                                                     phase_ind_max=self.best_phase_index, gaussianized=False,
+                                                                     use_occurrence_rate=True,
+                                                                     log_baseline_integral_score_rate=log_baseline_integral_score_rate)
             else:
                 self.best_period = np.nan
                 self.best_ftt = np.nan
@@ -4159,11 +4163,10 @@ class KeplerLightCurve(object):
                 self.best_g_stat = self.stats_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
                 self.best_g_stat_gaussianized = self.stats_gaussianized_periodic_mar_temp[self.best_g_per_index, self.best_g_phase_index]
                 self.best_g_ftt = self.tmin + self._phases[self.best_g_phase_index]
-                self.best_g_int_score = self.get_integral_score_at_max(
-                                                                        per_ind_max=self.best_g_per_index,
-                                                                        phase_ind_max=self.best_g_phase_index, gaussianized=True,
-                                                                        use_occurrence_rate=True,
-                                                                        log_baseline_integral_score_rate=log_baseline_integral_score_rate)
+                self.best_g_int_score = self.get_integral_score_at_max(per_ind_max=self.best_g_per_index,
+                                                                       phase_ind_max=self.best_g_phase_index, gaussianized=True,
+                                                                       use_occurrence_rate=True,
+                                                                       log_baseline_integral_score_rate=log_baseline_integral_score_rate)
             else:
                 self.best_g_period = np.nan
                 self.best_g_template_index = np.nan
@@ -4202,7 +4205,7 @@ class KeplerLightCurve(object):
         d_per = self.periods[1] - self.periods[0]
         dur_max_templ = self.tb.durations[-1]
         # n_transits = int(np.round(klc.t_mission / period))
-        delta_per_bins = int(np.round((period * 2 * dur_max_templ / self.t_mission * (1 - part_snr_2 ** 0.5)) / d_per))
+        delta_per_bins = int(np.round((period * 2 * dur_max_templ / self.t_mission * (1 - part_snr_2)) / d_per))
         close_period_ind = np.nanargmin(np.abs(self.periods - period))
         per_ind_left = max(0, close_period_ind - delta_per_bins)  # we do not divide delta_per_bins by 2 on purpose
         per_ind_right = min(len(self.periods), close_period_ind + delta_per_bins)
@@ -4215,7 +4218,7 @@ class KeplerLightCurve(object):
             phases, stats_periodic = self._phases_not_interleaved, self.statistics_periodic_not_interleaved
         d_ftt = phases[1] - phases[0]
         dur_max_templ = self.tb.durations[-1]
-        delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2 ** 0.5)) / d_ftt))
+        delta_ftt_bins = int(np.round((dur_max_templ * (1 - part_snr_2)) / d_ftt))
         close_phase_ind = np.nanargmin(np.abs(phases + self.tmin - first_transit_time))
         phase_ind_left = max(0, close_phase_ind - delta_ftt_bins)  # we do not divide delta_ftt_bins by 2 on purpose
         phase_ind_right = min(len(phases), close_phase_ind + delta_ftt_bins)
@@ -4285,9 +4288,15 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statis
 
 def get_minimal_processed_folded_klc(period, template_index='all', times=None, fluxes=None, target_id=None, get_data=False,
                                      nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos, delta_period=0.1,
-                                     data_location=None, output_location=None, cut_edge_nans=False, delete_fulls=True):
+                                     data_location=None, output_location=None, cut_edge_nans=False, delete_fulls=True,
+                                     allow_output_folder_creation=False, allow_data_folder_creation=False):
+    """
+    Usually used for not the actual Kepler Light Curves, but rather for centroids, background pixels etc.
+    """
     klc = KeplerLightCurve(target_id=target_id, get_data=get_data, times=times, fluxes=fluxes, cut_edge_nans=cut_edge_nans,
-                           data_location=data_location, output_location=output_location)
+                           data_location=data_location, output_location=output_location,
+                           allow_data_folder_creation=allow_data_folder_creation,
+                           allow_output_folder_creation=allow_output_folder_creation)
     klc.condition_data(nsig_outliers_0=nsig_outliers_0_neg, nsig_outliers_0_pos=nsig_outliers_0_pos,
                        nsig_outliers_0_neg=nsig_outliers_0_neg,
                        nsig_outliers_w=nsig_outliers_0_neg, nsig_outliers_w_pos=nsig_outliers_0_pos,
@@ -4303,10 +4312,11 @@ def get_minimal_processed_folded_klc(period, template_index='all', times=None, f
 
 
 def get_fold_quickly(target_id, period, data_location=Default_data_location, output_location=Default_output_location,
-                     connected_statistic_data_filename_postfix=Default_connected_statistic_data_filename_postfix,
-                     conditioned_data_filename_postfix=Default_conditioned_data_filename_postfix,
-                     overlap_period_bins=P_bins_overlap):
-    klc = KeplerLightCurve(target_id=target_id, get_data=True, data_location=data_location, output_location=output_location)
+                     connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
+                     conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
+                     overlap_period_bins=P_bins_overlap, allow_output_folder_creation=False):
+    klc = KeplerLightCurve(target_id=target_id, get_data=True, data_location=data_location, output_location=output_location,
+                           allow_output_folder_creation=allow_output_folder_creation)
     file_path_connected_data = af.get_saving_file_path(output_location=klc.output_location, target_id=klc.target_id,
                                                        filename_postfix=connected_statistic_data_filename_postfix, file_format='npy')
     file_path_conditioned_data = af.get_saving_file_path(output_location=klc.output_location, target_id=klc.target_id,
@@ -4338,6 +4348,3 @@ def get_fold_quickly(target_id, period, data_location=Default_data_location, out
                            save_uncorrected_periodic=True, delete_non_marginalized=False,
                            overlap_period_bins=overlap_period_bins)
     return klc
-
-
-

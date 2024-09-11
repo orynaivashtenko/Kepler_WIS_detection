@@ -6,6 +6,15 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import numpy as np
 
+# Those are needed for the pipeline, they will be imported there
+from pipeline_parameters import Conditioned_data_filename_postfix, No_veto_no_score_cor_stats_filename_postfix, \
+    Connected_statistic_data_filename_postfix, Best_periodic_scores_filename_postfix, \
+    Psd_for_injections_filename_postfix, Periodic_stats_filename_postfix
+
+# Locations:
+Default_output_location = os.getcwd()  # os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Outputs_of_pipeline')
+Default_data_location = os.getcwd()
+
 # PARAMETERS INITIALIZATION
 
 Default_end_time = 1560.  # If the end of the mission is needed for some estimations
@@ -122,16 +131,5 @@ Best_per_results_length = 7
 Dtype_r = np.float32
 Dtype_c = np.complex64
 
-# Locations:
-Default_output_location = os.getcwd()  # os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'Outputs_of_pipeline')
-Default_data_location = os.getcwd()
 
-Default_conditioned_data_filename_postfix = 'conditioned_data.npy'
-Default_no_veto_no_score_cor_stats_filename_postfix = 'no_veto_no_cor_stats'
-Default_connected_statistic_data_filename_postfix = 'connected_stats.npy'
-Default_best_candidates_filename_postfix_period = 'best_periodic_scores_P='
-Default_best_candidates_marginalized_filename_postfix_period = 'best_marg_periodic_scores_P='
-Default_psd_for_injections_filename_postfix = 'psd_for_injections.npy'
-# parameters_file = os.path.join(os.path.dirname(__file__), 'pipeline_parameters.txt')
-# PARAMETERS CAN BE SPECIFIED IN THE FILE, AND THEY WILL BE READ FROM IT
-# variables_from_file(parameters_file)
+

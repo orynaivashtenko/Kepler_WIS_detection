@@ -137,29 +137,46 @@ setup(
     # For an analysis of "install_requires" vs pip's requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=[
-        'numpy==1.21.5',
-        'batman==2.4.8',
-        'astropy==5.1',
-        'wget==3.2',
-        'matplotlib==3.5.2',
-        'numba==0.55.1',
-        'scipy==1.7.3',
-        'multiprocess==0.70.12.2',
-    ]
-    #	'astropy==4.0',
-    #	'astroquery==0.3.10',
-    #	'batman-package==2.4.6',
-    #	'colorama==0.4.3',
-    #	'emcee==3.0.2',
-    #	'keyrings.alt==3.4.0',
-    #	'lightkurve==1.6.0',
-    #	'matplotlib==3.1.2',
-    #	'numba==0.47.0',
-    #	'numpy==1.18.1',
-    #	'pandas==0.25.3',
-    #	'psutil==5.6.7',
-    #	'scipy==1.4.1',
-    #	'multiprocess==0.70.9',
-    # ],  # Optional
+        'numpy~=1.26.4',
+        'astropy~=6.1.0',
+        'matplotlib~=3.8.4',
+        'scipy~=1.13.0',
+        'numba~=0.59.1',
+        'wget~=3.2',
+        'batman-package~=2.4.8',
+        'multiprocess~=0.70.16  # 0.70.12.2',
+        'setuptools~=70.0.0',
+        'requests~=2.32.2',
+        'wget~=3.2',
+        'lightkurve~=2.4.0',
+        'astroquery~=0.4.7',
+    ])
+# 'astropy==4.0',
+# 'astroquery==0.3.10',
+# 'batman-package==2.4.6',
+# 'colorama==0.4.3',
+# 'emcee==3.0.2',
+# 'keyrings.alt==3.4.0',
+# 'lightkurve==1.6.0',
+# 'matplotlib==3.1.2',
+# 'numba==0.47.0',
+# 'numpy==1.18.1',
+# 'pandas==0.25.3',
+# 'psutil==5.6.7',
+# 'scipy==1.4.1',
+# 'multiprocess==0.70.9',
+# ],  # Optional
 
-)
+# numpy~=1.23.3
+# astropy~=5.1
+# matplotlib~=3.6.0
+# scipy~=1.9.1
+# numba~=0.56.2
+# wget~=3.2
+# batman-package>=2.4.8
+# multiprocess>=0.70.12.2
+# setuptools~=47.1.0
+# requests~=2.28.1
+# wget~=3.2
+# lightkurve~=2.4.0
+

@@ -6,19 +6,22 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.dirname(SCRIPT_DIR))
 import file_operations as fop
 from runfiles_parameters import *
-from pipeline_parameters import Threshold_crossing_list_filename, Run_root_folder
+from pipeline_parameters import Threshold_crossing_list_file
 from trigger_functions import Index_tid
 
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--trigger_list_file", type=str, nargs=1, help="path to file where to take triggers",
-                    default=os.path.join(Run_root_folder, Threshold_crossing_list_filename))
+                    default=Threshold_crossing_list_file)
 args = parser.parse_args()
-trigger_list_file = args.trigger_list_file[0]
+trigger_list_file = args.trigger_list_file
+if isinstance(trigger_list_file, list):
+    trigger_list_file = trigger_list_file[0]
 
 with open(trigger_list_file, 'r') as tlf:
     trig_ids = tlf.readlines()
 trig_ids = [tid.split()[Index_tid] for tid in trig_ids]
+trig_ids = list(set(trig_ids))  # remove duplicates
 
 mem_per_job_gb = '6.9'  # because there are many target pixels, job may need more memory
 
@@ -44,7 +47,4 @@ for tid in trig_ids:
                        arg_jobind=False,
                        other_args=[['target_id', tid]])
 
-
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_pre_slides_tce_veto.py --trigger_list_file /home/labs/barakz/Collaboration-Kepler/orynai/tids_tce_for_now.txt
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_pre_slides_tce_veto.py --trigger_list_file /home/labs/barakz/orynai/run_11/threshold_crossing_kid_info.txt
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_pre_slides_tce_veto.py --trigger_list_file /home/labs/barakz/orynai/run_11/not_run_tids.txt
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_pre_slides_tce_veto.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers/threshold_crossing_kid_info.txt

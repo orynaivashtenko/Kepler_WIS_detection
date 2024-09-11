@@ -63,6 +63,16 @@ def dec_to_bin(num, return_list=False, return_str=False):
         return int(''.join([str(b) for b in bits[::-1]]))
 
 
+def get_unique_indices(data_list):
+    data_list_unique = []
+    inds_unique = []
+    for i_dat, dat in enumerate(data_list):
+        if dat not in data_list_unique:
+            data_list_unique.append(dat)
+            inds_unique.append(i_dat)
+    return inds_unique, data_list_unique
+
+
 def get_uniform_random_sequence(low, high, n):
     res = np.linspace(low, high, n, endpoint=False)
     if n > 1:
@@ -76,9 +86,9 @@ def get_uniform_random_sequence(low, high, n):
 def cos_vec(h1, h2, wf_fd=None, freqmask=None):
     """
     Calculate cosine angle between two vectors h1, h2, which are given in the time domain
-    :param h1: First unwhitened vector in the time domain
+    :param h1: First non-whitened vector in the time domain
     :type h1: ndarray(float)
-    :param h2: Second unwhitened vector in the time domain, same length as `h1`
+    :param h2: Second non-whitened vector in the time domain, same length as `h1`
     :type h2: ndarray(float)
     :param wf_fd: whitening filter in the Fourier domain
     :type wf_fd: ndarray(float) of length consistent with rfft of `h1` and `h2`
@@ -157,7 +167,7 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
         points on the variance estimation.
     :type ngap: int, should be <`nwind`
     :param mask: Array with `True` where `signal` is food for processing and `False` where it is bad
-    :type mask: numpy.ndarray of bool
+    :type mask: None or numpy.ndarray (of bool)
     :param nsamples_min: Minimal number of samples in the window to take the variance
     :type nsamples_min: int
     :param remove_outliers: Whether to remove outliers before calculating the moving variance
@@ -184,19 +194,33 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
         assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
 
     if remove_outliers:
-        if detrend_remove_outliers:
-            data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
-                                    method='median', endmethod='mean', ends='symmetric', endlen=None,
-                                    return_trend=False, keep_overall_level=False, remove_outliers=True,
-                                    nsig_outliers=nsig_outliers)
-        else:
-            data1 = signal
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
-        mask *= outlier_mask
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
-        mask *= outlier_mask
+        # if detrend_remove_outliers:
+        #     data1 = detrend_mov_ave(np.array(signal), length=detr_length_outliers, mask=mask,
+        #                             method='median', endmethod='mean', ends='symmetric', endlen=None,
+        #                             return_trend=False, keep_overall_level=False, remove_outliers=True,
+        #                             nsig_outliers=nsig_outliers)
+        # else:
+        #     data1 = signal
 
-    tot_var = unb_var(signal[mask])
+        tot_var, mask = outlier_free_std(data=np.array(signal), nsig=nsig_outliers, n_iterations=2, mask=mask,
+                                         detrend=detrend_remove_outliers, detr_len=detr_length_outliers,
+                                         renormalize=True, return_var=True, return_mask=True)
+        # When outliers are removed, the variance is expected to be smaller in any case, therefore we will use
+        # the renormalization to make in unbiased. In the `outlier_free_std` function, it was already done.
+        expected_power_part = get_expected_power_after_outlier_removal(nsig_outliers=nsig_outliers)
+    else:
+        tot_var = unb_var(signal[mask])
+        expected_power_part = 1.
+
+        # outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * np.nanstd(data1[mask])
+        # mask *= outlier_mask
+        # # renormalize the variance to be unbiased
+        # var_calc = np.nanvar(data1[mask])
+        # expected_power = norm(loc=0, scale=1).expect(func=lambda x: x ** 2, lb=-nsig_outliers, ub=nsig_outliers, conditional=False)
+        # var_calc = var_calc / expected_power
+        #
+        # outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig_outliers * var_calc**0.5
+        # mask *= outlier_mask
 
     signal[~mask] = 0.
     sum1 = np.nancumsum(signal * mask.astype(float))
@@ -225,10 +249,11 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
         left_vec = temp_vec_g - temp_vec_w
         vecs[i] = right_vec + left_vec
     sum2, sum1, counts = vecs
-    mask_counts = counts >= max(nsamples_min, 2)
+    mask_counts = (counts >= max(nsamples_min, 2))
     counts = counts.astype(float)  # for the next row
     counts[~mask_counts] = np.nan  # only for division, to avoid dividing by zero is there is some
     mov_var = (sum2 / counts - (sum1 / counts) ** 2) * counts / (counts - 1)
+    mov_var = mov_var / expected_power_part
     mov_var[~mask_counts] = tot_var
     if not return_total_var:
         if not return_mask:
@@ -242,7 +267,12 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
             return mov_var, mask, tot_var
 
 
-def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128, renormalize=True):
+def get_expected_power_after_outlier_removal(nsig_outliers):
+    return norm(loc=0, scale=1).expect(func=lambda x: x ** 2, lb=-nsig_outliers, ub=nsig_outliers, conditional=False)
+
+
+def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128,
+                     renormalize=True, return_var=False, return_mask=False):
     """
     Calculates the std of data without impact of outliers and excluding masked regions
     :param data: The data, may contain nans.
@@ -268,7 +298,8 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
         mask = ~np.isnan(data)
     if detrend:
         data1 = detrend_mov_ave(np.array(data), length=detr_len, mask=mask, method='median', endmethod='mean',
-                                ends='symmetric', endlen=None, return_trend=False, keep_overall_level=False)
+                                ends='symmetric', endlen=None, return_trend=False, keep_overall_level=False,
+                                remove_outliers=True, nsig_outliers=nsig)
     else:
         data1 = np.array(data)
 
@@ -278,12 +309,21 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
         mask = outlier_mask * mask
         var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
         if renormalize:
-            expected_power = norm(loc=0, scale=1).expect(func=lambda x: x ** 2, lb=-nsig, ub=nsig, conditional=False)
+            expected_power = get_expected_power_after_outlier_removal(nsig_outliers=nsig)
             var_calc = var_calc / expected_power
-    return var_calc**0.5
+    if not return_mask:
+        if not return_var:
+            return var_calc**0.5
+        else:
+            return var_calc
+    else:
+        if not return_var:
+            return var_calc**0.5, mask
+        else:
+            return var_calc, mask
 
 
-def get_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
+def get_mean_and_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
     """
     Calculates the standard deviation of the mean of the data with the following model. We assume that the
     data points data[i] come from the model with distribution normal(mu, (stds[i]**2+sigma_global**2)**0.5).
@@ -304,15 +344,25 @@ def get_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
         mask = ~np.isnan(data)
     # if not hasattr(stds, '__len__'):
     #     stds = np.ones(len(data)) * stds
-
     data = np.array(data)[mask]
-    # vars = (np.array(stds)**2)[mask]
-    n_samples = len(data)
+    variances = (np.array(stds)[mask]) ** 2
+    # std_p is std of the underlying population which may have an additional spread to the measurements
+    # mean_p is estimate of the mean of the underlying population
 
-    sum_data = np.sum(data)
-    sum_data_2 = np.sum(data ** 2)
-    var_of_mean_est = 1 / (n_samples * (n_samples - 1)) * (sum_data_2 - 1 / n_samples * sum_data ** 2)
-    return np.sqrt(var_of_mean_est)
+    var_p = np.var(data) * len(data) / (len(data) - 1) - np.mean(variances)
+    if var_p < 0:
+        var_p = 0
+    mean_p = (np.sum(data / (variances + var_p))) / (np.sum(1 / (variances + var_p)))
+    var_mean_p = 1 / np.sum(1 / (variances + var_p))
+    return mean_p, var_mean_p**0.5, var_p**0.5
+
+    # # vars = (np.array(stds)**2)[mask]
+    # n_samples = len(data)
+    #
+    # sum_data = np.sum(data)
+    # sum_data_2 = np.sum(data ** 2)
+    # var_of_mean_est = 1 / (n_samples * (n_samples - 1)) * (sum_data_2 - 1 / n_samples * sum_data ** 2)
+    # return np.sqrt(var_of_mean_est)
 
 
 def get_average_dt(times):
@@ -619,38 +669,6 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
         assert length % 4 == 0, 'The length of the vector has to be even.'
         return cov_matr[length // 4:-length // 4, length // 4:-length // 4]
     return cov_matr
-
-
-def inpaint_fluxes_unstable(fluxes, masks, wf_tds, dtype=np.float32):
-    """
-    In `fluxes`, fill holes marked by `masks` with the inpainting filter which makes it so
-    that the response of the statistic to the flux in the hole is zero.
-    Do not change here any types or anything because numba can get broken.
-    :param fluxes: list of data for quarters which is to be inpainted
-    :type fluxes: list of numpy.ndarrays 1d of float
-    :param masks: masks marking with `False` holes in the `fluxes`
-    :type masks: list of numpy.ndarrays 1d of bool
-    :param wf_tds: Whilening filters in time domain corresponding to `fluxes`
-    :type wf_tds: list of numpy.ndarrays 1d of float
-    :param dtype:
-    :type dtype:
-    :return:
-    :rtype:
-    """
-    length = len(fluxes[0])
-    # I was afraid that wf_tds are fftshifted to the center, but since here we have the inner product, it is not important
-    inpainted_fluxes = np.zeros((len(fluxes), length), dtype=dtype)
-    for q in range(len(fluxes)):
-        # filter2cov_matrix:
-        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])
-        c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)])
-
-        a_t_c_inv = c_inv[~masks[q]]
-        m_inv = np.linalg.inv(a_t_c_inv[:, ~masks[q]])
-        f = np.zeros((length, length), dtype=dtype)
-        f[~masks[q]] = np.dot(m_inv, a_t_c_inv)
-        inpainted_fluxes[q] = fluxes[q] - np.dot(f, fluxes[q])
-    return inpainted_fluxes
 
 
 Inpaint_rand_vec = np.abs(np.random.normal(loc=0, scale=0.001, size=8192).astype(Dtype_r))
@@ -1093,7 +1111,7 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
 
     fdat = np.abs(np.fft.rfft(data_i))
     std_fast_0 = (np.mean((fdat[-len(data) // 4:]) ** 2) / (len(data))) ** 0.5  # standard deviation of fast modes
-    std_fast = std_fast_0 + np.max(fdat) / 20000  # I don't remember why exactly this was made but it worked
+    std_fast = std_fast_0 + np.max(fdat) / 20000  # I don't remember why exactly this was made, but it worked
 
     # now we will select the bad pieces which have to be detrended separately:
     beg_big_pieces = [ind_i]
@@ -1172,7 +1190,7 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
     :param data: Data sample from which the moving average has to be subtracted
     :type data: np.array 1d or list
     :param length: The length of sample to calculate moving average. At a given point,
-                    half length to the left and to the right are taken.
+                    half-length to the left and to the right are taken.
     :type length: int
     :param mask:
     :type mask:
@@ -1186,13 +1204,13 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
     :param ends: How to treat the points closer than length/2 to the ends of the data:
                 'symmetric' :  endlen is length/4
                                1) if point<endlen, take endlen samples from the right, and up to zero from the left
-                               2) if endlen<point<half length, takethe same number of points from left and right
-                               3) if point>half length, take usual half length from both sides
+                               2) if endlen<point<half-length, take the same number of points from left and right
+                               3) if point>half-length, take usual half-length from both sides
                                for the second end, the same in opposite direction
                 'asymmetric' : endlen is length/16
-                               1) if point<half length, take up to zero from the left, and the length to the
+                               1) if point<half-length, take up to zero from the left, and the length to the
                                     right linearly increases from endlen for point=0 to length/2 at point=length/2
-                               2) if point>half length, take usual half length from both sides
+                               2) if point>half-length, take usual half-length from both sides
                                for the second end, the same in opposite direction
                 'cut' : not to calculate the result at this point. The size of the output will be len(data)-length
     :type ends: str
@@ -1711,7 +1729,7 @@ def interpolate_time(time, mask=None):
     Returns
     -------
     time2 : numpy.array 1d of float
-        Interpolated time. Equally sampled, no NaNs.
+        Interpolated time. Equally-sampled, no NaNs.
     """
     time2 = copy.copy(time)
     if mask is None:
@@ -1745,9 +1763,9 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
     Fits the best amplitude for the template. Performs a chi squared test with this
     template and the maximum deviation test. The conditions for the fit to be good are:
         - The chi squared value is smaller than the point where the chi squared distribution with the number
-          of degrees of freedom equal to the lengts of the template (truncated from extra zeros) is fn
+          of degrees of freedom equal to the lengths of the template (truncated from extra zeros) is fn
         - Maximum relative deviation (in units of std) is smaller than maxdev
-    If both tests are satisfied, returns True. Otherwise False. If return_amplitude,
+    If both tests are satisfied, returns True. Otherwise, False. If return_amplitude,
     the amplitude from the fitting is also returned in absolute units.
     Attention: NO NANS are allowed.
 
@@ -2302,37 +2320,6 @@ def pdf_max_norm(x, n=2, loc=0, scale=1):
     return sum
 
 
-def unequal_amplitude_veto_old(values, variances=None, ampl_all=None, indmax=None, ampl_1=None, units_of_snr=True):
-    values = np.array(values)
-
-    if variances is None:
-        variances = np.ones(len(values))
-    else:
-        variances = np.array(variances)
-
-    variances = variances[~np.isnan(values)]
-    values = values[~np.isnan(values)]
-
-    if ampl_all is None:
-        ampl_all = np.sum(values / variances) / np.sum(1 / variances)
-    if indmax is None:
-        indmax = np.argmax(values)
-    if ampl_1 is None:
-        ampl_1 = values[indmax]
-
-    expected_mean_h_all = sum(ampl_all ** 2 / variances) - ampl_1 * ampl_all / variances[indmax]
-    expected_variance_h_all = np.abs(
-        sum(ampl_all ** 2 / variances) - 2 * ampl_1 * ampl_all / variances[indmax] + ampl_1 ** 2 / variances[indmax])
-    statistic = -(ampl_all * sum(values / variances) - ampl_1 * values[indmax] / variances[indmax] - expected_mean_h_all)
-    if np.isclose(expected_variance_h_all, 0):
-        statistic = np.inf
-    elif units_of_snr:
-        statistic = statistic / expected_variance_h_all ** 0.5
-    else:
-        statistic = statistic / expected_variance_h_all
-    return statistic
-
-
 def unequal_amplitude_veto(stats_raw, stat_vars=None, negative=True):
     stats_raw = np.array(stats_raw)
 
@@ -2802,8 +2789,97 @@ def log_non_gaussian_correction(stat, ampl, scale):
     return np.log(g_pdf) - np.log(ng_pdf)
 
 
-def select_connected_component(image, center):
-    def indices_square(center_coords, d, x_max=None, y_max=None):
+# def select_connected_component(image, center):
+#     def indices_square(center_coords, d, x_max=None, y_max=None):
+#         cc = center_coords
+#         x_left = cc[0] - d
+#         x_right = cc[0] + d
+#         span_x = np.arange(x_left, x_right + 1)
+#         y_left = cc[1] - d
+#         y_right = cc[1] + d
+#         span_y = np.arange(y_left, y_right + 1)
+#         top = [span_x, np.ones(len(span_x), dtype=int) * y_right]
+#         bottom = [span_x, np.ones(len(span_x), dtype=int) * y_left]
+#         left = [np.ones(len(span_y), dtype=int) * x_left, span_y]
+#         right = [np.ones(len(span_y), dtype=int) * x_right, span_y]
+#         all_coords = np.hstack((top, right, bottom, left))
+#
+#         all_coords = all_coords[:, all_coords[0] >= 0]
+#         all_coords = all_coords[:, all_coords[1] >= 0]
+#         if x_max is not None:
+#             all_coords = all_coords[:, all_coords[0] <= x_max]
+#         if y_max is not None:
+#             all_coords = all_coords[:, all_coords[1] <= y_max]
+#         # all_coords.T  # - for coordinate pairs list
+#         # (all_coords[0], all_coords[1])  # - for matrix indexing
+#         return list(zip(all_coords[0], all_coords[1]))  # gives list of tuples which is super important for array indexing!
+#
+#     image = image.astype(bool)
+#     included_mask = np.zeros_like(image).astype(bool)
+#     if image[center[0], center[1]]:
+#         x, y = center[0], center[1]
+#         included_mask[x, y] = True
+#         coords_boundary = [(x, y)]
+#         safety_counter = 0
+#         safety_counter_max = image.size / 8
+#         while len(coords_boundary) > 0:
+#             # 0) take all recently included and in image
+#             # 1) all squares
+#             # 2) set -> border
+#             # 3) if there are image true in the border, include them and take as the next border formation
+#             # 4) the old ones can be deleted because they already served
+#             new_coords_boundary = []
+#             for coor_boun in coords_boundary:
+#                 square_coords_point = indices_square(center_coords=coor_boun, d=1, x_max=image.shape[0] - 1, y_max=image.shape[1] - 1)
+#                 new_coords_boundary += square_coords_point
+#             new_coords_boundary = list(set(new_coords_boundary))
+#             ncb_reshaped = list(zip(*new_coords_boundary))
+#             in_image_inds_new_coords_boundary = \
+#                 np.where((image[ncb_reshaped[0], ncb_reshaped[1]]) & (~included_mask[ncb_reshaped[0], ncb_reshaped[1]]))[0]
+#             if len(in_image_inds_new_coords_boundary) == 0:
+#                 break
+#             new_coords_boundary = [new_coords_boundary[ind] for ind in in_image_inds_new_coords_boundary]
+#             ncb_reshaped = list(zip(*new_coords_boundary))
+#             included_mask[ncb_reshaped[0], ncb_reshaped[1]] = True
+#             # new_coords_boundary = list(zip(*ncb_reshaped))
+#             coords_boundary = copy.deepcopy(new_coords_boundary)
+#             safety_counter += 1
+#             if safety_counter > safety_counter_max:
+#                 break
+#     return included_mask
+#
+#
+# def get_indices_of_influence(vals, per_ind_center, ftt_ind_center, part_snr_2=0.5, abs_diff_snr_2=None):
+#     peak_val = vals[per_ind_center, ftt_ind_center]
+#     if abs_diff_snr_2 is None:
+#         ambient_val = np.nanmedian(vals)
+#         inds_sum = (vals > ambient_val + part_snr_2 * (peak_val - ambient_val))
+#         ambient_val = np.nanmedian(vals[~inds_sum])  # repetitive median to exclude peak
+#         inds_sum = (vals >= ambient_val + part_snr_2 * (peak_val - ambient_val))
+#         inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
+#     else:
+#         inds_sum = (vals >= (peak_val - abs_diff_snr_2))
+#         inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
+#     return inds_sum
+
+
+def select_connected_component(image, center, weights=None, forbid_diagonal=False):
+    """
+
+    :param image: image where the connected component is found; will e mad a binary image
+    :type image: numpy.ndarray of float or bool
+    :param center: coordinates of the point to which the connected component is found
+    :type center: tuple or list of two coordinates
+    :param weights: If not None, the weights are used to select the neighbors which are not heavier than the cantral point,
+        which is the point around which the boundary is expanded.
+    :type weights: None or numpy.ndarray 2d of float, same size as `image`
+    :param forbid_diagonal: Not allow to select a diagonal neighbor as the new boundary. When the boundary is
+        expanded, only the direct steps (non-diagonal) are taken
+    :type forbid_diagonal: bool
+    :return: mask of points included in the connected component
+    :rtype: numpy.ndarray 2d of bool, same size as `image`
+    """
+    def indices_square(center_coords, d, x_max=None, y_max=None, exclude_angles=False):
         cc = center_coords
         x_left = cc[0] - d
         x_right = cc[0] + d
@@ -2815,6 +2891,15 @@ def select_connected_component(image, center):
         bottom = [span_x, np.ones(len(span_x), dtype=int) * y_left]
         left = [np.ones(len(span_y), dtype=int) * x_left, span_y]
         right = [np.ones(len(span_y), dtype=int) * x_right, span_y]
+        if exclude_angles:
+            if len(top[0]) >= 3:
+                top = [top[0][1:-1], top[1][1:-1]]
+            if len(bottom[0]) >= 3:
+                bottom = [bottom[0][1:-1], bottom[1][1:-1]]
+            if len(left[0]) >= 3:
+                left = [left[0][1:-1], left[1][1:-1]]
+            if len(right[0]) >= 3:
+                right = [right[0][1:-1], right[1][1:-1]]
         all_coords = np.hstack((top, right, bottom, left))
 
         all_coords = all_coords[:, all_coords[0] >= 0]
@@ -2827,6 +2912,8 @@ def select_connected_component(image, center):
         # (all_coords[0], all_coords[1])  # - for matrix indexing
         return list(zip(all_coords[0], all_coords[1]))  # gives list of tuples which is super important for array indexing!
 
+    if weights is not None:
+        weights = weights / np.nanmax(weights)
     image = image.astype(bool)
     included_mask = np.zeros_like(image).astype(bool)
     if image[center[0], center[1]]:
@@ -2843,7 +2930,13 @@ def select_connected_component(image, center):
             # 4) the old ones can be deleted because they already served
             new_coords_boundary = []
             for coor_boun in coords_boundary:
-                square_coords_point = indices_square(center_coords=coor_boun, d=1, x_max=image.shape[0] - 1, y_max=image.shape[1] - 1)
+                square_coords_point = indices_square(center_coords=coor_boun, d=1, x_max=image.shape[0] - 1,
+                                                     y_max=image.shape[1] - 1, exclude_angles=forbid_diagonal)
+                # We may want to only select new value which has weight smaller than the considered one,
+                # so that everything is descending around the peak:
+                if weights is not None:
+                    center_weight = weights[coor_boun[0], coor_boun[1]]
+                    square_coords_point = [coor for coor in square_coords_point if weights[coor[0], coor[1]] <= center_weight]
                 new_coords_boundary += square_coords_point
             new_coords_boundary = list(set(new_coords_boundary))
             ncb_reshaped = list(zip(*new_coords_boundary))
@@ -2862,17 +2955,29 @@ def select_connected_component(image, center):
     return included_mask
 
 
-def get_indices_of_influence(vals, per_ind_center, ftt_ind_center, part_snr_2=0.5, abs_diff_snr_2=None):
-    peak_val = vals[per_ind_center, ftt_ind_center]
-    if abs_diff_snr_2 is None:
+def get_indices_of_influence(vals, ind_center_0, ind_center_1,
+                             part_peak=0.5, abs_diff_val=None,
+                             abs_thresh=None, rel_thresh=None,
+                             forbid_diagonal=False, descending=False):
+    peak_val = vals[ind_center_0, ind_center_1]
+    if abs_diff_val is not None:
+        inds_sum = (vals >= (peak_val - abs_diff_val))
+    elif part_peak is not None:
         ambient_val = np.nanmedian(vals)
-        inds_sum = (vals > ambient_val + part_snr_2 * (peak_val - ambient_val))
+        inds_sum = (vals > ambient_val + part_peak * (peak_val - ambient_val))
         ambient_val = np.nanmedian(vals[~inds_sum])  # repetitive median to exclude peak
-        inds_sum = (vals >= ambient_val + part_snr_2 * (peak_val - ambient_val))
-        inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
+        inds_sum = (vals >= ambient_val + part_peak * (peak_val - ambient_val))
     else:
-        inds_sum = (vals >= (peak_val - abs_diff_snr_2))
-        inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
+        if abs_thresh is None:
+            abs_thresh = rel_thresh * peak_val
+        inds_sum = (vals >= abs_thresh)
+
+    if descending:  # If we do not want to include secondary peaks connected to the primary peak
+        weights = vals
+    else:
+        weights = None
+    inds_sum = select_connected_component(inds_sum, center=[ind_center_0, ind_center_1], forbid_diagonal=forbid_diagonal,
+                                          weights=weights)
     return inds_sum
 
 
@@ -3026,6 +3131,11 @@ def rough_fold(array, period_bins):
     return res
 
 
+def get_transit_times(first_transit_time, period, max_time):
+    return np.array([first_transit_time + i * period
+                     for i in range(int(np.ceil((max_time - first_transit_time) / period)))])
+
+
 def check_transit_overlap(period, ftt, period_ref, ftt_ref, n_transits, timing_error):
     """
     Checks if the transits of the ephemeris set by `ftt` and `period` overlap with the transits
@@ -3039,11 +3149,17 @@ def check_transit_overlap(period, ftt, period_ref, ftt_ref, n_transits, timing_e
     return overlap_mask
 
 
-def calculate_p_planet_statistical(f_p, f_s, f_sc, pi_p, mu_m_mu_p=1):
-    g_p = f_p * pi_p
-    g_s = f_s * (1 - pi_p)
-    g_sc = f_sc * (1 - pi_p)
+def calculate_p_planet_statistical(f_p, f_s, f_sc, pi_p=None, mu_m_mu_p=1):
     kap = mu_m_mu_p
+    if pi_p is not None:
+        g_p = f_p * pi_p
+        g_s = f_s * (1 - pi_p)
+        g_sc = f_sc * (1 - pi_p)
+    else:
+        g_p = f_p
+        g_s = f_s
+        g_sc = f_sc
+
     return g_p * kap / (0.5 * (kap * (g_p + g_s) - (1 - kap) * g_p)
                         + 0.5 * ((kap * (g_p + g_s) - (1 - kap) * g_p) ** 2
                                  + 4 * g_p * kap * ((g_p + g_s) * (1 - kap) + g_sc - g_s)) ** 0.5)
