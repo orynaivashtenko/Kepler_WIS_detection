@@ -59,19 +59,6 @@ Naming notations
 """
 
 ##############################################################################
-# TODO: write note about template indexing, about vocabulary (raw score, units of snr, full stats,
-# interleaved stats, periodic stats, corrections etc.
-
-# TODO: ideas and maybe update things:
-# what if the template is not symmetric
-# maybe use minimax of scipy.spatial.distance.cdist
-
-# TODO discussion:
-# we are saving one best thing per star. Then, we are vetting it, and it might not pass.
-# But the same star could have a trigger which was slightly smaller but passing the veto.
-# Maybe we need to save all the scores of one star which are higher than a certain threshold.
-
-# When we plot folds of statistic, should these be folds with score correction or not?
 
 
 class KeplerLightCurve(object):
@@ -3940,7 +3927,7 @@ class KeplerLightCurve(object):
                          min_required_nonzero_transits_number=Min_required_nonzero_transits_number,
                          min_required_nonzero_transits_fraction=Min_required_nonzero_transits_fraction,
                          log_baseline_integral_score_rate=0,
-                         minimal_trackable_score=20.25, d_snr_2_tail=10,
+                         minimal_trackable_score=Minimal_trackable_score, d_snr_2_tail=10,
                          dpi=D_period_integral_score, dphi=D_phase_integral_score):
         """
         :param apply_veto_mes:

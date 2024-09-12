@@ -30,7 +30,8 @@ else:  # for now, run the search only if it is not a villanova binary
     try:
         targ.run_main_search(save_to_threshold_crossing_list=True,
                              clean_dir_if_not_threshold_crossing=True,
-                             save_multiple_triggers=True)
+                             save_multiple_triggers=True,
+                             print_message_to_history=True)
 
     except Exception as exc:
         tb = sys.exc_info()

@@ -116,6 +116,7 @@ Min_piece_scrambling = int(5 * 24 * 2)  # 5 days # Minimal possible length of a 
 # After periodicity search:
 D_phase_integral_score = 50  # Bins. The size of the region taken for selecting the phase indices participating in the integral score
 D_period_integral_score = 50  # Bins. The size of the region taken for selecting the period indices participating in the integral score
+Minimal_trackable_score = 20  # The score which is considered interesting. If all the scores are lower, the search is stopped
 
 # Best stat formatting:
 Best_per_results_index_per = 0

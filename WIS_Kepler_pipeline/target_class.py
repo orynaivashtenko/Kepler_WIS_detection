@@ -1977,8 +1977,8 @@ class KeplerTarget(object):
                         no_veto_no_score_cor_stats_filename_postfix=No_veto_no_score_cor_stats_filename_postfix,
                         connected_stats_data_filename_postfix=Connected_statistic_data_filename_postfix,
                         save_to_threshold_crossing_list=True,
-                        threshold_crossing_list_file=None,
-                        threshold_g_crossing_list_file=None,
+                        threshold_crossing_list_file=Threshold_crossing_list_file,
+                        threshold_g_crossing_list_file=Threshold_g_crossing_list_file,
                         threshold_crossing_list_location=Trigger_lists_folder,
                         threshold_crossing_list_filename=Threshold_crossing_list_filename,
                         threshold_g_crossing_list_filename=Threshold_g_crossing_list_filename,
@@ -3355,7 +3355,6 @@ class KeplerTarget(object):
 
     def analyze_injections_and_background(self, max_phase_mismatch_to_dur=Max_phase_mismatch_to_dur,
                                           bins=None, bin_min=None, bin_max=None, bin_width=Histogram_mes_binwid):
-        # TODO: MAKE SURE ALL IS CORRECT! IN THE P_PLANET!
         """
         Retrieves the results of the time-shuffled and injection-recovery runs in the corresponding files,
         makes histograms of them, finds the distribution density and estimates the statistical significance

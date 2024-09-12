@@ -20,9 +20,6 @@ from search_pipeline_parameters import *
 import pipeline_parameters as pp
 import locations as locs
 
-# TODO: some functions are copied from the old pipeline useful_functions.py. They shadow some methods of the search_pieline,
-# TODO: for example pad_by_zeros, measure_psd, psd2wf. I need to reorganize them nicely.
-
 
 def get_data_fun(target_id, location=Default_data_location):
     """
@@ -352,41 +349,37 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
 
     bins_std = None
     if return_std:
-        bins_flux_normalized = np.array(bins_flux)
-        # For the entries with enough counts for the unbiased estimate:
-        inds1 = (bins_counts >= 2)
-        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-        # estimate of the variance of the measurements:
-        bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
-        if normalize_by_counts:
-            bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
-        else:
-            bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
-        # See notebook from 22/08/24 for the explanation of the formula above
-
-        # For the ones where there is not enough counts for unbiased estimate of variance:
-        inds1 = (bins_counts == 1)
-        if len(np.where(inds1)[0]) > 0:
-            bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-            # estimate of the variance of the measurements:
-            bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / bins_counts[inds1]
-            if normalize_by_counts:
-                bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
-            else:
-                bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
-
-        bins_std = bins_flux_2**0.5
-        if normalize_by_counts:
-            bins_flux = bins_flux_normalized
+        bins_std, bins_flux = get_binned_flux_std(bins_flux=bins_flux, bins_flux_2=bins_flux_2, bins_counts=bins_counts,
+                                                  normalize_by_counts=normalize_by_counts)
+        # bins_flux_normalized = np.array(bins_flux)
+        # # For the entries with enough counts for the unbiased estimate:
+        # inds1 = (bins_counts >= 2)
+        # bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        # # estimate of the variance of the measurements:
+        # bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
+        # if normalize_by_counts:
+        #     bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        # else:
+        #     bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
+        # # See notebook from 22/08/24 for the explanation of the formula above
+        #
+        # # For the ones where there is not enough counts for unbiased estimate of variance:
+        # inds1 = (bins_counts == 1)
+        # if len(np.where(inds1)[0]) > 0:
+        #     bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        #     # estimate of the variance of the measurements:
+        #     bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / bins_counts[inds1]
+        #     if normalize_by_counts:
+        #         bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        #     else:
+        #         bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
+        #
+        # bins_std = bins_flux_2**0.5
+        # if normalize_by_counts:
+        #     bins_flux = bins_flux_normalized
 
     elif normalize_by_counts:
-        bins_flux_normalized = np.array(bins_flux)
-        inds1 = (bins_counts >= 2)
-        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-        inds1 = (bins_counts == 1)
-        if len(np.where(inds1)[0]) > 0:
-            bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-        bins_flux = bins_flux_normalized
+        bins_flux = normalize_by_counts_safe(bins_flux=bins_flux, bins_counts=bins_counts)
 
     if template is None:
         if return_std:
@@ -406,6 +399,92 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped, bins_std
         else:
             return bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, time_template, template_cropped
+
+
+def normalize_by_counts_safe(bins_flux, bins_counts):
+    bins_flux_normalized = np.array(bins_flux)
+    inds1 = (bins_counts >= 2)
+    bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+    inds1 = (bins_counts == 1)
+    if len(np.where(inds1)[0]) > 0:
+        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+    return bins_flux_normalized
+
+
+def get_binned_flux_std(bins_flux, bins_flux_2, bins_counts, normalize_by_counts=True):
+    bins_flux = np.array(bins_flux)
+    bins_flux_normalized = np.array(bins_flux)
+    # For the entries with enough counts for the unbiased estimate:
+    inds1 = (bins_counts >= 2)
+    bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+    # estimate of the variance of the measurements:
+    bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
+    if normalize_by_counts:
+        bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+    else:
+        bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
+    # See notebook from 22/08/24 for the explanation of the formula above
+
+    # For the ones where there is not enough counts for unbiased estimate of variance:
+    inds1 = (bins_counts == 1)
+    if len(np.where(inds1)[0]) > 0:
+        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        # estimate of the variance of the measurements:
+        bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / bins_counts[inds1]
+        if normalize_by_counts:
+            bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        else:
+            bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
+
+    bins_std = bins_flux_2 ** 0.5
+    if normalize_by_counts:
+        bins_flux = bins_flux_normalized
+    return bins_std, bins_flux
+
+
+def stack_fluxes(times_centered, fluxes, masks=None, time_wing_days=None, dt=None, tmin=None, tmax=None,
+                 return_std=False, normalize_by_counts=True):
+    times_centered = copy.deepcopy(times_centered)
+    fluxes = copy.deepcopy(fluxes)
+    masks = copy.deepcopy(masks)
+
+    if masks is None:
+        masks = [np.ones_like(fluxes[i], dtype=bool) for i in range(len(fluxes))]
+    if dt is None:
+        dt = np.nanmean([np.nanmean(np.abs(times_centered[i] - np.roll(times_centered[i], 1))[1:])
+                         for i in range(len(times_centered))])
+    if tmin is None or tmax is None:
+        if time_wing_days is not None:
+            tmin = -time_wing_days
+            tmax = time_wing_days
+        else:
+            tmin = np.nanmin([np.nanmin(times_centered[i]) for i in range(len(times_centered))])
+            tmax = np.nanmax([np.nanmax(times_centered[i]) for i in range(len(times_centered))])
+    time_total = np.arange(tmin, tmax + 0.9 * dt, dt)
+    flux_total = np.zeros(len(time_total))
+    flux2_total = np.zeros(len(time_total))
+    counts_total = np.zeros(len(time_total), dtype=int)
+    for i in range(len(times_centered)):
+        time_piece = times_centered[i]
+        flux_piece = fluxes[i]
+        flux_piece[~masks[i]] = 0
+        time_start_ind = np.nanargmin(np.abs(time_total - time_piece[0]))
+        len_add = min(len(time_piece), len(time_total) - time_start_ind)
+        flux_total[time_start_ind: time_start_ind + len_add] += flux_piece[:len_add]
+        flux2_total[time_start_ind: time_start_ind + len_add] += (flux_piece[:len_add]) ** 2
+        counts_total[time_start_ind: time_start_ind + len_add] += (masks[i][:len_add]).astype(int)
+
+    flux_total_std = None
+    if return_std:
+        flux_total_std, flux_total = get_binned_flux_std(bins_flux=flux_total, bins_flux_2=flux2_total, bins_counts=counts_total,
+                                                         normalize_by_counts=normalize_by_counts)
+    elif normalize_by_counts:
+        flux_total = normalize_by_counts_safe(bins_flux=flux_total, bins_counts=counts_total)
+
+    if return_std:
+        return time_total, flux_total, flux2_total, counts_total, flux_total_std
+    else:
+        return time_total, flux_total, flux2_total, counts_total
 
 
 def get_average_whitened_template(whitened_templates_td, temp_number, n_time_templ, dt_days=None, indices_of_templates=None):
@@ -1063,7 +1142,7 @@ def get_shift_reduced_full_stat_snr(statistics_full, stat_vars_full, temp_index,
 
     if stat_masks_full is None:
         stat_masks_full = [np.ones(len(statistics_full[k]), dtype=bool) for k in range(len(statistics_full))]
-    stat_masks_full = [stat_masks_full[k] & (stat_vars_full[k] > 0) for k in range(len(statistics_full))]
+    stat_masks_full = [stat_masks_full[k] & (stat_vars_full[k] > 0) for k in range(len(stat_masks_full))]
 
     if indices_of_templates[temp_index][-1] - indices_of_templates[temp_index][0] > 1:
         if shift_reduction == 'minimize':  # -> minimizing over subbing shifts to find the worst
@@ -1104,9 +1183,15 @@ def get_near_transit_pieces_from_full_time(transit_times, time_full, data_full, 
         times_near_transit_pieces.append(time_full[ind_0:ind_1])
         mask_near_transit_pieces.append(mask_full[ind_0:ind_1])
         if peak_is_min:
-            piece_peaks.append(np.nanmin(data_full[ind_0:ind_1][mask_full[ind_0:ind_1]]))  # ! Minimization over broad range!
+            if len(np.where(mask_full[ind_0:ind_1])[0]) > 0:
+                piece_peaks.append(np.nanmin(data_full[ind_0:ind_1][mask_full[ind_0:ind_1]]))  # ! Minimization over broad range!
+            else:
+                piece_peaks.append(np.nan)
         else:
-            piece_peaks.append(np.nanmax(data_full[ind_0:ind_1][mask_full[ind_0:ind_1]]))  # ! Maximization over broad range!
+            if len(np.where(mask_full[ind_0:ind_1])[0]) > 0:
+                piece_peaks.append(np.nanmax(data_full[ind_0:ind_1][mask_full[ind_0:ind_1]]))  # ! Maximization over broad range!
+            else:
+                piece_peaks.append(np.nan)
     if not return_mask:
         return times_near_transit_pieces, data_near_transit_pieces, piece_peaks
     else:
@@ -1155,6 +1240,18 @@ def get_orig_quarters(times):
             elif q_orig > 0 and quarter_end_times[q_orig-1] < tim < quarter_start_times[q_orig]:
                 orig_quarters.append(np.nan)
     return np.array(orig_quarters)
+
+
+def get_seasons(tce=None, transit_times=None):
+    if tce is not None:
+        if tce.transit_seasons is None:
+            seasons = np.array(get_orig_quarters(tce.summed_transit_times)) % 4
+        else:
+            seasons = tce.transit_seasons
+    else:
+        seasons = np.array(get_orig_quarters(transit_times)) % 4
+    seasons[~np.isnan(seasons)] = seasons[~np.isnan(seasons)].astype(int)  # it does not become int if there are nans
+    return seasons
 
 
 def get_kepler_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):

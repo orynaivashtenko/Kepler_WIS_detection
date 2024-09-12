@@ -365,7 +365,7 @@ class WisTCE(object):
                               pickle_all_attributes_filename_postfix=Pickle_tce_all_attributes_filename_postfix):
         """
         Pickles all attributes which are of type str, float, int, np.float, np.integer, np.ndarray, list, dict
-        TODO: unclear whether to ever use it because if we have attributes like klc, we do not want to pickle them, it will take too much
+        Not really used because if we have attributes like klc, we do not want to pickle them, it will take too much space.
 
         :param pickle_all_attributes_filename_postfix:
         :type pickle_all_attributes_filename_postfix:
@@ -766,6 +766,7 @@ class WisTCE(object):
         centr_coords_snr_peaks = []
         centr_coords_snr_near_transit_pieces = []
         centr_coords_times_near_transit_pieces = []
+        centr_coords_masks_near_transit_pieces = []
 
         for temp, filename_postfix in [[self.centroid_templates_ra_dec[0], locs.Connected_stats_centroid_x_filename_postfix],
                                        [self.centroid_templates_ra_dec[1], locs.Connected_stats_centroid_y_filename_postfix]]:
@@ -782,18 +783,20 @@ class WisTCE(object):
                 seasons = np.array(orig_quarters) % 4
 
             # Converting to units of SNR and minimizing over the template sub-bin shifts
-            statistic_full = af.get_shift_reduced_full_stat_snr(statistics_full=statistics_full, stat_vars_full=stat_vars_full,
-                                                                temp_index=temp, indices_of_templates=indices_of_templates,
-                                                                shift_reduction='minimize', renormalize=True)
+            statistic_full, stat_mask_full = af.get_shift_reduced_full_stat_snr(
+                statistics_full=statistics_full, stat_vars_full=stat_vars_full, stat_masks_full=stat_masks_full, return_mask=True,
+                temp_index=temp, indices_of_templates=indices_of_templates, shift_reduction='minimize', renormalize=True)
             # -> Since the centroid can be rather bad, we renormalize by the outlier-free total variance
 
-            times_near_transit_pieces, near_transit_pieces, snr_peaks = af.get_near_transit_pieces_from_full_time(
-                transit_times=transit_times, time_full=time_full, data_full=statistic_full,
-                time_wing_days=time_wing_days, peak_is_min=True)
+            times_near_transit_pieces, near_transit_pieces, mask_near_transit_pieces, snr_peaks = (
+                af.get_near_transit_pieces_from_full_time(
+                    transit_times=transit_times, time_full=time_full, data_full=statistic_full,
+                    mask_full=stat_mask_full, time_wing_days=time_wing_days, peak_is_min=True, return_mask=True))
 
             centr_coords_snr_peaks.append(snr_peaks)
             centr_coords_snr_near_transit_pieces.append(near_transit_pieces)
             centr_coords_times_near_transit_pieces.append(times_near_transit_pieces)
+            centr_coords_masks_near_transit_pieces.append(mask_near_transit_pieces)
 
         # --------------------------------------------------------------------------------------------------------------
         # Getting snr squared by aligning times and summing ra and dec
@@ -804,9 +807,14 @@ class WisTCE(object):
             for i_coor in (0, 1):
                 time_piece = centr_coords_times_near_transit_pieces[i_coor][i_trans]
                 snr_piece = centr_coords_snr_near_transit_pieces[i_coor][i_trans]
+                mask_piece = (centr_coords_masks_near_transit_pieces[i_coor][i_trans]).astype(bool)
                 time_start_ind = np.nanargmin(np.abs(time_total - (time_piece[0] - transit_time)))
                 len_add = min(len(time_piece), len(time_total) - time_start_ind)
-                snr2_piece[time_start_ind: time_start_ind + len_add] += (snr_piece[:len_add]) ** 2
+                snr2_addition = (snr_piece[:len_add]) ** 2
+                mask_addition = mask_piece[:len_add]
+                snr2_addition[np.isnan(snr2_addition)] = 0.
+                snr2_addition[~mask_addition] = 0.
+                snr2_piece[time_start_ind: time_start_ind + len_add] += snr2_addition
             centr_snr2_near_transit_pieces.append(snr2_piece)
         return (centr_coords_snr_peaks, centr_coords_snr_near_transit_pieces, centr_coords_times_near_transit_pieces,
                 centr_snr2_near_transit_pieces, time_total, seasons)
@@ -826,7 +834,7 @@ class WisTCE(object):
             (periods, ftts_interleaved, ftts_not_interleaved, statistics_periodic_interleaved,
              statistics_periodic_not_interleaved, _, _) = np.load(file, allow_pickle=True)
 
-            if temp < len(statistics_periodic_interleaved):
+            if temp < len(statistics_periodic_interleaved[0]):
                 stats_2_max_periodic = np.max((statistics_periodic_interleaved[:, temp]) ** 2, axis=0)
                 ftts = ftts_interleaved
             else:
@@ -1108,8 +1116,6 @@ class WisTCE(object):
                 tce_status += ' '
         self.kepler_tces = tce_status
         self.kepler_tce_overlap_mask = tce_overlap_mask
-
-    # TODO: make overlap mask with all the bright villanova and koi events to prevent leakage
 
     def estimate_biased_rp(self):
         if self.summed_raw_stats is None or self.summed_vars is None or self.mean_flux is None:

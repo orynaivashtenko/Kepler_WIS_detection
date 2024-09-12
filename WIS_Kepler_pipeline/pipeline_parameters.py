@@ -112,15 +112,9 @@ Baseline_rate_period = P_min_search
 Rp_re_max = 11  # this number of earth radii we search for now. 11 is Jupiter
 Rp_rs_max = 0.05  # this relative radius we search for now. 0.04 is like Neptune to Sun
 # this one is used for the main search
-# P_chunks_search = 360  # will give approx 2GB per core, I increased it when changed duty cycle. # is not used for now
-# -> this one used to be when I had 25 templates. Now I have more, so we must increase
-# P_chunks_search = 1000  # 1440
-Per_phases_per_chunk = 1200000  # It was 1300000 in run 12, but injection search took too much memory # With 1500000 some jobs got killed
+Per_phases_per_chunk = 1100000  # It was 1300000 in run 12, but injection search took too much memory # With 1500000 some jobs got killed
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
-# N_periods_per_chunk = 2000  # will give 1.2GB per core, but it was when I only ran for 1 template
-# N_periods_per_chunk = 80  # Now I run for the full bank
-# I don't know why the previous line (with P_chunks_search = 360) is so (it would give 222 periods per chunk)
 Score_candidate_search = 40.  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
 Score_candidate_postprocess = 49.
 # The following `close` parameters are for the maximal score selection. Sometimes the maximal integral corresponds
@@ -136,9 +130,7 @@ N_slides_total = 50000  # for one template and narrow periods for all the runs
 # But there was a timeout, so
 N_slides_chunk = 200
 N_injections_total = 10000  # total number of all injections (all radii and periods etc.)
-N_injections_chunk = 40  # the previous one was perhaps run_8, but now we have full bank
-# N_injections_chunk = 20  # number of injections per job so that it will take 10/3 hours (120/3 sec per one inj detection)
-# I decreased it from 50 to 20 in run_7 because now we need more time for veto
+N_injections_chunk = 30  # number of injections per one job so that it does not run for too long
 Per_wing_injection_and_slides_relative = 2 / 50  # Range to the left and to the right of the best period in units of period. Will be used
 # to generate injections and time slides with variable periods around the best one
 Per_wing_injection_and_slides_absolute = 2 / 50  # Range to the left and to the right of the best period in days. Will be used

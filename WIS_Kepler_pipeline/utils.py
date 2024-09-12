@@ -103,7 +103,7 @@ def cos_vec(h1, h2, wf_fd=None, freqmask=None):
         freqmask = freqmask.astype(float)
     if wf_fd is None:
         wf_fd = np.ones(len(freqmask))
-    # TODO: warning! freq mask is not participating in the normalization!
+    # Warning! freq mask is not participating in the normalization!
     norm_1 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))) ** 2)
     norm_2 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2))) ** 2)
     return (np.sum(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))
@@ -1143,7 +1143,6 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
         mask_p = mask[beg_big_pieces[i]:end_big_pieces[i]]
         big_mask_p = big_mask[beg_big_pieces[i]:end_big_pieces[i]]
         trend_local = trend_fft(piece, nperseg=nperseg, endlen=endlen, mask=mask_p)
-        # TODO: make here something to avoid repeating detrending if all is fine
         begholes = np.where(big_mask_p * np.roll(~big_mask_p, -1))[0] + 1  # define begholes inside the piece
         endholes = np.where(big_mask_p * np.roll(~big_mask_p, 1))[0]
 

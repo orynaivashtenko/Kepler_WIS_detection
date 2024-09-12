@@ -11,7 +11,8 @@ os.environ["NUMEXPR_NUM_THREADS"] = core_num
 import numpy as np
 from auxiliary_functions import (fold_fluxes, get_average_stat_template, get_average_whitened_template,
                                  get_shift_reduced_full_stat_snr, get_near_transit_pieces_from_full_time,
-                                 get_near_transit_pieces_of_whitened_flux)
+                                 get_near_transit_pieces_of_whitened_flux, get_seasons,
+                                 stack_fluxes)
 import utils as ut
 import pickle
 import pipeline_parameters as pp
@@ -417,7 +418,8 @@ def plot_snrs_and_wh_fluxes_per_season(target, time_wing_days=Seasonal_plotting_
                                        filename_postfix_snr=locs.Season_pieces_snr_plot_filename_postfix,
                                        filename_postfix_wh_flux=locs.Season_pieces_wh_flux_plot_filename_postfix,
                                        plot_output_location=locs.Triggers_plots_location, dpi=Plots_dpi,
-                                       markersize_folds=0.7, markersize_bins=2, linewidth=Linewidth_very_thin):
+                                       markersize_folds=Markersize_folds_small,
+                                       markersize_bins=Markersize_bins_small, linewidth=Linewidth_very_thin):
     prepare_target_for_plotting(target, initialize_templates=False, condition_templates=False, detect_single_transits=False)
     transit_times = target.klc.summed_times
     seasons = get_seasons(tce=None, transit_times=transit_times)
@@ -453,40 +455,52 @@ def plot_snrs_and_wh_fluxes_per_season(target, time_wing_days=Seasonal_plotting_
          'Whitened flux', 'Whitened flux slices near transits by season'],
         [times_near_transit_pieces_snr, near_transit_pieces_snr, mask_near_pieces_snr, filename_postfix_snr,
          'Single-transit statistic in units of $SNR$', 'Single-transit statistic slices near transits by season']]:
-        with SubplotsWrapper(nrows=2, ncols=2, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw,
+        with SubplotsWrapper(nrows=2, ncols=2, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw_2_line_title,
                              save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=target.target_id,
                              filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=dpi,
-                             grid=True, zero_lines=True, zero_lines_linewidth=Linewidth_zero_level) as (fig, axs):
-            seasons_labeled = np.zeros(len(seasons)).astype(bool)
-            for i in range(len(transit_times)):
-                season = seasons[i]
-                ax = axs[season // 2, season % 2]
-                label = 'S' + str(season) if not seasons_labeled[season] else None
+                             grid=True, zero_lines=False) as (fig, axs):
+            seasons = np.array(seasons)
+            seasons[~np.isnan(seasons)] = seasons[~np.isnan(seasons)].astype(int)
+            times_for_seasons = [[times_near_transit_pieces[i]
+                                  for i in range(len(times_near_transit_pieces)) if seasons[i] == s] for s in range(4)]
+            datas_for_seasons = [[data_near_transit_pieces[i]
+                                  for i in range(len(data_near_transit_pieces)) if seasons[i] == s] for s in range(4)]
+            masks_for_seasons = [[mask_near_transit_pieces[i]
+                                  for i in range(len(mask_near_transit_pieces)) if seasons[i] == s] for s in range(4)]
+            transit_times_for_seasons = [[transit_times[i]
+                                          for i in range(len(transit_times)) if seasons[i] == s] for s in range(4)]
+
+            for s in range(4):
+                ax = axs[s // 2, s % 2]
+                label = 'S' + str(s)  # if not seasons_labeled[season] else None
                 col = (0.5, 0.5, 0.5)
-                ax.plot((times_near_transit_pieces[i] - transit_times[i])[mask_near_transit_pieces[i]],
-                        data_near_transit_pieces[i][mask_near_transit_pieces[i]], linestyle='',
-                        marker='o', markersize=markersize_folds, color=col, zorder=10,
-                        label=label)
-
-                bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
-                    times=copy.deepcopy(times_near_transit_pieces_wh_flux),
-                    fluxes=copy.deepcopy(wh_fluxes_near_transit_pieces),
-                    period=target.best_per,
-                    first_time=target.best_ftt,
-                    masks=copy.deepcopy(masks_near_transit_pieces_flux),
-                    binwid=target.klc.dt_days, dt=target.klc.dt_days, means=None, template=None, return_std=True,
-                    normalize_by_counts=True)
-                col = 'k'
-                ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0],
-                            xerr=None, markersize=markersize_bins, fmt='o', markerfacecolor=col, markeredgecolor=col,
-                            ecolor=col, elinewidth=linewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
-                            xlolims=False, xuplims=False, errorevery=1, capthick=None,
-                            label=None)
-                seasons_labeled[season] = True
-
-            for season in seasons:
-                ax = axs[season // 2, season % 2]
-                ax.legend(loc='upper left')
+                if len(times_for_seasons[s]) > 0:
+                    for i in range(len(times_for_seasons[s])):
+                        ax.plot(times_for_seasons[s][i][masks_for_seasons[s][i]] - transit_times_for_seasons[s][i],
+                                datas_for_seasons[s][i][masks_for_seasons[s][i]], linestyle='',
+                                marker='o', markersize=markersize_folds, color=col, zorder=10)
+                    if len(times_for_seasons[s]) > 1:
+                        bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
+                            times=copy.deepcopy(times_for_seasons[s]),
+                            fluxes=copy.deepcopy(datas_for_seasons[s]),
+                            period=target.best_per,
+                            first_time=target.best_ftt,
+                            masks=copy.deepcopy(masks_for_seasons[s]),
+                            binwid=target.klc.dt_days, dt=target.klc.dt_days, means=None, template=None, return_std=True,
+                            normalize_by_counts=True)
+                    else:
+                        bins_time = times_for_seasons[s][0] - transit_times_for_seasons[s][0]
+                        bins_flux = datas_for_seasons[s][0]
+                        bins_counts = (~np.isclose(bins_flux, 0)).astype(int)
+                        bins_std = np.zeros_like(bins_flux)
+                    col = 'k'
+                    ax.errorbar(bins_time[bins_counts > 0], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0],
+                                xerr=None, markersize=markersize_bins, fmt='o', markerfacecolor=col, markeredgecolor=col,
+                                ecolor=col, elinewidth=linewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
+                                xlolims=False, xuplims=False, errorevery=1, capthick=None,
+                                label=label)
+                    ax.axhline(0, linewidth=Linewidth_zero_level, color='k', zorder=0)
+                    ax.legend(loc='upper left')
 
             axs[-1, 0].set_xlabel('Time from transit, days')
             axs[-1, 0].set_ylabel(ylabel)
@@ -649,7 +663,7 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
     short_temps = res_array[Best_per_results_index_template]
 
     with SubplotsWrapper(nrows=3, ncols=1, sharex=True, sharey=False, gridspec_kw=Subplots_gridspec_kw,
-                         save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=None,
+                         save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=tce.target_id,
                          filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=Plots_dpi,
                          grid=True, zero_lines=False) as (fig, axs):
         lw = 1.5
@@ -681,7 +695,7 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
         ax.plot(short_pers, (short_ftts - np.nanmin(short_ftts)) / short_pers, color=def_cols[0], linewidth=2, zorder=100)
         ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline)
         ax.set_xlabel('Period, days')
-        ax.set_ylabel('Template Duration, days')
+        ax.set_ylabel('First transit phase')
         ax.set_ylim(-0.1, 1.2)
         ax.legend(loc='upper left')
 
@@ -1005,12 +1019,12 @@ def plot_centroids_stat_periodic(tce=None, target_id=None,
                      grid=True) as (fig, ax):
         ax.plot(ftts_coords[0], stats_2_max_periodic_coords[0], label='Centroid ra')
         ax.plot(ftts_coords[1], stats_2_max_periodic_coords[1], label='Centroid dec')
-        ax.plot(ftts_total, stats_2_max_periodic_total, label='Centroid total deviation')
+        ax.plot(ftts_total, stats_2_max_periodic_total, label='Centroid total \ndeviation')
         ax.axvline(ftt_center, color='r', label='$t0$ of the trigger')
-        ax.axhline(max_centroid_snr_2, linestyle='--', color='k', label='Detected centroid deviation')
+        ax.axhline(max_centroid_snr_2, linestyle='--', color='k', label='Detected \ncentroid \ndeviation')
 
         ax.set_xlim(ftt_center - ftt_window_plotting, ftt_center + ftt_window_plotting)
-        ax.legend()
+        ax.legend(loc=(1.01, 0))
         ax.set_xlabel('First transit time, days')
         ax.set_ylabel('Maximal statistic, $SNR^2$')
         ax.set_title('Centroid statistic folded with period close to trigger', y=1)
@@ -1020,34 +1034,64 @@ def plot_centroid_coordinates_snr_pieces(target_id, transit_times, centr_coords_
                                          centr_coords_times_near_transit_pieces, seasons,
                                          save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
                                          dpi=Plots_dpi, figsize=Figsize_centroid_coordinate_pieces,
-                                         filename_postfix=locs.Centroid_coordinate_pieces_plot_filename_postfix
-                                         ):
-    with SubplotsWrapper(nrows=2, ncols=1, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw,
+                                         filename_postfix=locs.Centroid_coordinate_pieces_plot_filename_postfix,
+                                         markersize_folds=Markersize_folds_small, markersize_bins=Markersize_bins_small,
+                                         linewidth=Linewidth_very_thin):
+    with SubplotsWrapper(nrows=4, ncols=2, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw_2_line_title,
                          save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=target_id,
                          filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=dpi,
                          grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid,
                          zero_lines=True, zero_lines_linewidth=Linewidth_zero_level) as (fig, axs):
+        seasons = np.array(seasons)
+        seasons[~np.isnan(seasons)] = seasons[~np.isnan(seasons)].astype(int)
         for i_coor in (0, 1):
-            ax = axs[i_coor]
-            seasons_labeled = np.zeros(4).astype(bool)
-            for i in range(len(transit_times)):
-                season = seasons[i]
-                ax.plot(centr_coords_times_near_transit_pieces[i_coor][i] - transit_times[i],
-                        centr_coords_snr_near_transit_pieces[i_coor][i], '-',
-                        markersize=2, color=def_cols[season], zorder=10,
-                        label='Season ' + str(season) if not seasons_labeled[season] else None)
-                seasons_labeled[season] = True
-            ax.set_title('ra' if i_coor == 1 else 'dec', y=0.85, x=0.05, bbox={
-                         'facecolor': 'None', 'edgecolor': 'black', 'boxstyle': 'square,pad=0.1'})
-        axs[-1].legend(loc='best')
-        axs[-1].set_xlabel('Time from the transit, days')
-        axs[-1].set_ylabel('SNR of centroid deviation')
+            times_for_seasons = [[centr_coords_times_near_transit_pieces[i_coor][i] - transit_times[i]
+                                  for i in range(len(centr_coords_times_near_transit_pieces[i_coor]))
+                                  if seasons[i] == s] for s in range(4)]
+            snr_for_seasons = [[centr_coords_snr_near_transit_pieces[i_coor][i]
+                                for i in range(len(centr_coords_snr_near_transit_pieces[i_coor]))
+                                if seasons[i] == s] for s in range(4)]
+            for s in range(4):
+                ax = axs[s, i_coor]
+                if len(times_for_seasons[s]) > 1:
+                    time_total, flux_total, flux2_total, counts_total, flux_total_std = stack_fluxes(
+                        times_centered=times_for_seasons[s], fluxes=snr_for_seasons[s],
+                        masks=[(~np.isclose(x, 0)) & (~np.isnan(x)) for x in snr_for_seasons[s]],
+                        time_wing_days=None, dt=None, tmin=None, tmax=None,
+                        return_std=True, normalize_by_counts=True)
+                else:
+                    time_total = times_for_seasons[s][0]
+                    flux_total = snr_for_seasons[s][0]
+                    flux_total_std = np.zeros_like(flux_total)
+                    counts_total = (~np.isclose(flux_total, 0)).astype(int)
+                for i in range(len(times_for_seasons[s])):
+                    col = (0.5, 0.5, 0.5)
+                    ax.plot(times_for_seasons[s][i][~np.isclose(snr_for_seasons[s][i], 0)],
+                            snr_for_seasons[s][i][~np.isclose(snr_for_seasons[s][i], 0)],
+                            linestyle='', marker='o', markersize=markersize_folds, color=col, zorder=10)
+                col = 'k'
+                ax.errorbar(time_total[counts_total > 0], flux_total[counts_total > 0], yerr=flux_total_std[counts_total > 0],
+                            xerr=None, markersize=markersize_bins, fmt='o', markerfacecolor=col, markeredgecolor=col,
+                            ecolor=col, elinewidth=linewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
+                            xlolims=False, xuplims=False, errorevery=1, capthick=None, zorder=10,
+                            label=None)
+                if i_coor == 0:
+                    ax.plot([], [], ' ', label='S'+str(s))
+                    ax.legend(loc='upper left', handlelength=0, handletextpad=0.0)
+
+            # ax.set_title('ra' if i_coor == 1 else 'dec', y=0.85, x=0.05, bbox={
+            #              'facecolor': 'None', 'edgecolor': 'black', 'boxstyle': 'square,pad=0.1'})
+        axs[0, 0].set_title('RA')
+        axs[0, 1].set_title('DEC')
+
+        axs[-1, 0].set_xlabel('Time from the transit, days')
+        axs[-2, 0].set_ylabel('SNR of centroid deviation')
         fig.suptitle('SNR of centroid deviations around the transits', y=1)
 
 
 def plot_centroid_snr2_seasons(target_id, transit_times, time_total, centr_snr2_near_transit_pieces,
                                seasons, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
-                               dpi=Plots_dpi, figsize=Figsize_centroid_coordinate_pieces,
+                               dpi=Plots_dpi, figsize=Figsize_centroid_snr2_seasons,
                                filename_postfix=locs.Centroid_snr2_seasons_plot_filename_postfix
                                ):
     with SubplotsWrapper(nrows=2, ncols=2, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw,
@@ -1055,17 +1099,23 @@ def plot_centroid_snr2_seasons(target_id, transit_times, time_total, centr_snr2_
                          filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=dpi,
                          grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid,
                          zero_lines=True, zero_lines_linewidth=Linewidth_zero_level) as (fig, axs):
+        seasons = np.array(seasons)
+        seasons[~np.isnan(seasons)] = seasons[~np.isnan(seasons)].astype(int)
         seasons_labeled = np.zeros(len(seasons)).astype(bool)
         for i in range(len(transit_times)):
             season = seasons[i]
-            ax = axs[season // 2, season % 2]
-            ax.plot(time_total, centr_snr2_near_transit_pieces[i], '-',
-                    markersize=2, color=def_cols[season], zorder=10, label='Season ' + str(season) if not seasons_labeled[season] else None)
-            seasons_labeled[season] = True
+            if not np.isnan(season):
+                season = int(season)
+                ax = axs[season // 2, season % 2]
+                ax.plot(time_total, centr_snr2_near_transit_pieces[i], '-',
+                        markersize=2, color=def_cols[season], zorder=10, label='Season ' + str(season) if not seasons_labeled[season] else None)
+                seasons_labeled[season] = True
 
         for season in seasons:
-            ax = axs[season // 2, season % 2]
-            ax.legend(loc='best')
+            if not np.isnan(season):
+                season = int(season)
+                ax = axs[season // 2, season % 2]
+                ax.legend(loc='best')
 
         axs[-1, 0].set_xlabel('Time from transit, days')
         axs[-1, 0].set_ylabel('Centroid deviation $SNR^2$')
@@ -1075,20 +1125,23 @@ def plot_centroid_snr2_seasons(target_id, transit_times, time_total, centr_snr2_
 def plot_centroid_coordinates_cloud(target_id, transit_times, centr_coords_snr_near_transit_pieces,
                                     seasons, save_fig=Save_fig, no_show=No_show,
                                     plot_output_location=locs.Triggers_plots_location,
-                                    dpi=Plots_dpi, figsize=Figsize_centroid_coordinate_pieces,
+                                    dpi=Plots_dpi, figsize=Figsize_centroid_cloud,
                                     filename_postfix=locs.Centroid_cloud_plot_filename_postfix):
     with SubplotsWrapper(nrows=1, ncols=1, sharex=True, sharey=True, gridspec_kw=Subplots_gridspec_kw,
                          save_fig=save_fig, no_show=no_show, figsize=figsize, target_id=target_id,
                          filename_postfix=filename_postfix, plot_output_location=plot_output_location, dpi=dpi,
                          grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid,
                          zero_lines=True, zero_lines_linewidth=Linewidth_zero_level) as (fig, ax):
+        seasons[~np.isnan(seasons)] = seasons[~np.isnan(seasons)].astype(int)
         seasons_labeled = np.zeros(4).astype(bool)
         for i in range(len(transit_times)):
             season = seasons[i]
-            ax.plot(centr_coords_snr_near_transit_pieces[0][i], centr_coords_snr_near_transit_pieces[1][i], 'o',
-                    markersize=1, color=def_cols[season], zorder=10,
-                    label='Season ' + str(season) if not seasons_labeled[season] else None)
-            seasons_labeled[season] = True
+            if not np.isnan(season):
+                season = int(season)
+                ax.plot(centr_coords_snr_near_transit_pieces[0][i], centr_coords_snr_near_transit_pieces[1][i], 'o',
+                        markersize=1, color=def_cols[season], zorder=10,
+                        label='Season ' + str(season) if not seasons_labeled[season] else None)
+                seasons_labeled[season] = True
         ax.legend(loc='best')
         ax.set_xlabel('SNR of RA of centroid deviation')
         ax.set_ylabel('SNR of DEC of centroid deviation')
@@ -1111,31 +1164,20 @@ def produce_centroid_plots(tce, save_fig=Save_fig, no_show=No_show, plot_output_
                                  ftts_coords=ftts_coords,
                                  stats_2_max_periodic_coords=stats_2_max_periodic_coords, ftt_center=ftt_center,
                                  ftt_window_plotting=ftt_window_plotting, max_centroid_snr_2=tce.centroid_snr_2,
-                                 save_fig=save_fig, no_show=no_show, plot_output_location=plot_output_location,
-                                 dpi=dpi, figsize=Figsize_centroid_periodic,
-                                 filename_postfix=locs.Centroid_periodic_plot_filename_postfix
-                                 )
+                                 save_fig=save_fig, no_show=no_show, plot_output_location=plot_output_location)
     plot_centroid_coordinates_snr_pieces(target_id=tce.target_id, transit_times=tce.summed_transit_times,
                                          centr_coords_snr_near_transit_pieces=centr_coords_snr_near_transit_pieces,
                                          centr_coords_times_near_transit_pieces=centr_coords_times_near_transit_pieces,
                                          seasons=seasons,
-                                         save_fig=save_fig, no_show=no_show, plot_output_location=plot_output_location,
-                                         dpi=dpi, figsize=Figsize_centroid_coordinate_pieces,
-                                         filename_postfix=locs.Centroid_coordinate_pieces_plot_filename_postfix
-                                         )
+                                         save_fig=save_fig, no_show=no_show, plot_output_location=plot_output_location)
     plot_centroid_snr2_seasons(target_id=tce.target_id, transit_times=tce.summed_transit_times,
                                time_total=time_total, centr_snr2_near_transit_pieces=centr_snr2_near_transit_pieces,
                                seasons=seasons, save_fig=save_fig, no_show=no_show,
-                               plot_output_location=plot_output_location,
-                               dpi=dpi, figsize=Figsize_centroid_coordinate_pieces,
-                               filename_postfix=locs.Centroid_snr2_seasons_plot_filename_postfix
-                               )
+                               plot_output_location=plot_output_location)
     plot_centroid_coordinates_cloud(target_id=tce.target_id, transit_times=tce.summed_transit_times,
                                     centr_coords_snr_near_transit_pieces=centr_coords_snr_near_transit_pieces,
                                     seasons=seasons, save_fig=save_fig, no_show=no_show,
-                                    plot_output_location=plot_output_location,
-                                    dpi=dpi, figsize=Figsize_centroid_coordinate_pieces,
-                                    filename_postfix=locs.Centroid_cloud_plot_filename_postfix)
+                                    plot_output_location=plot_output_location)
 
 
 def plot_all_postprocessing(tce, save_fig=Save_fig, no_show=No_show, fluxes_and_stats=True,
@@ -1163,15 +1205,17 @@ def plot_all_postprocessing(tce, save_fig=Save_fig, no_show=No_show, fluxes_and_
         produce_centroid_plots(tce, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
 
 
-def plots_all_after_slides_injections(tce, save_fig=Save_fig, no_show=No_show):
-    import target_class
-    target = target_class.KeplerTarget(tce.target_id, data_location=tce.data_location, output_location=tce.output_location,
-                                       problems_folder=None)
+def plots_all_after_slides_injections(tce=None, target=None, save_fig=Save_fig, no_show=No_show,
+                                      plots_output_location=locs.Triggers_plots_location):
+    if target is None:
+        import target_class
+        target = target_class.KeplerTarget(tce.target_id, data_location=tce.data_location, output_location=tce.output_location,
+                                           problems_folder=None)
     target.fetch_saved_lightcurve()
-    plot_significance_histograms(target, save_fig=save_fig, no_show=no_show)
-    plot_periodogram_chunks(target, save_fig=save_fig, no_show=no_show)
-    plot_injections_corners(target, save_fig=save_fig, no_show=no_show)
-    plot_injections_radii_durations_score(target, save_fig=save_fig, no_show=no_show)
+    plot_significance_histograms(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    plot_periodogram_chunks(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    plot_injections_corners(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    plot_injections_radii_durations_score(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
 
 
 # ##########################################################################################################
@@ -1192,18 +1236,6 @@ def prepare_target_for_plotting(target, initialize_templates=False,
     if go_fetch:
         target.fetch_saved_lightcurve(initialize_templates=initialize_templates, condition_templates=condition_templates,
                                       detect_single_transits=detect_single_transits)
-
-
-def get_seasons(tce=None, transit_times=None):
-    from auxiliary_functions import get_orig_quarters
-    if tce is not None:
-        if tce.transit_seasons is None:
-            seasons = np.array(get_orig_quarters(tce.summed_transit_times)) % 4
-        else:
-            seasons = tce.transit_seasons
-    else:
-        seasons = np.array(get_orig_quarters(transit_times)) % 4
-    return seasons
 
 
 def set_axes_limits_fold(ax, bins_flux, bins_time, folds_fluxes, folds_times, best_per, plot_twice=False,

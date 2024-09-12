@@ -5,7 +5,7 @@ import os
 Pipeline_folder = os.path.dirname(__file__)
 force_data_output_locations_creation = False
 # --------------------------------------------------------------------------------------------
-Run_name = 'run_11'
+Run_name = 'run_12'
 # --------------------------------------------------------------------------------------------
 Working_place = None  # On which machine it is running: my office Mac ('Home'), Marvin or WEXAC
 # Working_place = 'Home' # 'Marvin'  # 'WEXAC'

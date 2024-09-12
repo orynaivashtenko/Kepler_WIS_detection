@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 
 import os
+import sys
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(SCRIPT_DIR))
 
 from runfiles_parameters import (Run_jobs_outputs_folder, Job_files_folder, Submitted_jobs_folder,
                                  Failed_jobs_folder, Output_files_folder, Error_files_folder, Output_stars_folder,
                                  Error_list_file, List_of_failed_jobs_file, List_of_success_jobs_file)
-from pipeline_parameters import Trigger_lists_folder, Problems_folder, Data_location
+from pipeline_parameters import Data_location
 
 
 if not os.path.exists(Run_jobs_outputs_folder) or not os.path.isdir(Run_jobs_outputs_folder):
     os.makedirs(Run_jobs_outputs_folder)
-if not os.path.exists(Trigger_lists_folder) or not os.path.isdir(Trigger_lists_folder):
-    os.makedirs(Trigger_lists_folder)
+if not os.path.exists(Output_stars_folder):
+    os.makedirs(Output_stars_folder)
 
-if not os.path.exists(Error_list_file):
+if os.path.exists(Error_list_file):
     os.remove(Error_list_file)
-if not os.path.exists(List_of_failed_jobs_file):
+if os.path.exists(List_of_failed_jobs_file):
     os.remove(List_of_failed_jobs_file)
-if not os.path.exists(List_of_success_jobs_file):
+if os.path.exists(List_of_success_jobs_file):
     os.remove(List_of_success_jobs_file)
 
 for folder in [Job_files_folder, Submitted_jobs_folder, Failed_jobs_folder, Output_files_folder, Error_files_folder]:

@@ -371,7 +371,6 @@ def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_outp
     :rtype: int or list
     """
     had_len = True
-    # TODO: this is wrong, all strings will have length! and there is now dynamical queue submission...
     if isinstance(queues, str):
         queues = (queues,)
         had_len = False
