@@ -1933,7 +1933,7 @@ class KeplerTarget(object):
         self.find_best_trigger_from_per_chunks(best_candidates_concat=best_candidates_concat)
         if ((self.best_int_score is not None) and (self.best_stat is not None)
                 and (not np.isnan(self.best_int_score)) and (not np.isnan(self.best_stat))
-                and (self.best_per is None) and (not np.isnan(self.best_per))
+                and (self.best_per is not None) and (not np.isnan(self.best_per))
                 and ((period_threshold is None) or (self.best_per >= period_threshold))
                 and self.best_int_score >= candidate_threshold):
             self.is_threshold_crossing = True

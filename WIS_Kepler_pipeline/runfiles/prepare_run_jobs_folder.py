@@ -27,7 +27,9 @@ for folder in [Job_files_folder, Submitted_jobs_folder, Failed_jobs_folder, Outp
     if not os.path.exists(folder):
         os.makedirs(folder)
     if len(os.listdir(folder)) != 0:
-        os.system('rm ' + folder + '/*')
+        # os.system('rm ' + folder + '/*')
+        os.system('rm -r ' + folder)
+        os.makedirs(folder)
 
 prefixes = [p for p in os.listdir(Data_location) if len(p) == 4 and os.path.isdir(os.path.join(Data_location, p))]
 for prefixes_folder in [Output_stars_folder]:

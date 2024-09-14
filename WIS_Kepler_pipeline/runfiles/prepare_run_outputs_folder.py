@@ -20,23 +20,31 @@ if not os.path.exists(Trigger_lists_folder) or not os.path.isdir(Trigger_lists_f
 if not os.path.exists(Problems_folder) or not os.path.isdir(Problems_folder):
     os.makedirs(Problems_folder)
 
-
 for folder in [Trigger_lists_folder, Triggers_plots_location]:
     if not os.path.exists(folder):
         os.makedirs(folder)
     if len(os.listdir(folder)) != 0:
         os.system('rm -r ' + folder + '/*')
 
+for ff in os.listdir(Run_outputs_folder):
+    if not os.path.isdir(os.path.join(Run_outputs_folder, ff)):
+        os.system('rm ' + os.path.join(Run_outputs_folder, ff))
+
+
 prefixes = [p for p in os.listdir(Data_location) if len(p) == 4 and os.path.isdir(os.path.join(Data_location, p))]
-for prefixes_folder in [Output_location, Problems_folder]:
-    for fold in os.listdir(prefixes_folder):
-        if os.path.isdir(os.path.join(prefixes_folder, fold)):
-            if len(os.listdir(os.path.join(prefixes_folder, fold))) != 0:
-                os.system('rm ' + os.path.join(prefixes_folder, fold) + '/*')
+for big_folder in [Output_location, Problems_folder]:
+    for prefix_folder in os.listdir(big_folder):
+        if os.path.isdir(os.path.join(big_folder, prefix_folder)):
+            for tid_folder in os.listdir(os.path.join(big_folder, prefix_folder)):
+                if os.path.isdir(os.path.join(big_folder, prefix_folder, tid_folder)):
+                    os.system('rm -rf ' + os.path.join(big_folder, prefix_folder, tid_folder) + '/*')
+                else:
+                    os.remove(os.path.join(big_folder, prefix_folder, tid_folder))
         else:
-            os.remove(os.path.join(prefixes_folder, fold))
+            os.remove(os.path.join(big_folder, prefix_folder))
+
     for prefix in prefixes:
-        if not os.path.exists(os.path.join(prefixes_folder, prefix)):
-            os.makedirs(os.path.join(prefixes_folder, prefix))
+        if not os.path.exists(os.path.join(big_folder, prefix)):
+            os.makedirs(os.path.join(big_folder, prefix))
 
 # bsub -q risk -R "rusage[mem=1GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/prepare_run_outputs_folder.py

@@ -123,10 +123,11 @@ while (time.time() < timeout_start + Max_work_time) and (
                             '########################################################################################################################################################################',
                             file=fs)
 
-                if job_was_success:
+                elif job_was_success:
                     with open(List_of_success_jobs_file, 'a') as elf:
                         print(job_filename + ' - ' + str(datetime.datetime.now()) + ' - ' + job_fate, file=elf)
-                    os.remove(os.path.join(Submitted_jobs_folder, job_filename))
+                    if os.path.exists(os.path.join(Submitted_jobs_folder, job_filename)):
+                        os.remove(os.path.join(Submitted_jobs_folder, job_filename))
 
                 # ERRORFILE. Regardless of the success, copy the error file if relevant:
                 if len(text_err) > 0 and (job_was_bad or not job_was_keyboard_interrupted):
