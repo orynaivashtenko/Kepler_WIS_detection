@@ -11,6 +11,9 @@ import pickle
 import time
 import datetime
 
+from numba.core.removerefctpass import remove_unnecessary_nrt_usage
+
+
 def is_int(string):
     assert type(string) == str, 'Input must be string!'
     if string.isdecimal():
@@ -352,11 +355,13 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
 
 
 def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_output.txt', output_dir=None,
-                                   queues=('all',), running=False):
+                                   queues=('all',), running=False, pending=True):
     """Performs bjobs and checks how many submitted jobs there
     For WEXAC IBM job manager. Returns the number of running, waiting and all the other jobs.
     :param running:
     :type running:
+    :param pending:
+    :type pending:
     :param output_file: file to which the output of the bjobs command will be written. Not important because will be removed in the end.
     :type output_file:
     :param output_filename: if `output_file` is None, it will be created from `output_filename` which is the name of the file without the
@@ -386,10 +391,12 @@ def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_outp
         with open(output_file, 'w'):  # clean file if it was there or create if not
             pass
         try:
-            if not running:
-                os.system('bjobs | wc > ' + output_file)
-            else:
-                os.system('bjobs -r | wc > ' + output_file)
+            command = 'bjobs '
+            if running:
+                command += '-r '
+            if pending:
+                command += '-pe '
+            os.system(command + '| wc > ' + output_file)
         except Exception as e:
             with open(output_file) as fil1:
                 print(str(e), file=fil1)
@@ -407,10 +414,13 @@ def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_outp
             with open(output_file, 'w'):  # clean file if it was there or create if not
                 pass
             try:
-                if not running:
-                    os.system('bjobs -q ' + queue + ' | wc > ' + output_file)
-                else:
-                    os.system('bjobs -r -q ' + queue + ' | wc > ' + output_file)
+                command = 'bjobs '
+                if running:
+                    command += '-r '
+                if pending:
+                    command += '-pe '
+                command += '-q ' + queue + ' '
+                os.system(command + '| wc > ' + output_file)
             except Exception as e:
                 with open(output_file) as fil1:
                     print(str(e), file=fil1)

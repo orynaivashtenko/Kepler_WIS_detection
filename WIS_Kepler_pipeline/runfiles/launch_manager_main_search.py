@@ -19,8 +19,9 @@ from pipeline_parameters import Run_technical_folder
 # LAUNCH MANAGER WHICH MOVES OUTPUTFILES AND ERRORFILES TO THE OTHER FOLDER AND REPORTS STATUS OF JOBS
 # ################################################################################################
 
-Max_work_time = 6.9 * 24 * 60 * 60  # in seconds; the job in physics-short is killed after 7 days
-Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at a certain time
+Max_work_time = 6.9 * 24 * 60 * 60  # in seconds; the job in physics-long is killed after 7 days
+# Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at a certain time
+Max_jobs_submitted = 9500  # Maximal number of jobs that we can have in bjobs at a certain time
 
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
@@ -28,7 +29,7 @@ Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at
 queues = Queues_check
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
-minutes_between_checks = 10.
+minutes_between_checks = 5.
 timeout_start = time.time()
 time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to start immediately
 while (time.time() < timeout_start + Max_work_time) and (
@@ -42,12 +43,13 @@ while (time.time() < timeout_start + Max_work_time) and (
             wc = sum(wcs)
         else:
             wc = wcs
-        for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-            os.system('bsub < '+os.path.join(Job_files_folder, ff))
-            time.sleep(0.1)
-            # os.remove(os.path.join(Job_files_folder, ff))
-            # Moving it to the submitted jobs' folder. Will delete it after it is done
-            os.replace(os.path.join(Job_files_folder, ff), os.path.join(Submitted_jobs_folder, ff))
+        if wc < Max_jobs_submitted:
+            for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
+                os.system('bsub < '+os.path.join(Job_files_folder, ff))
+                time.sleep(0.1)
+                # os.remove(os.path.join(Job_files_folder, ff))
+                # Moving it to the submitted jobs' folder. Will delete it after it is done
+                os.replace(os.path.join(Job_files_folder, ff), os.path.join(Submitted_jobs_folder, ff))
 
         # ----------------------------------------------------------------------------------------------
         # Simultaneously, this loop should take care of the outputs.
@@ -111,9 +113,14 @@ while (time.time() < timeout_start + Max_work_time) and (
                         job_was_keyboard_interrupted = False
                     with open(List_of_failed_jobs_file, 'a') as elf:
                         print(job_filename + ' - ' + str(datetime.datetime.now()) + ' - ' + job_fate, file=elf)
-                    os.replace(os.path.join(Submitted_jobs_folder, job_filename), os.path.join(Failed_jobs_folder, job_filename))
+                    sjn = [ff for ff in os.listdir(Submitted_jobs_folder) if target_id in ff]
+                    if len(sjn) > 0:
+                        sjn = sjn[0]
+                        #os.replace(os.path.join(Submitted_jobs_folder, job_filename), os.path.join(Failed_jobs_folder, job_filename))
+                        os.replace(os.path.join(Submitted_jobs_folder, sjn), os.path.join(Failed_jobs_folder, sjn))
                     # OUTPUTFILE. If there is a problem, write this to the finished folder. Otherwise, do not do anything
-                    with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
+                    with open(os.path.join(Output_stars_folder, target_id[:4],
+                                           target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
                         print('FILE:  ' + fo, file=fs)
                         print(datetime.datetime.now(), file=fs)
                         print(file=fs)
@@ -126,12 +133,18 @@ while (time.time() < timeout_start + Max_work_time) and (
                 elif job_was_success:
                     with open(List_of_success_jobs_file, 'a') as elf:
                         print(job_filename + ' - ' + str(datetime.datetime.now()) + ' - ' + job_fate, file=elf)
-                    if os.path.exists(os.path.join(Submitted_jobs_folder, job_filename)):
-                        os.remove(os.path.join(Submitted_jobs_folder, job_filename))
+                    sjn = [ff for ff in os.listdir(Submitted_jobs_folder) if target_id in ff]
+                    if len(sjn) > 0:
+                        sjn = sjn[0]
+                        if os.path.exists(os.path.join(Submitted_jobs_folder, sjn)):
+                            os.remove(os.path.join(Submitted_jobs_folder, sjn))
+                    # if os.path.exists(os.path.join(Submitted_jobs_folder, job_filename)):
+                    #     os.remove(os.path.join(Submitted_jobs_folder, job_filename))
 
                 # ERRORFILE. Regardless of the success, copy the error file if relevant:
                 if len(text_err) > 0 and (job_was_bad or not job_was_keyboard_interrupted):
-                    with open(os.path.join(Output_stars_folder, target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
+                    with open(os.path.join(Output_stars_folder, target_id[:4],
+                                           target_id + '_' + Star_full_output_filename_postfix), 'a') as fs:
                         print('FILE:  ' + fe, file=fs)
                         print(datetime.datetime.now(), file=fs)
                         print(file=fs)

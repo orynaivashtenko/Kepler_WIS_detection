@@ -23,7 +23,7 @@ from pipeline_parameters import Run_technical_folder
 
 
 Max_work_time = 6.9 * 24 * 60 * 60  # in seconds; the job in physics-short is killed after 7 days
-Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at a certain time
+Max_jobs_submitted = 9500  # Maximal number of jobs that we can have in bjobs at a certain time
 
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
@@ -31,7 +31,7 @@ Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at
 queues = Queues_check
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
-minutes_between_checks = 10.
+minutes_between_checks = 5.
 timeout_start = time.time()
 time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to start immediately
 while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):

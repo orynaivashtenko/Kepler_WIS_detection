@@ -351,33 +351,6 @@ def fold_fluxes(times, fluxes, period, first_time, masks=None, binwid=0.0204336 
     if return_std:
         bins_std, bins_flux = get_binned_flux_std(bins_flux=bins_flux, bins_flux_2=bins_flux_2, bins_counts=bins_counts,
                                                   normalize_by_counts=normalize_by_counts)
-        # bins_flux_normalized = np.array(bins_flux)
-        # # For the entries with enough counts for the unbiased estimate:
-        # inds1 = (bins_counts >= 2)
-        # bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-        # # estimate of the variance of the measurements:
-        # bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
-        # if normalize_by_counts:
-        #     bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
-        # else:
-        #     bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
-        # # See notebook from 22/08/24 for the explanation of the formula above
-        #
-        # # For the ones where there is not enough counts for unbiased estimate of variance:
-        # inds1 = (bins_counts == 1)
-        # if len(np.where(inds1)[0]) > 0:
-        #     bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-        #     # estimate of the variance of the measurements:
-        #     bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / bins_counts[inds1]
-        #     if normalize_by_counts:
-        #         bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
-        #     else:
-        #         bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
-        #
-        # bins_std = bins_flux_2**0.5
-        # if normalize_by_counts:
-        #     bins_flux = bins_flux_normalized
-
     elif normalize_by_counts:
         bins_flux = normalize_by_counts_safe(bins_flux=bins_flux, bins_counts=bins_counts)
 
@@ -414,6 +387,7 @@ def normalize_by_counts_safe(bins_flux, bins_counts):
 def get_binned_flux_std(bins_flux, bins_flux_2, bins_counts, normalize_by_counts=True):
     bins_flux = np.array(bins_flux)
     bins_flux_normalized = np.array(bins_flux)
+
     # For the entries with enough counts for the unbiased estimate:
     inds1 = (bins_counts >= 2)
     bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
@@ -818,11 +792,13 @@ def get_connected_stats_from_file(file_path=None, output_location=None, target_i
         return (time_full, statistics_full, stat_masks_full, stat_vars_full, big_hole_masks_full, corrections_full,
                 statistics_gaussianized_full, indices_of_templates, templates_of_indices)
 
+
 # ####################################################################################################
 # FUNCTIONS FOR VETO FOLDED
 # ####################################################################################################
 
-def mf_high_pass(data, dt, dt_pass, template=None, template_rolled=None, renorm_psd_drift=False):
+def mf_high_pass(data, dt, dt_pass, template=None, template_rolled=None, renorm_psd_drift=False,
+                 return_wf=False, return_denom=False):
     """
     ! Warning ! uses the np.fft.rfft(..., norm=None) convention!
     Matched-filtering of `data` and `template` with high-pass filter. That is, the matched filter is informed
@@ -844,6 +820,10 @@ def mf_high_pass(data, dt, dt_pass, template=None, template_rolled=None, renorm_
     :type dt_pass: float
     :param renorm_psd_drift:
     :type renorm_psd_drift: bool
+    :param return_wf:
+    :type return_wf:
+    :param return_denom:
+    :type return_denom:
     :return: matched-filtering scores in units of snr and in units of amplitude
     :rtype: (numpy.ndarray 1d or 2d, numpy.ndarray 1d or 2d), corresponding to the sizes of `data` and `template`
     """
@@ -870,7 +850,12 @@ def mf_high_pass(data, dt, dt_pass, template=None, template_rolled=None, renorm_
     stats_ampl = (numer.T / denom ** 2).T
     if renorm_psd_drift and hasattr(stats_snr, '__len__') and len(stats_snr) > 1:
         stats_snr = stats_snr / ut.outlier_free_std(stats_snr, nsig=3, n_iterations=1, renormalize=True)
-    return stats_snr, stats_ampl  # snr, ampl
+    return_res = [stats_snr, stats_ampl]
+    if return_wf:
+        return_res.append(wf2_effective**0.5)
+    if return_denom:
+        return_res.append(denom)
+    return return_res
 
 
 def mf_high_pass_iterative_rolls(data, dt, dt_pass, template=None, coefficients_template=None, renorm_psd_drift=False):
@@ -891,6 +876,8 @@ def mf_high_pass_iterative_rolls(data, dt, dt_pass, template=None, coefficients_
     :type dt_pass: float
     :param renorm_psd_drift:
     :type renorm_psd_drift: bool
+    :param coefficients_template:
+    :type coefficients_template:
     :return: matched-filtering scores in units of snr and in units of amplitude
     :rtype: (numpy.ndarray 1d or 2d, numpy.ndarray 1d or 2d), corresponding to the sizes of `data` and `template`
     """
@@ -920,16 +907,18 @@ def mf_high_pass_iterative_rolls(data, dt, dt_pass, template=None, coefficients_
     return stats_snr, stats_ampl  # snr, ampl
 
 
-def renorm_noise_high_pass(data, dt, dt_pass):
+def renorm_noise_by_high_freq_tail(data, dt, dt_pass, high_pass=False):
     """
     ! Warning ! uses the np.fft.rfft(..., norm=None) convention!
     Renormalizes the noise`data` after high-pass filtering. We want that the noise is white,
-    but its lowest frequencies are removes. This means that the high-frequency spectrum of the
+    but its lowest frequencies are removed. This means that the high-frequency spectrum of the
     Fourier image of the data should look in the same way as if the data was white. Therefore,
     going to the time domain and measuring the variance is not an option because it will measure
     a smaller variance. This function renormalizes the data in the Fourier space so that the
     power at the high frequencies corresponds to the power of the white noise at the same
     frequencies, as defined by the length of the data in the np.fft.rfft(..., norm=None) convention
+    :param high_pass:
+    :type high_pass:
     :param data: Noise vector to be renormalized. In time-domain
     :type data: numpy.ndarray 1d
     :param dt: time step of the data, should have the same units as `dt_pass`
@@ -944,9 +933,45 @@ def renorm_noise_high_pass(data, dt, dt_pass):
     f_data = np.fft.rfft(data, axis=-1)
     freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
     inds_pass = freqs > 1 / dt_pass
+    filter_val = data.shape[-1] / np.mean((np.abs(f_data)**2)[inds_pass])
+    if high_pass:
+        wf2_effective = np.zeros(freqs.shape[-1])
+        wf2_effective[inds_pass] = filter_val
+        return np.fft.irfft(f_data * wf2_effective**0.5, n=data.shape[-1], axis=-1)
+    else:
+        return data * filter_val**0.5
+
+
+def filter_data_high_pass(data, dt, dt_pass, in_fourier=False, return_cutoff_index=False, renormalize_to_tail=True):
+    data = np.array(data)
+    f_data = np.fft.rfft(data, axis=-1)
+    freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
+    inds_pass = freqs > 1 / dt_pass
+    wf2_effective = np.zeros(freqs.shape[-1])
+    if renormalize_to_tail:
+        wf2_effective[inds_pass] = data.shape[-1] / np.mean((np.abs(f_data) ** 2)[inds_pass])
+    else:
+        wf2_effective[inds_pass] = np.ones(len(wf2_effective))[inds_pass]
+    f_data_hp = f_data * wf2_effective ** 0.5
+    if in_fourier:
+        res = f_data_hp
+    else:
+        res = np.fft.irfft(f_data_hp, n=data.shape[-1], axis=-1)
+    if return_cutoff_index:
+        return res, np.argmax(inds_pass)  # argmax will select the first non-zero here
+    else:
+        return res
+
+
+def high_pass_residuals_renormalized(residuals_td, dt, dt_pass):
+    data = np.array(residuals_td)
+    f_data = np.fft.rfft(data, axis=-1)
+    freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
+    inds_pass = freqs > 1 / dt_pass
     wf2_effective = np.zeros(freqs.shape[-1])
     wf2_effective[inds_pass] = data.shape[-1] / np.mean((np.abs(f_data)**2)[inds_pass])
-    return np.fft.irfft(f_data * wf2_effective**0.5, n=data.shape[-1], axis=-1)
+    return (np.fft.irfft(f_data * wf2_effective * np.conjugate(f_data), n=data.shape[-1], axis=-1)[0]
+            / np.fft.irfft(wf2_effective, n=data.shape[-1], axis=-1)[0])
 
 
 def matched_filter_folded_fluxes_still_too_much_memory(template_number, whitened_templates_td, n_time_templ, binwid,
@@ -1196,6 +1221,49 @@ def get_near_transit_pieces_from_full_time(transit_times, time_full, data_full, 
         return times_near_transit_pieces, data_near_transit_pieces, piece_peaks
     else:
         return times_near_transit_pieces, data_near_transit_pieces, mask_near_transit_pieces, piece_peaks
+
+
+def get_veto_scores_parts_fold_high_pass(flux_wh_td, template_wh_td, n_parts, dt_steps_high_pass, dt_days, binwid,
+                                         return_amplitudes=False, return_vectors=False, min_bins_part=4):
+    from scipy.stats import chi2, norm
+    # Just asserting zeroing the low freqs, without renormalizing anything
+    flux_wh_td = filter_data_high_pass(data=np.array(flux_wh_td), dt=binwid, dt_pass=dt_steps_high_pass * dt_days, in_fourier=False,
+                                       return_cutoff_index=False, renormalize_to_tail=False)
+    template_wh_td = filter_data_high_pass(data=template_wh_td, dt=binwid, dt_pass=dt_steps_high_pass * dt_days, in_fourier=False,
+                                           return_cutoff_index=False, renormalize_to_tail=False)
+
+    mf_scores_full, ampl_scores_full = mf_high_pass(data=flux_wh_td, template=template_wh_td, template_rolled=None,
+                                                    dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+                                                    renorm_psd_drift=True)
+    rolling_arg = np.argmax(mf_scores_full, axis=-1)
+    template_wh_td = np.roll(template_wh_td, rolling_arg)
+    ampl_full = ampl_scores_full[rolling_arg]
+    ampl_std_full = ampl_scores_full[rolling_arg] / mf_scores_full[rolling_arg]
+
+    # -----parts-------
+    templates_parts = ut.get_template_by_parts_snr(template_wh_td, n_parts, min_bins_part=min_bins_part)
+
+    res = [mf_high_pass(data=flux_wh_td, template=temp, template_rolled=None, dt=binwid, dt_pass=dt_steps_high_pass * dt_days,
+                        renorm_psd_drift=True, return_denom=True) for temp in templates_parts]
+    mf_scores_parts, ampl_scores_parts = np.array([[res[i][0], res[i][1]] for i in range(len(res))]).transpose(1, 0, 2)
+    denoms = np.array([res[i][2] for i in range(len(res))])
+    ampls_parts = np.array([ampl_scores_parts[i][0] for i in range(len(templates_parts))])
+    # Here taking the actual denom as the std of the amplitude, without empirical measurement
+    ampls_stds_parts = 1 / denoms
+
+    # -----scores-------
+    total_score = np.sum(((ampls_parts - ampl_full) / ampls_stds_parts) ** 2)
+    total_pval = chi2.sf(total_score, loc=0, scale=1, df=n_parts - 1)
+    partial_scores = np.abs((ampls_parts - ampl_full) / ampls_stds_parts)
+    partial_pvals = norm.sf(partial_scores, scale=(1 - 1 / n_parts) ** 0.5, loc=0) * 2
+    worst_pval = np.min(partial_pvals)
+    # worst_pval_look_elsewhere_corrected = 1 - (1 - worst_pval) ** n_parts
+    return_list = [total_pval, worst_pval]
+    if return_amplitudes:
+        return_list = return_list + [ampl_full, ampl_std_full, ampls_parts, ampls_stds_parts]
+    if return_vectors:
+        return_list = return_list + [mf_scores_full, ampl_scores_full, mf_scores_parts, ampl_scores_parts]
+    return return_list
 
 
 def get_near_transit_pieces_of_whitened_flux(transit_times, times, whitened_fluxes_td, time_wing_days,
@@ -1666,7 +1734,7 @@ def get_sap_from_pixels(target_pixel_fluxes, bit_aperture_masks=None, custom_mas
 
 
 def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None, part_of_peak=0.3,
-                                  part_of_cumsum_2=0.8, part_of_light=None):
+                                  part_of_cumsum_2=0.8, part_of_light=None, return_inclusion_masks=False):
     """
 
     :param target_pixel_fluxes:
@@ -1681,11 +1749,14 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
     :type part_of_cumsum_2:
     :param part_of_light:
     :type part_of_light:
+    :param return_inclusion_masks:
+    :type return_inclusion_masks:
     :return:
     :rtype:
     """
     star_part_sap_fluxes = []
     bg_part_sap_fluxes = []
+    inclusion_masks = []
     for q in range(len(target_pixel_fluxes)):
         with warnings.catch_warnings():  # there can be full-nan slices
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -1697,6 +1768,7 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
             inclusion_mask = ut.get_indices_of_influence(vals=mean_stamp, ind_center_0=peak_coords[0], ind_center_1=peak_coords[1],
                                                          part_peak=part_of_peak, abs_diff_val=None,
                                                          abs_thresh=None, rel_thresh=None, forbid_diagonal=True, descending=True)
+            inclusion_masks.append(inclusion_mask)
             with warnings.catch_warnings():  # there can be full-nan slices
                 warnings.simplefilter("ignore", category=RuntimeWarning)
                 star_part_sap_flux = np.nansum(target_pixel_fluxes[q][:, inclusion_mask], axis=-1)
@@ -1737,7 +1809,10 @@ def get_splitted_saps_from_pixels(target_pixel_fluxes, number_of_pixels_cut=None
 
         star_part_sap_fluxes.append(star_part_sap_flux)
         bg_part_sap_fluxes.append(bg_part_sap_flux)
-    return star_part_sap_fluxes, bg_part_sap_fluxes
+    if not return_inclusion_masks:
+        return star_part_sap_fluxes, bg_part_sap_fluxes
+    else:
+        return star_part_sap_fluxes, bg_part_sap_fluxes, inclusion_masks
 
 
 def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max, flux_trend, trends_std=None,
@@ -1776,10 +1851,10 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
 
     not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (flux_trend > 0.) & (summed_raw_stats != 0.) & (summed_stat_vars > 0.)
     if valid_transit_mask is not None:
-        not_missed_transit_mask = not_missed_transit_mask & valid_transit_mask
+        valid_transit_mask = not_missed_transit_mask & valid_transit_mask
 
-    mean_trend = np.nanmean(flux_trend[not_missed_transit_mask])
-    mean_trend_std = (np.nanmean(trends_std[not_missed_transit_mask] ** 2) + np.nanvar(flux_trend[not_missed_transit_mask])) ** 0.5
+    mean_trend = np.nanmean(flux_trend[valid_transit_mask])
+    mean_trend_std = (np.nanmean(trends_std[valid_transit_mask] ** 2) + np.nanvar(flux_trend[valid_transit_mask])) ** 0.5
 
     ampls = np.zeros(len(summed_raw_stats)) * np.nan
     ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
@@ -1798,18 +1873,18 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
     # ampl = (np.nanmean((ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask]))
     #         * np.nanmean(flux_trend[not_missed_transit_mask]))
     ampl, ampl_std, ampl_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(
-        data=ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask],
-        stds=ampls_stds[not_missed_transit_mask] / flux_trend[not_missed_transit_mask], mask=None)
-    ampl = ampl * np.nanmean(flux_trend[not_missed_transit_mask])
-    ampl_std = ampl_std * np.nanmean(flux_trend[not_missed_transit_mask])
-    ampl_variability = ampl_variability * np.nanmean(flux_trend[not_missed_transit_mask])
+        data=ampls[valid_transit_mask] / flux_trend[valid_transit_mask],
+        stds=ampls_stds[valid_transit_mask] / flux_trend[valid_transit_mask], mask=None)
+    ampl = ampl * np.nanmean(flux_trend[valid_transit_mask])
+    ampl_std = ampl_std * np.nanmean(flux_trend[valid_transit_mask])
+    ampl_variability = ampl_variability * np.nanmean(flux_trend[valid_transit_mask])
 
     ppms_stds[not_missed_transit_mask] = np.abs(ppms[not_missed_transit_mask]) * (
             (ampls_stds[not_missed_transit_mask] / ampls[not_missed_transit_mask])**2
             + (trends_std[not_missed_transit_mask] / flux_trend[not_missed_transit_mask])**2)**0.5
     # ppm = np.nanmean(ppms[not_missed_transit_mask])
-    ppm, ppm_std, ppm_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(data=ppms[not_missed_transit_mask],
-                                                                                 stds=ppms_stds[not_missed_transit_mask], mask=None)
+    ppm, ppm_std, ppm_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(data=ppms[valid_transit_mask],
+                                                                                 stds=ppms_stds[valid_transit_mask], mask=None)
     # ppms_stds[not_missed_transit_mask] = (ppms[not_missed_transit_mask])**2 * (
     #     (ampls_stds[not_missed_transit_mask])**2 / (ampls[not_missed_transit_mask])**2
     #     + np.var(flux_trend[not_missed_transit_mask]) / (flux_trend[not_missed_transit_mask])**2)

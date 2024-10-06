@@ -13,7 +13,7 @@ import target_class
 import argparse
 from pipeline_parameters import N_injections_chunk, N_injections_total
 parser = argparse.ArgumentParser()
-parser.add_argument("--target_id", type=str, nargs=1, help="KOI number", default="003097222")
+parser.add_argument("--target_id", type=str, nargs=1, help="KIC number", default="003097222")
 parser.add_argument("--first_injection_load_parameters_index", type=str, nargs=1,
                     help="Index in the list of all the detection parameters, by chunks of N_injections_chunk",
                     default="0")

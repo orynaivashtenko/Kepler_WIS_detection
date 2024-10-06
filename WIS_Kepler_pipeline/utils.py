@@ -1976,7 +1976,7 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
                tlen=None, fn=0.01, n_parts=4, min_bins_part=4, nperseg_psd=Nperseg_psd,
                splitting='snr', lobe_hlen=4):
     """
-    Splits the tamplate into parts and tests between two cases: all parts are of the same amplitude
+    Splits the template into parts and tests between two cases: all parts are of the same amplitude
     or every part has a different amplitude.
     :param data_wh_fd: Whitened data in the Fourier domain for the entire quarter.
     :type data_wh_fd: numpy.ndarray 1d of float
@@ -2083,6 +2083,17 @@ def _split_template_by_snr(template_wh_full, n_parts, min_bins_part=4):
     return chi2_temp_indices
 
 
+def get_template_by_parts_snr(template_wh_td, n_parts, min_bins_part=4):
+    chi2_temp_indices = _split_template_by_snr(template_wh_full=template_wh_td, n_parts=n_parts, min_bins_part=min_bins_part)
+
+    templates_parts = np.zeros((len(chi2_temp_indices) - 1, len(template_wh_td)))
+
+    for i in range(len(chi2_temp_indices) - 1):
+        templates_parts[i][chi2_temp_indices[i]: chi2_temp_indices[i + 1]] = template_wh_td[
+                                                                             chi2_temp_indices[i]: chi2_temp_indices[i + 1]]
+    return templates_parts
+
+
 def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_full, chi2_temp_indices, fn):
     n_parts = len(chi2_temp_indices) - 1
     templates_parts = np.zeros((n_parts, len(template_wh_full)))
@@ -2109,6 +2120,7 @@ def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_ful
     # abs(scores_parts / norms_parts - score_full / norm_full) * norms_parts
     # note norm_full = 1
     p_values_parts = norm.sf(ampl_scores_parts, scale=(1 - 1 / n_parts) ** 0.5, loc=0) * 2
+    # TODO abs
     is_good_parts = np.sum((p_values_parts >= fn / n_parts).astype(float), axis=0) >= n_parts // 2
 
     scores = np.sum(scores ** 2, axis=0) - stat_full ** 2
@@ -2788,80 +2800,6 @@ def log_non_gaussian_correction(stat, ampl, scale):
     return np.log(g_pdf) - np.log(ng_pdf)
 
 
-# def select_connected_component(image, center):
-#     def indices_square(center_coords, d, x_max=None, y_max=None):
-#         cc = center_coords
-#         x_left = cc[0] - d
-#         x_right = cc[0] + d
-#         span_x = np.arange(x_left, x_right + 1)
-#         y_left = cc[1] - d
-#         y_right = cc[1] + d
-#         span_y = np.arange(y_left, y_right + 1)
-#         top = [span_x, np.ones(len(span_x), dtype=int) * y_right]
-#         bottom = [span_x, np.ones(len(span_x), dtype=int) * y_left]
-#         left = [np.ones(len(span_y), dtype=int) * x_left, span_y]
-#         right = [np.ones(len(span_y), dtype=int) * x_right, span_y]
-#         all_coords = np.hstack((top, right, bottom, left))
-#
-#         all_coords = all_coords[:, all_coords[0] >= 0]
-#         all_coords = all_coords[:, all_coords[1] >= 0]
-#         if x_max is not None:
-#             all_coords = all_coords[:, all_coords[0] <= x_max]
-#         if y_max is not None:
-#             all_coords = all_coords[:, all_coords[1] <= y_max]
-#         # all_coords.T  # - for coordinate pairs list
-#         # (all_coords[0], all_coords[1])  # - for matrix indexing
-#         return list(zip(all_coords[0], all_coords[1]))  # gives list of tuples which is super important for array indexing!
-#
-#     image = image.astype(bool)
-#     included_mask = np.zeros_like(image).astype(bool)
-#     if image[center[0], center[1]]:
-#         x, y = center[0], center[1]
-#         included_mask[x, y] = True
-#         coords_boundary = [(x, y)]
-#         safety_counter = 0
-#         safety_counter_max = image.size / 8
-#         while len(coords_boundary) > 0:
-#             # 0) take all recently included and in image
-#             # 1) all squares
-#             # 2) set -> border
-#             # 3) if there are image true in the border, include them and take as the next border formation
-#             # 4) the old ones can be deleted because they already served
-#             new_coords_boundary = []
-#             for coor_boun in coords_boundary:
-#                 square_coords_point = indices_square(center_coords=coor_boun, d=1, x_max=image.shape[0] - 1, y_max=image.shape[1] - 1)
-#                 new_coords_boundary += square_coords_point
-#             new_coords_boundary = list(set(new_coords_boundary))
-#             ncb_reshaped = list(zip(*new_coords_boundary))
-#             in_image_inds_new_coords_boundary = \
-#                 np.where((image[ncb_reshaped[0], ncb_reshaped[1]]) & (~included_mask[ncb_reshaped[0], ncb_reshaped[1]]))[0]
-#             if len(in_image_inds_new_coords_boundary) == 0:
-#                 break
-#             new_coords_boundary = [new_coords_boundary[ind] for ind in in_image_inds_new_coords_boundary]
-#             ncb_reshaped = list(zip(*new_coords_boundary))
-#             included_mask[ncb_reshaped[0], ncb_reshaped[1]] = True
-#             # new_coords_boundary = list(zip(*ncb_reshaped))
-#             coords_boundary = copy.deepcopy(new_coords_boundary)
-#             safety_counter += 1
-#             if safety_counter > safety_counter_max:
-#                 break
-#     return included_mask
-#
-#
-# def get_indices_of_influence(vals, per_ind_center, ftt_ind_center, part_snr_2=0.5, abs_diff_snr_2=None):
-#     peak_val = vals[per_ind_center, ftt_ind_center]
-#     if abs_diff_snr_2 is None:
-#         ambient_val = np.nanmedian(vals)
-#         inds_sum = (vals > ambient_val + part_snr_2 * (peak_val - ambient_val))
-#         ambient_val = np.nanmedian(vals[~inds_sum])  # repetitive median to exclude peak
-#         inds_sum = (vals >= ambient_val + part_snr_2 * (peak_val - ambient_val))
-#         inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
-#     else:
-#         inds_sum = (vals >= (peak_val - abs_diff_snr_2))
-#         inds_sum = select_connected_component(inds_sum, center=[per_ind_center, ftt_ind_center])
-#     return inds_sum
-
-
 def select_connected_component(image, center, weights=None, forbid_diagonal=False):
     """
 
@@ -3142,9 +3080,12 @@ def check_transit_overlap(period, ftt, period_ref, ftt_ref, n_transits, timing_e
     by less than `timing_error`. The transit durations are not taken into account.
     """
     ephemeris = np.arange(ftt, ftt + period * n_transits, period)[:n_transits]
-    ephemeris_ref = np.arange(ftt_ref, ftt + period * n_transits, period_ref)[:n_transits]
-    min_offsets = np.array([np.min(np.abs(ephemeris_ref - tt)) for tt in ephemeris])
-    overlap_mask = min_offsets < timing_error
+    ephemeris_ref = np.arange(ftt_ref, ftt + period * n_transits, period_ref)
+    if len(ephemeris_ref) > 0:
+        min_offsets = np.array([np.min(np.abs(ephemeris_ref - tt)) for tt in ephemeris])
+        overlap_mask = min_offsets < timing_error
+    else:
+        overlap_mask = np.zeros(len(ephemeris)).astype(bool)
     return overlap_mask
 
 

@@ -2532,7 +2532,6 @@ class KeplerLightCurve(object):
                                          for q in self.quarters] for k in range(len(self.whitened_templates_td))]
         stds_fluxes = [np.std(self.whitened_fluxes_td[q][self.big_hole_masks[q]]) for q in self.quarters]
         fluxes_wh_fd_rewh = [self.whitened_fluxes_fd[q] / stds_fluxes[q] for q in self.quarters]
-
         # Preparing peak statistic (will be unpadded):
         stats_peak, whitened_peak_temps_td, whitened_peak_temps_fd = self.prepare_peak_statistics()
 

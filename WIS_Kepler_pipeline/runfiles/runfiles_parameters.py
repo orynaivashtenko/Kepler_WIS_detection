@@ -27,7 +27,7 @@ List_of_success_jobs_file = os.path.join(Run_jobs_outputs_folder, 'success_jobs_
 
 # Queue_submit = 'physics-short'  # 'risk'
 Queue_submit = 'risk'  # '"short medium risk"'  # dynamic queue submission
-Queues_check = ['all']  # dynamic queue submission, im not sure what it does to the names so i just check all
+Queues_check = ['all']  # in dynamic queue submission, im not sure what it does to the names so i just check all
 # ['short', 'medium']  # check these queues in launch manager
 Mem_per_job_gb = '3.9'
 

@@ -635,7 +635,10 @@ class KeplerTarget(object):
         dict_to_pickle = {}
         for key in self.__dict__:
             value = self.__dict__[key]
-            if isinstance(value, (str, float, int, np.float32, np.integer, np.ndarray, list, dict)):
+            # We do not want to pickle klc light curve or whatever else.
+            # Also, we do not want to pickle None because when we unpickle, we may overwrite not None by None
+            if isinstance(value, (str, float, int, bool, np.bool_, np.float32, np.float64, np.complex64, np.complex128,
+                                  np.integer, np.ndarray, list, dict, tuple)):
                 if (((not hasattr(value, '__len__')) or len(value) < 1000) and getsizeof(value) < 80128) or isinstance(value, str):
                     # size in bytes of array 100*100
                     dict_to_pickle[key] = value
@@ -855,11 +858,12 @@ class KeplerTarget(object):
             output_location = self.output_location
         dict_to_print = {}
         for key in self.__dict__:
+            ok_to_print = True
             if key not in fields_not_to_print:
                 value = self.__dict__[key]
-                if isinstance(value, (str, float, int, np.float32, np.integer, np.ndarray, list, dict)):
+                if isinstance(value, (str, float, int, bool, np.bool_, np.float32, np.float64, np.complex64, np.complex128,
+                                      np.integer, np.ndarray, list, dict, tuple)):
                     # -> float is np.float64 but not 32!
-                    ok_to_print = True
                     if hasattr(value, '__len__') and len(value) > 0:
                         if isinstance(value, dict) and hasattr(value[list(value.keys())[0]], '__len__'):
                             ok_to_print = False
@@ -3423,3 +3427,9 @@ class KeplerTarget(object):
         self.klc.load_connected_stats()
         self.klc.interleave_shifts(delete_fulls=False)
         self.klc.get_summed_values(first_transit_time=self.best_ftt, period=self.best_per, template=self.best_temp)
+
+
+def get_target_for_tce(tce):
+    target = KeplerTarget(tce.target_id, data_location=tce.data_location, output_location=tce.output_location,
+                          problems_folder=None)
+    return target

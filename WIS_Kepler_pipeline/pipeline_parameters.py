@@ -116,7 +116,7 @@ Per_phases_per_chunk = 1100000  # It was 1300000 in run 12, but injection search
 # -> instead of specifying number of chunks, it is easier to specify the time-size of the array going to the memory
 # this one is used for the timeslides:
 Score_candidate_search = 40.  # mes in units of SNR SQUARED TEMPLATE-MARGINALIZED
-Score_candidate_postprocess = 49.
+Score_candidate_postprocess = 45.
 # The following `close` parameters are for the maximal score selection. Sometimes the maximal integral corresponds
 # to the chunk that does not capture the true peak. But the integral does capture the true peak because of the
 # period overlapping. We check whether there is a score which is no less

@@ -21,7 +21,7 @@ import target_class
 import tce_class
 from catalog_functions import write_trigger_table
 from tce_parameters import Catalog_names_properties_dict, Trigger_table_file, Trigger_table_format
-from plotting_functions import plots_all_after_slides_injections
+from plotting_functions import plot_all_after_slides_injections, plot_neighbors_maps
 from astropy.table import Table, MaskedColumn
 
 import argparse
@@ -92,7 +92,8 @@ for tid in target_ids:
                 # trigger_table[key][-1] = np.ma.masked
                 trigger_table[key].mask[-1] = True
 
-    plots_all_after_slides_injections(target=targ, save_fig=True, no_show=True)
+    plot_all_after_slides_injections(target=targ, save_fig=True, no_show=True)
+    plot_neighbors_maps(tce=tce, save_fig=True, no_show=True)
 
 write_trigger_table(trigger_table, file_path=Trigger_table_file, overwrite=True,
                     trigger_table_format=Trigger_table_format, fill_values=None)

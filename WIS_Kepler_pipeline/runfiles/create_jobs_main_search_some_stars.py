@@ -35,7 +35,7 @@ for target_id in targ_ids:
     fop.write_job_file(code_file=None,
                        code_filename=main_search_runfile_filename,
                        code_file_dir=Run_files_folder,
-                       jobname=target_id + '_' + Main_search_job_filename_prefix + '.bsub',
+                       jobname=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
                        job_file=None,
                        job_filename=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
                        job_file_dir=Job_files_folder,

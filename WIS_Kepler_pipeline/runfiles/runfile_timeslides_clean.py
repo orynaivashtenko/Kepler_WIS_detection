@@ -15,7 +15,7 @@ import target_class
 from pipeline_parameters import Slides_clean_res_filename_postfix
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--target_id", type=str, nargs=1, help="KOI number", default="003097222")
+parser.add_argument("--target_id", type=str, nargs=1, help="KIC number", default="003097222")
 parser.add_argument("--period", type=str, nargs=1, help="period, days", default="100")
 parser.add_argument("--ftt", type=str, nargs=1, help="first transit time, days Kepler time", default="140")
 args = parser.parse_args()

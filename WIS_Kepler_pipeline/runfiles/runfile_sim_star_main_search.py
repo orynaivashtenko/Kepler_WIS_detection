@@ -16,7 +16,7 @@ import traceback
 
 import argparse
 parser = argparse.ArgumentParser()
-parser.add_argument("--target_id", type=str, nargs=1, help="KOI number", default="000000000")
+parser.add_argument("--target_id", type=str, nargs=1, help="KIC number", default="000000000")
 args = parser.parse_args()
 Target_id = args.target_id
 if isinstance(Target_id, list):

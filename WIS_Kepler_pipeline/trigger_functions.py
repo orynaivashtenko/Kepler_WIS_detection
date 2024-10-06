@@ -49,6 +49,25 @@ def load_triggers(file, sep=' '):
     return target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates
 
 
+def load_triggers_unique(file, sep=' '):
+    target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates = load_triggers(file=file, sep=sep)
+
+    inds_selection = []
+    for tid in list(set(target_ids)):
+        inds = np.where(np.array(target_ids) == tid)[0]
+        if len(inds) > 1:
+            inds = [ind for ind in inds if (~np.isnan(integral_scores[ind])) and (~np.isnan(stats[ind]))]
+        inds_selection.append(inds[-1])
+    target_ids = target_ids[inds_selection]
+    integral_scores = integral_scores[inds_selection]
+    stats = stats[inds_selection]
+    pers = pers[inds_selection]
+    ftts = ftts[inds_selection]
+    gauss_stats = gauss_stats[inds_selection]
+    templates = templates[inds_selection]
+    return target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates
+
+
 def print_triggers(target_ids=None, integral_scores=None, stats=None, pers=None, ftts=None, gauss_stats=None,
                    templates=None, file=None, sep=' ', end='\n'):
     with open(file, "w") as fil:

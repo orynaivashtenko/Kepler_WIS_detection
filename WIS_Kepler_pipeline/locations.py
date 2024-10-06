@@ -79,6 +79,10 @@ Quarter_end_times_file = os.path.join(Kepler_files_folder, 'quarter_end_times.tx
 Villanova_catalog_file = os.path.join(Kepler_files_folder, 'villanova_catalog')
 Villanova_periods_phases_kmags_relevant_filename = 'villanova_periods_phases_kmags_relevant.npy'
 Villanova_periods_phases_kmags_relevant_file = os.path.join(Kepler_files_folder, Villanova_periods_phases_kmags_relevant_filename)
+Villanova_kic_relevant_filename = 'villanova_from_kic_relevant.ecsv'
+Villanova_kic_relevant_file = os.path.join(Kepler_files_folder, Villanova_kic_relevant_filename)
+Villanova_kic_query_relevant_filename = 'villanova_kic_query.ecsv'
+Villanova_kic_query_relevant_file = os.path.join(Kepler_files_folder, Villanova_kic_query_relevant_filename)
 Table_koi_file = os.path.join(Kepler_files_folder, 'KOI_table_2024.csv')
 
 # ############################################################################################################
@@ -99,7 +103,7 @@ Triggers_short_periodicity_filtered_filename = 'triggers_short_periodicity_filte
 Triggers_g_short_periodicity_filtered_filename = 'triggers_g_short_periodicity_filtered.txt'
 Triggers_for_slides_injections_filename = 'triggers_for_slides_injections.txt'
 Triggers_g_for_slides_injections_filename = 'triggers_g_for_slides_injections.txt'
-Tids_that_did_not_run_filename = 'Tids_that_did_not_run.txt'
+Tids_that_did_not_run_filename = 'tids_that_did_not_run.txt'
 Non_slidable_tids_short_period_filename = 'non_slidable_tids__having_10_30_trigger.txt'
 Seeds_scrambling_run_filename = 'seeds_scrambling_run.txt'
 Threshold_crossing_scrambled_list_filename = 'threshold_crossing_scrambled_kid_info.txt'
@@ -170,8 +174,11 @@ Periodic_stats_star_pixels_filename_postfix = 'periodic_stats_star_pixels'
 Connected_stats_bg_pixels_filename_postfix = 'connected_stats_bg_pixels'
 Periodic_stats_bg_pixels_filename_postfix = 'periodic_stats_bg_pixels'
 
-Fold_residuals_flux_binned_filename_postfix = 'fold_residuals_flux_binned'
+Fold_residuals_flux_fd_chi2_filename_postfix = 'fold_residuals_flux_fd_chi2'
 Mf_scores_residuals_filename_postfix = 'mf_scores_residuals'
+Folded_binned_flux_template_filename_postfix = 'folded_binned_flux_template'
+Fold_residuals_flux_td_chi_filename_postfix = 'fold_residuals_flux_td_chi'
+Folded_binned_wh_flux_model_even_odd_filename_postfix = 'folded_binned_wh_flux_model_even_odd'
 # ############################################################################################################
 # Search pipeline data saving postfixes
 # ############################################################################################################
@@ -228,17 +235,23 @@ Default_effective_wf_fd_filename = 'effective_whitening_filter_fourier_domain.np
 #########################################################################################################################
 # Plotting
 #########################################################################################################################
+Trigger_pdf_report_filename_postfix = 'trigger_report.pdf'
+
 Background_injection_histograms_plot_filename_postfix = 'background_injection_histograms.png'
 Orig_fluxes_plot_filename_postfix = 'orig_fluxes.png'
 Red_fluxes_plot_filename_postfix = 'red_fluxes.png'
 Whitened_fluxes_plot_filename_postfix = 'whitened_fluxes.png'
 Single_event_statistics_plot_filename_postfix = 'single_event_statistics.png'
+All_series_plot_filename_postfix = 'all_series.png'
 Folded_whitened_fluxes_plot_filename_postfix = 'folded_whitened_fluxes.png'
 Folded_whitened_fluxes_zoomed_plot_filename_postfix = 'folded_whitened_fluxes_zoomed.png'
 Folded_statistics_plot_filename_postfix = 'folded_statistics.png'
 Folded_statistics_zoomed_plot_filename_postfix = 'folded_statistics_zoomed.png'
+All_folds_plot_filename_postfix = 'all_folds.png'
+All_folds_zoomed_filename_postfix = 'all_folds_zoomed.png'
 Periodogram_chunks_plot_filename_postfix = 'periodogram_chunks.png'
 Residuals_fold_veto_histogram_plot_filename_postfix = 'residuals_fold_veto_histogram.png'
+Veto_parts_fold_plot_filename_postfix = 'veto_parts_fold.png'
 Neighbor_maps_plot_filename_postfix = 'neighbor_maps.png'
 Injections_radii_durations_score_plot_filename_postfix = 'inj_radii_dur_score.png'
 Corner_injections_orbital_plot_filename_postfix = 'corner_inj_orbital.png'
@@ -248,9 +261,17 @@ Centroid_cloud_plot_filename_postfix = 'centroid_cloud.png'
 Centroid_periodic_plot_filename_postfix = 'centroid_periodic.png'
 Centroid_coordinate_pieces_plot_filename_postfix = 'centroid_coordinate_pieces.png'
 Centroid_snr2_seasons_plot_filename_postfix = 'centroid_snr2_seasons.png'
+Centroid_full_stats_plot_filename_postfix = 'centroid_full_stats.png'
 Star_bg_pixels_ppm_plot_filename_postfix = 'star_bg_pixels_ppm.png'
 Season_pieces_snr_plot_filename_postfix = 'season_pieces_snr.png'
 Season_pieces_wh_flux_plot_filename_postfix = 'season_pieces_wh_flux.png'
+Even_odd_wh_flux_plot_filename_postfix = 'even_odd_wh_flux.png'
+Even_odd_snr_plot_filename_postfix = 'even_odd_snr.png'
+Even_odd_wh_flux_and_snr_plot_filename_postfix = 'even_odd_wh_flux_and_snr.png'
+Even_odd_wh_flux_from_veto_plot_filename_postfix = 'even_odd_wh_flux_from_veto.png'
+Neighbors_maps_plot_filename_postfix = 'neighbors_maps.png'
+Star_bg_full_stats_plot_filename_postfix = 'star_bg_full_stats.png'
+Transit_info_plot_filename_postfix = 'transit_info.png'
 
 # locs.Folded_red_fluxes_plot_filename_postfix
 # locs.Neighbor_maps_plot_filename_postfix

@@ -18,10 +18,12 @@ import pipeline_parameters
 from pipeline_parameters import (Koi_dict_filename, Ttv_dict_filename, Villanova_dict_filename,
                                  Limb_darkening_array_filename, Flares_file)
 
-from tce_parameters import (Earth_pointing_times_file, Quarter_start_times_file, Quarter_end_times_file,
-                            Villanova_catalog_file, Table_koi_file, Suspicious_frequency_reasons_triggers_file,
-                            Threshold_crossing_list_file, Suspicious_frequency_filtered_triggers_file,
-                            Villanova_periods_phases_kmags_relevant_filename)
+from locations import (Earth_pointing_times_file, Quarter_start_times_file, Quarter_end_times_file,
+                       Villanova_catalog_file, Table_koi_file, Suspicious_frequency_reasons_triggers_file,
+                       Threshold_crossing_list_file, Suspicious_frequency_filtered_triggers_file,
+                       Villanova_periods_phases_kmags_relevant_file, Villanova_kic_relevant_file)
+from catalog_functions import (Column, Kic_retrieval_fields, Villanova_table_fields, query_kic,
+                               write_trigger_table)
 
 Default_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
 Default_koi_catalog_filename = 'KOI_table_2024.csv'  # 'cumulative_2022.10.18_03.41.17.csv'  # TODO replace by the new one
@@ -198,18 +200,22 @@ def make_villanova_dict(villanova_catalog_path=os.path.join(Default_files_folder
 
 
 def make_villanova_periods_phases_kmags_for_relevant_periods_postprocessing(
-        villanova_periods_phases_kmags_relevant_file=os.path.join(Default_files_folder, Villanova_periods_phases_kmags_relevant_filename)):
+        villanova_periods_phases_kmags_relevant_file=Villanova_periods_phases_kmags_relevant_file,
+        return_results=False, save_to_file=True):
     # ################################################################################################
     # LOADING VILLANOVA
+    # # KIC,period,period_err,bjd0,bjd0_err,morph,GLon,GLat,kmag,Teff,SC,
 
     with open(Villanova_catalog_file, 'r') as vil_file:
         lines = vil_file.readlines()
     lines = [(line.strip()).split(',') for line in lines if ((len(line.strip()) > 0) and (line.strip())[0] != '#')]
+    vil_kids = np.array([line[0].rjust(9, '0') for line in lines])
     vil_periods = np.array([float(line[1]) for line in lines])  # error is about 0.0000002 days
     vil_phases = np.array([float(line[3]) for line in lines])  # error is about one lc exposure time
     vil_kmags = np.array([float(line[8]) for line in lines])
     vil_relevant_period_indices = vil_periods > 1  # we keep harmonics, but we do not need some 0.1 day periods
 
+    vil_kids = vil_kids[vil_relevant_period_indices]
     vil_periods = vil_periods[vil_relevant_period_indices]
     vil_phases = vil_phases[vil_relevant_period_indices]
     vil_kmags = vil_kmags[vil_relevant_period_indices]
@@ -217,7 +223,57 @@ def make_villanova_periods_phases_kmags_for_relevant_periods_postprocessing(
     # Villanova phases are in BJD - 2400000
     vil_phases = vil_phases + 2400000. - 2454833
 
-    np.save(villanova_periods_phases_kmags_relevant_file, np.vstack((vil_periods, vil_phases, vil_kmags)), allow_pickle=True)
+    if save_to_file:
+        np.save(villanova_periods_phases_kmags_relevant_file, np.vstack((vil_kids, vil_periods, vil_phases, vil_kmags)),
+                allow_pickle=True)
+    if return_results:
+        return vil_kids, vil_periods, vil_phases, vil_kmags
+
+
+def make_villanova_table_from_kic_for_postprocessing(
+        villanova_kic_relevant_file=Villanova_kic_relevant_file,
+        kic_retrieval_fields=Kic_retrieval_fields,
+        villanova_table_fields=Villanova_table_fields):
+    """
+    Some Villanova targets cannot be identified with a Gaia ID, apparently exactly because they are
+    binaries and not one star. Therefore, to pinpoint them as Kepler targets, we use KIC (Kepler Input Catalog).
+    For example, if we need their coordinates
+    :param villanova_kic_relevant_file:
+    :type villanova_kic_relevant_file:
+    :param kic_retrieval_fields:
+    :type kic_retrieval_fields:
+    :param villanova_table_fields:
+    :type villanova_table_fields:
+    :return:
+    :rtype:
+    """
+    # ################################################################################################
+    # LOADING VILLANOVA
+    # # KIC,period,period_err,bjd0,bjd0_err,morph,GLon,GLat,kmag,Teff,SC,
+
+    vil_kids, vil_periods, vil_phases, vil_kmags = make_villanova_periods_phases_kmags_for_relevant_periods_postprocessing(
+        return_results=True, save_to_file=False)
+
+    objects_table = query_kic(target_id_list=vil_kids, return_table=True,
+                              save_table_to_file=True, table_file=villanova_kic_relevant_file,
+                              table_filename=None, table_folder=None,
+                              kic_retrieval_fields=kic_retrieval_fields)
+    for name in ['period', 't0']:
+        col = Column(data=np.empty(len(objects_table['target_id']), dtype=float),
+                     name=name, dtype=float,
+                     description=name, unit='days',
+                     format=None, meta=None, copy=False, copy_indices=True)
+        objects_table.add_column(col)
+
+    for i_kid, kid in enumerate(np.array(objects_table['target_id'])):
+        kid = str(kid).rjust(9, '0')
+        if kid in vil_kids:
+            ind = np.where(vil_kids == kid)[0][0]
+            objects_table['period'][i_kid] = vil_periods[ind]
+            objects_table['t0'][i_kid] = vil_phases[ind]
+            objects_table['kepmag'][i_kid] = vil_kmags[ind]
+
+    write_trigger_table(trigger_table=objects_table, file_path=villanova_kic_relevant_file, overwrite=True)
 
 
 def make_limb_darkening_coefficients_array(limb_darkening_table_file, save_file=False):
