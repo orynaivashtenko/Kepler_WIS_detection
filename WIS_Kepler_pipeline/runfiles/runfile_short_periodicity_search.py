@@ -2,7 +2,7 @@
 
 import os
 
-import auxiliary_functions
+# import auxiliary_functions
 
 os.environ["OMP_NUM_THREADS"] = "1"  #
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import target_class
 import search_pipeline as spip
 import pipeline_parameters as pp
-from trigger_functions import print_trigger_line, get_trigger_from_target_id, Indices_dict, copy_trigger_between_files
+from trigger_functions import print_trigger_line  # , get_trigger_from_target_id, Indices_dict, copy_trigger_between_files
 from auxiliary_functions import get_saving_file_path
 import traceback
 from runfiles_parameters import Error_list_file
@@ -97,11 +97,11 @@ try:
                            ftt=targ.best_g_ftt, gauss_stat=targ.best_g_gauss_stat, template=targ.best_g_temp,
                            file=fil1, sep=' ', end='\n')
 
-    trigger_main_search = get_trigger_from_target_id(Target_id, trigger_list_file=pp.Threshold_crossing_list_file)
-    int_score_main = trigger_main_search[Indices_dict['int_score']]
-    if int_score_main > targ.best_int_score:
-        copy_trigger_between_files(target_id=Target_id, source_file=pp.Threshold_crossing_list_file,
-                                   destination_file=pp.Triggers_for_slides_injections_file)
+    # trigger_main_search = get_trigger_from_target_id(Target_id, trigger_list_file=pp.Threshold_crossing_list_file)
+    # int_score_main = trigger_main_search[Indices_dict['int_score']]
+    # if int_score_main > targ.best_int_score:
+    #     copy_trigger_between_files(target_id=Target_id, source_file=pp.Threshold_crossing_list_file,
+    #                                destination_file=pp.Triggers_for_slides_injections_file)
 except Exception as exc:
     tb = sys.exc_info()
     list_str_exc = traceback.format_exception(exc, value=tb[1], tb=tb[2])

@@ -4272,8 +4272,9 @@ def sum_periods_fun(statistics_by_trends, trends_sq_by_vars, corrections, statis
     return statistics_periodic, denomsq, corrections_periodic, stats_gaussianized_periodic
 
 
-def get_minimal_processed_folded_klc(period, template_index='all', times=None, fluxes=None, target_id=None, get_data=False,
-                                     nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos, delta_period=0.1,
+def get_minimal_processed_folded_klc(period=None, search_periodicity=True,  delta_period=0.1, template_index='all',
+                                     times=None, fluxes=None, target_id=None, get_data=False,
+                                     nsig_outliers_0_neg=Nsig_outliers_0_neg, nsig_outliers_0_pos=Nsig_outliers_0_pos,
                                      data_location=None, output_location=None, cut_edge_nans=False, delete_fulls=True,
                                      allow_output_folder_creation=False, allow_data_folder_creation=False):
     """
@@ -4292,7 +4293,8 @@ def get_minimal_processed_folded_klc(period, template_index='all', times=None, f
     klc.cut_zero_padding_ends()
     klc.connect_quarters()
     klc.interleave_shifts(delete_fulls=delete_fulls)
-    klc.sum_periods(p_min=period - delta_period, p_max=period + delta_period)
+    if search_periodicity and period is not None:
+        klc.sum_periods(p_min=period - delta_period, p_max=period + delta_period)
     # -> we do not marginalize, so statistics are still not in units of snr squared
     return klc
 

@@ -34,17 +34,10 @@ queues = Queues_check
 minutes_between_checks = 5.
 timeout_start = time.time()
 time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to start immediately
-while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):
+Min_work_time = 10 * 60
+while ((time.time() < timeout_start + Max_work_time)
+       and (len(os.listdir(Job_files_folder)) > 0) or (time.time() < timeout_start + Min_work_time)):
     if time.time() - time_last > minutes_between_checks * 60:  # check every 10 min
-        time_last = time.time()
-
-
-timeout_start = time.time()
-time_last = timeout_start - 10.01 * 60  # I want it to start immediately
-while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_files_folder)) > 0)
-                                                         or len(os.listdir(Output_files_folder)) > 0 or len(
-            os.listdir(Error_files_folder)) > 0):
-    if time.time() - time_last > 10 * 60:  # check every 10 min
         time_last = time.time()
         # wc = check_number_of_submitted_jobs(output_dir=Run_technical_folder)
         wcs = check_number_of_submitted_jobs(output_dir=Run_technical_folder, queues=queues)
@@ -52,12 +45,13 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
             wc = sum(wcs)
         else:
             wc = wcs
-        for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-            os.system('bsub < ' + os.path.join(Job_files_folder, ff))
-            time.sleep(0.1)
-            # os.remove(os.path.join(Job_files_folder, ff))
-            # Moving it to the submitted jobs' folder. Will delete it after it is done
-            os.replace(os.path.join(Job_files_folder, ff), os.path.join(Submitted_jobs_folder, ff))
+        if wc < Max_jobs_submitted:
+            for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
+                os.system('bsub < ' + os.path.join(Job_files_folder, ff))
+                time.sleep(0.1)
+                # os.remove(os.path.join(Job_files_folder, ff))
+                # Moving it to the submitted jobs' folder. Will delete it after it is done
+                os.replace(os.path.join(Job_files_folder, ff), os.path.join(Submitted_jobs_folder, ff))
 
         # ----------------------------------------------------------------------------------------------
         # Simultaneously, this loop looks at the submitted jobs which are done and moves them to the appropriate folder
@@ -91,8 +85,8 @@ while (time.time() < timeout_start + Max_work_time) and ((len(os.listdir(Job_fil
                         if job_was_bad:
                             os.replace(os.path.join(Submitted_jobs_folder, job_filename), os.path.join(Failed_jobs_folder, job_filename))
 
-                        if job_was_success:
-                            os.remove(os.path.join(Submitted_jobs_folder, job_filename))
+                        # if job_was_success:
+                        #     os.remove(os.path.join(Submitted_jobs_folder, job_filename))
     else:
         time.sleep(30)  # sleep 30 seconds if the time to check did not yet come
 

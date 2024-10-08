@@ -390,14 +390,15 @@ def get_binned_flux_std(bins_flux, bins_flux_2, bins_counts, normalize_by_counts
 
     # For the entries with enough counts for the unbiased estimate:
     inds1 = (bins_counts >= 2)
-    bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
-    # estimate of the variance of the measurements:
-    bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
-    if normalize_by_counts:
-        bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
-    else:
-        bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
-    # See notebook from 22/08/24 for the explanation of the formula above
+    if len(np.where(inds1)[0]) > 0:
+        bins_flux_normalized[inds1] = bins_flux[inds1] / bins_counts[inds1]
+        # estimate of the variance of the measurements:
+        bins_flux_2[inds1] = (bins_flux_2[inds1] - bins_flux_normalized[inds1] ** 2 * bins_counts[inds1]) / (bins_counts[inds1] - 1)
+        if normalize_by_counts:
+            bins_flux_2[inds1] = bins_flux_2[inds1] / bins_counts[inds1]  # the variance of the mean is like that
+        else:
+            bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
+        # See notebook from 22/08/24 for the explanation of the formula above
 
     # For the ones where there is not enough counts for unbiased estimate of variance:
     inds1 = (bins_counts == 1)
@@ -410,6 +411,7 @@ def get_binned_flux_std(bins_flux, bins_flux_2, bins_counts, normalize_by_counts
         else:
             bins_flux_2[inds1] = bins_flux_2[inds1] * bins_counts[inds1]  # the variance of the sum is like that
 
+    bins_flux_2[bins_flux_2 < 0] = 0.  # sometimes it is a small negative number due to numerics
     bins_std = bins_flux_2 ** 0.5
     if normalize_by_counts:
         bins_flux = bins_flux_normalized
@@ -1852,45 +1854,57 @@ def estimate_ampls_ppms_from_stats(summed_raw_stats, summed_stat_vars, templ_max
     not_missed_transit_mask = (~np.isnan(summed_raw_stats)) & (flux_trend > 0.) & (summed_raw_stats != 0.) & (summed_stat_vars > 0.)
     if valid_transit_mask is not None:
         valid_transit_mask = not_missed_transit_mask & valid_transit_mask
+    else:
+        valid_transit_mask = not_missed_transit_mask
 
-    mean_trend = np.nanmean(flux_trend[valid_transit_mask])
-    mean_trend_std = (np.nanmean(trends_std[valid_transit_mask] ** 2) + np.nanvar(flux_trend[valid_transit_mask])) ** 0.5
-
+    # FIGURE OUT WHERE NON-MISSED AND WHERE VALID
     ampls = np.zeros(len(summed_raw_stats)) * np.nan
     ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
     normalized_ampls = np.zeros(len(summed_raw_stats)) * np.nan
+    normalized_ampls_stds = np.zeros(len(summed_raw_stats)) * np.nan
     ppms = np.zeros(len(summed_raw_stats)) * np.nan
     ppms_stds = np.zeros(len(summed_raw_stats)) * np.nan
 
-    ampls[not_missed_transit_mask] = summed_raw_stats[not_missed_transit_mask] / summed_stat_vars[not_missed_transit_mask]
-    ampls_stds[not_missed_transit_mask] = (np.abs(1 / summed_stat_vars[not_missed_transit_mask])**0.5)
-    normalized_ampls[not_missed_transit_mask] = (ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask] * mean_trend)
-    normalized_ampls_stds = ((ampls_stds * mean_trend / flux_trend)**2
-                             + (trends_std * ampls * mean_trend / flux_trend ** 2)**2
-                             + (mean_trend_std * ampls / flux_trend)**2)**0.5
-    ppms[not_missed_transit_mask] = (ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask] * templ_max * 1e6)
+    ppm = np.nan
+    ppm_std = np.nan
+    ppm_variability = np.nan
+    ampl = np.nan
+    ampl_std = np.nan
+    ampl_variability = np.nan
 
-    # ampl = (np.nanmean((ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask]))
-    #         * np.nanmean(flux_trend[not_missed_transit_mask]))
-    ampl, ampl_std, ampl_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(
-        data=ampls[valid_transit_mask] / flux_trend[valid_transit_mask],
-        stds=ampls_stds[valid_transit_mask] / flux_trend[valid_transit_mask], mask=None)
-    ampl = ampl * np.nanmean(flux_trend[valid_transit_mask])
-    ampl_std = ampl_std * np.nanmean(flux_trend[valid_transit_mask])
-    ampl_variability = ampl_variability * np.nanmean(flux_trend[valid_transit_mask])
+    if np.sum(valid_transit_mask.astype(float)) > 0:
+        mean_trend = np.nanmean(flux_trend[valid_transit_mask])
+        mean_trend_std = (np.nanmean(trends_std[valid_transit_mask] ** 2) + np.nanvar(flux_trend[valid_transit_mask])) ** 0.5
 
-    ppms_stds[not_missed_transit_mask] = np.abs(ppms[not_missed_transit_mask]) * (
-            (ampls_stds[not_missed_transit_mask] / ampls[not_missed_transit_mask])**2
-            + (trends_std[not_missed_transit_mask] / flux_trend[not_missed_transit_mask])**2)**0.5
-    # ppm = np.nanmean(ppms[not_missed_transit_mask])
-    ppm, ppm_std, ppm_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(data=ppms[valid_transit_mask],
-                                                                                 stds=ppms_stds[valid_transit_mask], mask=None)
-    # ppms_stds[not_missed_transit_mask] = (ppms[not_missed_transit_mask])**2 * (
-    #     (ampls_stds[not_missed_transit_mask])**2 / (ampls[not_missed_transit_mask])**2
-    #     + np.var(flux_trend[not_missed_transit_mask]) / (flux_trend[not_missed_transit_mask])**2)
-    # ppms_stds[not_missed_transit_mask] = ((1 / summed_stat_vars[not_missed_transit_mask] / (flux_trend[not_missed_transit_mask]) ** 2
-    #                                        + np.var(flux_trend[not_missed_transit_mask])
-    #                                        / flux_trend[not_missed_transit_mask] ** 4 * templ_max ** 2 * 1e12) ** 0.5)
+        ampls[valid_transit_mask] = summed_raw_stats[valid_transit_mask] / summed_stat_vars[valid_transit_mask]
+        ampls_stds[valid_transit_mask] = (np.abs(1 / summed_stat_vars[valid_transit_mask])**0.5)
+        normalized_ampls[valid_transit_mask] = (ampls[valid_transit_mask] / flux_trend[valid_transit_mask] * mean_trend)
+        normalized_ampls_stds = ((ampls_stds * mean_trend / flux_trend)**2
+                                 + (trends_std * ampls * mean_trend / flux_trend ** 2)**2
+                                 + (mean_trend_std * ampls / flux_trend)**2)**0.5
+        ppms[valid_transit_mask] = (ampls[valid_transit_mask] / flux_trend[valid_transit_mask] * templ_max * 1e6)
+
+        # ampl = (np.nanmean((ampls[not_missed_transit_mask] / flux_trend[not_missed_transit_mask]))
+        #         * np.nanmean(flux_trend[not_missed_transit_mask]))
+        ampl, ampl_std, ampl_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(
+            data=ampls[valid_transit_mask] / flux_trend[valid_transit_mask],
+            stds=ampls_stds[valid_transit_mask] / flux_trend[valid_transit_mask], mask=None)
+        ampl = ampl * np.nanmean(flux_trend[valid_transit_mask])
+        ampl_std = ampl_std * np.nanmean(flux_trend[valid_transit_mask])
+        ampl_variability = ampl_variability * np.nanmean(flux_trend[valid_transit_mask])
+
+        ppms_stds[valid_transit_mask] = np.abs(ppms[valid_transit_mask]) * (
+                (ampls_stds[valid_transit_mask] / ampls[valid_transit_mask])**2
+                + (trends_std[valid_transit_mask] / flux_trend[valid_transit_mask])**2)**0.5
+        # ppm = np.nanmean(ppms[not_missed_transit_mask])
+        ppm, ppm_std, ppm_variability = ut.get_mean_and_std_of_mean_two_sigmas_model(data=ppms[valid_transit_mask],
+                                                                                     stds=ppms_stds[valid_transit_mask], mask=None)
+        # ppms_stds[not_missed_transit_mask] = (ppms[not_missed_transit_mask])**2 * (
+        #     (ampls_stds[not_missed_transit_mask])**2 / (ampls[not_missed_transit_mask])**2
+        #     + np.var(flux_trend[not_missed_transit_mask]) / (flux_trend[not_missed_transit_mask])**2)
+        # ppms_stds[not_missed_transit_mask] = ((1 / summed_stat_vars[not_missed_transit_mask] / (flux_trend[not_missed_transit_mask]) ** 2
+        #                                        + np.var(flux_trend[not_missed_transit_mask])
+        #                                        / flux_trend[not_missed_transit_mask] ** 4 * templ_max ** 2 * 1e12) ** 0.5)
     return (ppm,  ppm_std,  ppm_variability, ppms, ppms_stds,
             ampl, ampl_std, ampl_variability, ampls, ampls_stds,
             normalized_ampls, normalized_ampls_stds)

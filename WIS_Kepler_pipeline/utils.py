@@ -1,5 +1,7 @@
 import copy
 import warnings
+
+import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import chi2, norm, binom
 from scipy.special import erfc, erfinv
@@ -349,11 +351,19 @@ def get_mean_and_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
     # std_p is std of the underlying population which may have an additional spread to the measurements
     # mean_p is estimate of the mean of the underlying population
 
-    var_p = np.var(data) * len(data) / (len(data) - 1) - np.mean(variances)
+    if len(data) == 1:
+        var_p = 0
+    else:
+        var_p = np.var(data) * len(data) / (len(data) - 1) - np.mean(variances)
     if var_p < 0:
         var_p = 0
-    mean_p = (np.sum(data / (variances + var_p))) / (np.sum(1 / (variances + var_p)))
-    var_mean_p = 1 / np.sum(1 / (variances + var_p))
+    msk = (variances + var_p) > 0
+    if np.sum(msk.astype(float)) == 0:
+        mean_p = np.nan
+        var_mean_p = np.nan
+    else:
+        mean_p = (np.sum((data / (variances + var_p))[msk])) / (np.sum((1 / (variances + var_p))[msk]))
+        var_mean_p = 1 / np.sum((1 / (variances + var_p))[msk])
     return mean_p, var_mean_p**0.5, var_p**0.5
 
     # # vars = (np.array(stds)**2)[mask]
@@ -2875,6 +2885,8 @@ def select_connected_component(image, center, weights=None, forbid_diagonal=Fals
                     center_weight = weights[coor_boun[0], coor_boun[1]]
                     square_coords_point = [coor for coor in square_coords_point if weights[coor[0], coor[1]] <= center_weight]
                 new_coords_boundary += square_coords_point
+            if len(new_coords_boundary) == 0:  # It can be that no coord passed the weight
+                break
             new_coords_boundary = list(set(new_coords_boundary))
             ncb_reshaped = list(zip(*new_coords_boundary))
             in_image_inds_new_coords_boundary = \

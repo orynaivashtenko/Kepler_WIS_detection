@@ -488,7 +488,10 @@ def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed
                                                              dt_days=target.klc.dt_days,
                                                              indices_of_templates=target.klc.indices_of_templates)
     non_zero_mask = target.klc.summed_vars > 0
-    ampl_est = np.nanmean(target.klc.summed_stats_raw[non_zero_mask] / target.klc.summed_vars[non_zero_mask])
+    if np.sum(non_zero_mask.astype(float)) > 0:
+        ampl_est = np.nanmean(target.klc.summed_stats_raw[non_zero_mask] / target.klc.summed_vars[non_zero_mask])
+    else:
+        ampl_est = np.nan
 
     # Plotting
     with PlotWrapper(target_id=target.target_id, save_fig=save_fig, no_show=no_show, ax=ax, figsize=figsize,
@@ -629,8 +632,11 @@ def plot_snrs_and_wh_fluxes_per_season(target, time_wing_days=Seasonal_plotting_
                                 xlolims=False, xuplims=False, errorevery=1, capthick=None,
                                 label=label, zorder=15)
                     ax.axhline(0, linewidth=Linewidth_zero_level, color='k', zorder=0)
-                    ax.set_xlim(min_time, max_time)
                     ax.legend(loc='upper left', borderpad=0.05, handletextpad=0.05)
+            if min_time != 0 and max_time != 0:
+                for s in range(4):
+                    ax = axs[s // 2, s % 2]
+                    ax.set_xlim(min_time, max_time)
 
             axs[-1, 0].set_xlabel(' ' * 140 + 'Time from mid transit, days')
             axs[-1, 0].set_ylabel(' ' * 40 + ylabel)
@@ -671,10 +677,12 @@ def plot_wh_fluxes_even_odd_from_veto(tce, time_wing_days=Zoom_wing_folded_plots
                 ax.set_xlim(-time_wing_days, time_wing_days)
             axs[0].set_ylabel('Binned normalized \nhigh-passed whitened flux')
             fig.suptitle(get_target_title(tce) + ', Even-odd binned folds, p-val: '
-                         + str(np.round(tce.p_value_even_odd_ampl, 3)), y=1)
+                         + (str(np.round(tce.p_value_even_odd_ampl, 3))
+                            if tce.p_value_even_odd_ampl is not None else 'None'), y=1)
 
 
-def plot_snrs_and_wh_fluxes_even_odd(target, best_temp_folded=None, best_ampls=None,  # only_snr=True,
+def plot_snrs_and_wh_fluxes_even_odd(target,
+                                     best_temp_folded=None, best_ampls=None,  # only_snr=True,
                                      binwid=None, time_wing_days=Zoom_wing_folded_plots,
                                      save_fig=Save_fig, no_show=No_show, figsize=Figsize_even_odd,
                                      # filename_postfix_snr=locs.Even_odd_snr_plot_filename_postfix,
@@ -767,11 +775,12 @@ def plot_snrs_and_wh_fluxes_even_odd(target, best_temp_folded=None, best_ampls=N
                                 temp_number=best_temp_folded, n_time_templ=n_time_templ,
                                 dt_days=dt_days, indices_of_templates=indices_of_templates)
                             # Interpolating the best averaged template
-                            averaged_template = np.interp(bins_time, time_template, averaged_template)
                             averaged_template = - averaged_template / np.linalg.norm(averaged_template)
-                            averaged_template = averaged_template / bins_counts**0.5
+                            averaged_template = np.interp(bins_time, time_template, averaged_template)
+                            # averaged_template[bins_counts > 0] = averaged_template[bins_counts > 0] / (bins_counts[bins_counts > 0])**0.5
+                            # averaged_template[bins_counts == 0] = 0
                             ax.plot(bins_time, averaged_template * best_ampls[i_ax],
-                                    color='r', linewidth=linewidth)
+                                    color='r', linewidth=linewidth, label='Template with\nhigh-pass fit amplitude')
                 ax.set_xlim(-time_wing_days, time_wing_days)
                 ax.axhline(0, linewidth=Linewidth_zero_level, color='k', zorder=0)
                 # ax.legend(loc='upper left')
@@ -779,6 +788,7 @@ def plot_snrs_and_wh_fluxes_even_odd(target, best_temp_folded=None, best_ampls=N
                 # ax.set_title(title + ev_od_label + ' transits')
                 axs[0, i_ax].set_title(ev_od_label + ' transits')
             ax_row[0].set_ylabel(ylabel)
+        axs[0, 1].legend(loc='upper right', fontsize=Fontsize_legend)
         fig.suptitle(get_target_title(target) + ', Even-odd folds around transits', y=1)
 
 
@@ -824,10 +834,13 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         # --------------------------------------------
         # PLOTTING TRIGGER
         axx.axvline(best_score, color='k', linewidth=linewidth,
-                    label=' ' * 13 + r'$SNR^2$=' + str(np.round(np.abs(best_score), 1))
-                          + ',\n' + 'trigger: period=' + str(int(np.round(target.best_per, 0))) + ' d'
-                          + ',\n' + ' ' * 13 + 'duration='
-                          + str(int(np.round(target.templates_durations_hours[target.best_temp], 0))) + ' h')
+                    label=(' ' * 13 + r'$SNR^2$=' + (str(np.round(np.abs(best_score), 1))
+                                                     if best_score is not None else 'None')
+                           + ',\n' + 'trigger: period=' + ((str(int(np.round(target.best_per, 0))) + ' d')
+                                                           if best_score is not None else 'None')
+                           + ',\n' + ' ' * 13 + 'duration='
+                           + ((str(int(np.round(target.templates_durations_hours[target.best_temp], 0))) + ' h')
+                              if best_score is not None else 'None')))
 
         # --------------------------------------------
         # PLOTTING HISTOGRAMS
@@ -1388,10 +1401,15 @@ def plot_transit_info(tce, save_fig=Save_fig, no_show=No_show, plot_output_locat
         #          marker='*', linestyle=':', color='k', linewidth=lw, markersize=1,  # label='snr',
         #          )
         ax.axhline(0, color='k', linewidth=linewidth_zero_level, zorder=2)
-        min_level = np.nanmin(tce.transit_ppms - tce.transit_ppm_stds)
-        max_level = np.nanmax(tce.transit_ppms + tce.transit_ppm_stds)
-        scale = max_level - min_level
-        max_level = max(0, max_level)
+        if (~np.isnan(tce.transit_ppms)).any() and (~np.isnan(tce.transit_ppm_stds)).any():
+            min_level = np.nanmin(tce.transit_ppms - tce.transit_ppm_stds)
+            max_level = np.nanmax(tce.transit_ppms + tce.transit_ppm_stds)
+            scale = max_level - min_level
+            max_level = max(0, max_level)
+        else:
+            min_level = -100.
+            max_level = 0.
+            scale = 100.
 
         texts = []
         len_texts = []
@@ -1507,8 +1525,10 @@ def plot_bg_star_pixels_ppm(tce, save_fig=Save_fig, no_show=No_show, plot_output
         ax.legend(loc='best')
 
         fig.suptitle(get_target_title(tce) + '\nTransit depths of star and background pixels comparison '
-                     + 'p-values of the veto: $p_{total}=$' + str(np.round(tce.p_value_mean_bg_pixels, 3))
-                     + ', $p_{worst}=$' + str(np.round(tce.p_value_worst_bg_pixels, 3)), y=1)
+                     + 'p-values of the veto: $p_{total}=$' + (str(np.round(tce.p_value_mean_bg_pixels, 3))
+                                                               if tce.p_value_mean_bg_pixels is not None else 'None')
+                     + ', $p_{worst}=$' + (str(np.round(tce.p_value_worst_bg_pixels, 3))
+                                           if tce.p_value_worst_bg_pixels is not None else 'None'), y=1)
 
 
 def plot_bg_star_pixels_stats(tce, edge_gap_time=10, save_fig=Save_fig, no_show=No_show,
@@ -1630,8 +1650,9 @@ def plot_centroids_stat_periodic(tce=None, target_id=None,
         ax.plot(ftts_coords[1], stats_2_max_periodic_coords[1], label='Centroid dec', zorder=8)
         ax.plot(ftts_total, stats_2_max_periodic_total, label='Centroid total \ndeviation', zorder=10)
         ax.axvline(ftt_center, color='r', label='$t0$ of the trigger', zorder=0, linewidth=Linewidth_zero_level)
-        ax.axhline(max_centroid_snr_2, linestyle='--', color='k', zorder=1,
-                   label='Detected \ncentroid \ndeviation ' + str(np.round(max_centroid_snr_2, 1)))
+        if max_centroid_snr_2 is not None:
+            ax.axhline(max_centroid_snr_2, linestyle='--', color='k', zorder=1,
+                       label='Detected \ncentroid \ndeviation ' + str(np.round(max_centroid_snr_2, 1)))
 
         ax.set_xlim(ftt_center - ftt_window_plotting, ftt_center + ftt_window_plotting)
         ax.legend(loc=(1.01, 0))
@@ -1670,32 +1691,33 @@ def plot_centroid_coordinates_snr_pieces(target_id, transit_times, centr_coords_
                 max_time = plot_time_wing
             for s in range(4):
                 ax = axs[s, i_coor]
-                if len(times_for_seasons[s]) > 1:
-                    time_total, flux_total, flux2_total, counts_total, flux_total_std = stack_fluxes(
-                        times_centered=times_for_seasons[s], fluxes=snr_for_seasons[s],
-                        masks=[(~np.isclose(x, 0)) & (~np.isnan(x)) for x in snr_for_seasons[s]],
-                        time_wing_days=None, dt=None, tmin=None, tmax=None,
-                        return_std=True, normalize_by_counts=True)
-                else:
-                    time_total = times_for_seasons[s][0]
-                    flux_total = snr_for_seasons[s][0]
-                    flux_total_std = np.zeros_like(flux_total)
-                    counts_total = (~np.isclose(flux_total, 0)).astype(int)
-                for i in range(len(times_for_seasons[s])):
-                    col = (0.6, 0.6, 0.6)
-                    ax.plot(times_for_seasons[s][i][~np.isclose(snr_for_seasons[s][i], 0)],
-                            snr_for_seasons[s][i][~np.isclose(snr_for_seasons[s][i], 0)],
-                            linestyle='', marker='o', markersize=markersize_folds, color=col, zorder=10)
-                col = 'k'
-                ax.errorbar(time_total[counts_total > 0], flux_total[counts_total > 0], yerr=flux_total_std[counts_total > 0],
-                            xerr=None, markersize=markersize_bins, fmt='o', markerfacecolor=col, markeredgecolor=col,
-                            ecolor=col, elinewidth=linewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
-                            xlolims=False, xuplims=False, errorevery=1, capthick=None, zorder=10,
-                            label=None)
-                ax.set_xlim(min_time, max_time)
-                if i_coor == 0:
-                    ax.plot([], [], ' ', label='S'+str(s))
-                    ax.legend(loc='upper left', handlelength=0, handletextpad=0.0)
+                if len(times_for_seasons[s]) > 0:
+                    if len(times_for_seasons[s]) > 1:
+                        time_total, flux_total, flux2_total, counts_total, flux_total_std = stack_fluxes(
+                            times_centered=times_for_seasons[s], fluxes=snr_for_seasons[s],
+                            masks=[(~np.isclose(x, 0)) & (~np.isnan(x)) for x in snr_for_seasons[s]],
+                            time_wing_days=None, dt=None, tmin=None, tmax=None,
+                            return_std=True, normalize_by_counts=True)
+                    else:
+                        time_total = times_for_seasons[s][0]
+                        flux_total = snr_for_seasons[s][0]
+                        flux_total_std = np.zeros_like(flux_total)
+                        counts_total = (~np.isclose(flux_total, 0)).astype(int)
+                    for i in range(len(times_for_seasons[s])):
+                        col = (0.6, 0.6, 0.6)
+                        ax.plot(times_for_seasons[s][i][~np.isclose(snr_for_seasons[s][i], 0)],
+                                snr_for_seasons[s][i][~np.isclose(snr_for_seasons[s][i], 0)],
+                                linestyle='', marker='o', markersize=markersize_folds, color=col, zorder=10)
+                    col = 'k'
+                    ax.errorbar(time_total[counts_total > 0], flux_total[counts_total > 0], yerr=flux_total_std[counts_total > 0],
+                                xerr=None, markersize=markersize_bins, fmt='o', markerfacecolor=col, markeredgecolor=col,
+                                ecolor=col, elinewidth=linewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
+                                xlolims=False, xuplims=False, errorevery=1, capthick=None, zorder=10,
+                                label=None)
+                    ax.set_xlim(min_time, max_time)
+                    if i_coor == 0:
+                        ax.plot([], [], ' ', label='S'+str(s))
+                        ax.legend(loc='upper left', handlelength=0, handletextpad=0.0)
             # ax.set_title('ra' if i_coor == 1 else 'dec', y=0.85, x=0.05, bbox={
             #              'facecolor': 'None', 'edgecolor': 'black', 'boxstyle': 'square,pad=0.1'})
         axs[0, 0].set_title('RA')
@@ -1717,7 +1739,7 @@ def plot_centroid_snr2_seasons(target_id, transit_times, time_total, centr_snr2_
                          zero_lines_linewidth=Linewidth_zero_level) as (fig, axs):
         seasons = np.array(seasons)
         seasons[~np.isnan(seasons)] = seasons[~np.isnan(seasons)].astype(int)
-        seasons_labeled = np.zeros(len(seasons)).astype(bool)
+        seasons_labeled = np.zeros(4).astype(bool)
         for i in range(len(transit_times)):
             season = seasons[i]
             if not np.isnan(season):

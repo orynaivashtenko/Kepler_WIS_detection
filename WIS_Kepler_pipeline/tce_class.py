@@ -3,6 +3,8 @@
 import copy
 import os
 
+import numpy as np
+
 from template_bank.template_module import Durations
 
 core_num = "1"
@@ -526,7 +528,7 @@ class WisTCE(object):
     def get_trigger_star_bg_ppms(self, target_pixels_folder=None,
                                  part_of_flux_peak_threshold=Part_of_flux_peak_threshold,
                                  number_of_pixels_cut=Number_of_pixels_cut, part_of_cumsum_2=Part_of_cumsum_2_targ_pix,
-                                 part_of_light=Part_of_light, period=None, template_index=None, first_transit_time=None,
+                                 part_of_light=Part_of_light, period=None, template_index=None,  # first_transit_time=None,
                                  nsig_outliers_0_neg=Nsig_outliers_0_neg_tests,
                                  nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
                                  save_klcs=False, save_data_to_file=False):
@@ -536,8 +538,8 @@ class WisTCE(object):
             period = self.best_per
         if template_index is None:
             template_index = int(self.best_temp)
-        if first_transit_time is None:
-            first_transit_time = self.best_ftt
+        # if first_transit_time is None:
+        #     first_transit_time = self.best_ftt
 
         target_pixels_folder = af.get_correct_tid_folder(target_id=self.target_id, location=target_pixels_folder)
         pixel_times, target_pixel_fluxes = af.get_target_pixel_data_fun(self.target_id, data_folder=target_pixels_folder,
@@ -554,7 +556,8 @@ class WisTCE(object):
         klcs = []
         for i_flux, fluxes in enumerate([star_part_sap_fluxes, bg_part_sap_fluxes]):
             # making the lightcurve out of this whatever data and doing search:
-            klc = spip.get_minimal_processed_folded_klc(target_id=self.target_id, get_data=False,  # target_id is needed for saving name
+            klc = spip.get_minimal_processed_folded_klc(target_id=self.target_id,
+                                                        search_periodicity=True, get_data=False,  # target_id is needed for saving name
                                                         times=pixel_times, fluxes=copy.deepcopy(fluxes),
                                                         period=period, delta_period=0.2, template_index=template_index,
                                                         cut_edge_nans=False, delete_fulls=False,
@@ -572,43 +575,53 @@ class WisTCE(object):
             ti = 0  # we have only one template initialized, and we
             ti_sh = klc.indices_of_templates[ti][0]
             if klc.indices_of_templates[ti][-1] - klc.indices_of_templates[ti][0] > 1:
-                is_interleaved = True
-                phases = klc._phases_interleaved
+                # is_interleaved = True
+                # phases = klc._phases_interleaved
                 time = klc.time_interleaved
-                statistics_periodic = klc.statistics_periodic_interleaved
+                # statistics_periodic = klc.statistics_periodic_interleaved
                 statistics = klc.statistics_interleaved
                 stat_vars = klc.stat_vars_interleaved
             else:
-                is_interleaved = False
-                phases = klc._phases_not_interleaved
+                # is_interleaved = False
+                # phases = klc._phases_not_interleaved
                 time = klc.time_not_interleaved
-                statistics_periodic = klc.statistics_periodic_not_interleaved
+                # statistics_periodic = klc.statistics_periodic_not_interleaved
                 statistics = klc.statistics_not_interleaved
                 stat_vars = klc.stat_vars_not_interleaved
 
-            # Finding  correlation size:
-            period_index_left, period_index_right = klc.get_influence_period_indices(period=period, part_snr_2=0.5)
-            phase_index_left, phase_index_right = klc.get_influence_phase_indices(first_transit_time=first_transit_time,
-                                                                                  in_interleaved=is_interleaved, part_snr_2=0.3)
+            summed_transit_points = [np.nanargmin(np.abs(time - self.summed_transit_times[i]))
+                                     for i in range(len(self.summed_transit_times))]
+            # # ---------------------------------------------------------------------------------------------------------------
+            # # The following was used before to give some minimixation freedom, but it may lead to incorrect number of transits!
+            # # ---------------------------------------------------------------------------------------------------------------
+            # # Finding  correlation size:
+            # period_index_left, period_index_right = klc.get_influence_period_indices(period=period, part_snr_2=0.5)
+            # phase_index_left, phase_index_right = klc.get_influence_phase_indices(first_transit_time=first_transit_time,
+            #                                                                       in_interleaved=is_interleaved, part_snr_2=0.3)
+            #
+            # # Allow the actual minimum to be a little bit shifted:
+            # # Is it okay that it is independent in star and bg? I think so because maybe the actual minimum in the BG was a bit off,
+            # # and the star caught it in a different time due to its processed. We are interested in what happened in
+            # # the background in the worst case.
+            # # Redefining the best period index with a small freedom:
+            # period_index = period_index_left + np.argmin(np.nanmin(statistics_periodic[period_index_left:period_index_right, 0,
+            #                                                        phase_index_left:phase_index_right], axis=-1))
+            # # Warning: we are taking minima here assuming that the statistics are not squared,
+            # # and that the deviation is actually negative.
+            # # redefining the best phase index with a small freedom:
+            # phase_index = phase_index_left + np.argmin(statistics_periodic[period_index][0][
+            #                                            phase_index_left:phase_index_right])
+            # # -> allow the actual minimum to be a little bit shifted
+            # # !!! This may lead to different number of transit times!
+            # period_new = klc.periods[period_index]
+            # first_transit_time_new = phases[phase_index] + klc.tmin
+            # expected_transit_times = ut.get_transit_times(first_transit_time=first_transit_time_new, period=period_new, max_time=klc.tmax)
+            # # -> I am not sure tmin does not miss some nan in the beginning
+            # summed_transit_points = [np.nanargmin(np.abs(time - expected_transit_times[i])) for i in range(len(expected_transit_times))]
+            # # summed_transit_times = np.array(time[summed_transit_points])
+            #
+            # # ---------------------------------------------------------------------------------------------------------------
 
-            # Allow the actual minimum to be a little bit shifted:
-            # Is it okay that it is independent in star and bg? I think so because maybe the actual minimum in the BG was a bit off,
-            # and the star caught it in a different time due to its processed. We are interested in what happened in
-            # the background in the worst case.
-            # Redefining the best period index with a small freedom:
-            period_index = period_index_left + np.argmin(np.nanmin(statistics_periodic[period_index_left:period_index_right, 0,
-                                                                   phase_index_left:phase_index_right], axis=-1))
-            # Warning: we are taking minima here assuming that the statistics are not squared, and that the deviation is actually negative.
-            # redefining the best phase index with a small freedom:
-            phase_index = phase_index_left + np.argmin(statistics_periodic[period_index][0][
-                                                       phase_index_left:phase_index_right])
-            # -> allow the actual minimum to be a little bit shifted
-            period_new = klc.periods[period_index]
-            first_transit_time_new = phases[phase_index] + klc.tmin
-            expected_transit_times = ut.get_transit_times(first_transit_time=first_transit_time_new, period=period_new, max_time=klc.tmax)
-            # -> I am not sure tmin does not miss some nan in the beginning
-            summed_transit_points = [np.nanargmin(np.abs(time - expected_transit_times[i])) for i in range(len(expected_transit_times))]
-            # summed_transit_times = np.array(time[summed_transit_points])
             summed_raw_stats = statistics[ti][summed_transit_points]
             summed_vars = stat_vars[ti][summed_transit_points]
 
@@ -650,8 +663,10 @@ class WisTCE(object):
         self.bg_valid_transit_mask = (~np.isnan(self.bg_pixels_ppms)) & (~np.isnan(self.bg_pixels_stds_of_ppms)
                                                                          & (self.bg_pixels_stds_of_ppms > 0))
         valid_star_bg_transit_mask = self.star_valid_transit_mask & self.bg_valid_transit_mask
-        if len(np.where(valid_star_bg_transit_mask)[0]) < 3:
+        if len(np.where(valid_star_bg_transit_mask)[0]) < 1:
             self.is_bad_bg_pixels = True
+            self.p_value_mean_bg_pixels = np.nan
+            self.p_value_worst_bg_pixels = np.nan
         else:
             # If everything is fine, then look at the ppm difference of the star and the background pixels:
             diff_ppms = self.star_pixels_ppms - self.bg_pixels_ppms
@@ -685,6 +700,8 @@ class WisTCE(object):
                 false_neg_1 = 1 - (1 - threshold_false_negative_bg_target_pixels_max)**(1 / len(np.where(valid_mask)[0]))
                 if worst_false_neg_single < false_neg_1:
                     self.is_bad_bg_pixels = True
+            else:
+                self.p_value_worst_bg_pixels = 1.
 
     def test_centroid_transits_snr(self, threshold_snr_2=Threshold_centroid_snr_2,
                                    save_byproducts_to_file=False):
@@ -785,9 +802,15 @@ class WisTCE(object):
         """  stats_selected_periodic_coords = [stats[per_ind_left:per_ind_right, :, phase_ind_left:phase_ind_right]
                               for stats in stats_periodic_coords]"""
         snr2_devs_periodic = [stats**2 for stats in stats_selected_periodic_coords]
+        for i in range(len(snr2_devs_periodic)):
+            snr2_devs_periodic[i][np.isnan(snr2_devs_periodic[i])] = - np.inf
+        # -> if something is full of nans, we replace it with minus inf for the ease of computations
+        # In this case, it will have zero maximal template index, we define it to be so:
         max_temps_per_point = [np.nanargmax(stats, axis=1) for stats in snr2_devs_periodic]
         snr2_devs_periodic_max_over_temps = [np.nanmax(stats, axis=1) for stats in snr2_devs_periodic]
-
+        # Now we replace back minus infs with nans:
+        for i in range(len(snr2_devs_periodic_max_over_temps)):
+            snr2_devs_periodic_max_over_temps[i][snr2_devs_periodic_max_over_temps[i] == -np.inf] = np.nan
         snr2_devs_max_tot = snr2_devs_periodic_max_over_temps[0] + snr2_devs_periodic_max_over_temps[1]
         p_ind_max = np.nanargmax(np.nanmax(snr2_devs_max_tot, axis=-1))
         ph_ind_max = np.nanargmax(snr2_devs_max_tot[p_ind_max], axis=-1)
@@ -935,14 +958,24 @@ class WisTCE(object):
                 valid_transit_mask[i] = False
 
             index_in_times = np.searchsorted(concatenated_time, transit_time)
-            if ((not concatenated_kepler_quality_mask[index_in_times])
-                    or (not concatenated_kepler_quality_mask[max(0, index_in_times - 1)])):
-                badness_of_transits[i] += 'kepler_quality '
-                valid_transit_mask[i] = False
+            skip_next = False
+            if index_in_times == len(concatenated_time):
+                if transit_time - np.nanmax(concatenated_time) > 3 * tm.dt_lc:
+                    badness_of_transits[i] += 'out_of_range '
+                    valid_transit_mask[i] = False
+                    skip_next = True
+                else:
+                    index_in_times = len(concatenated_time) - 1
 
-            if np.min(np.abs(earth_pointing_times - transit_time)) < Timing_error_earth_downlink:
-                badness_of_transits[i] += 'downlink '
-                valid_transit_mask[i] = False
+            if not skip_next:
+                if ((not concatenated_kepler_quality_mask[index_in_times])
+                        or (not concatenated_kepler_quality_mask[max(0, index_in_times - 1)])):
+                    badness_of_transits[i] += 'kepler_quality '
+                    valid_transit_mask[i] = False
+
+                if np.min(np.abs(earth_pointing_times - transit_time)) < Timing_error_earth_downlink:
+                    badness_of_transits[i] += 'downlink '
+                    valid_transit_mask[i] = False
 
         self.badness_of_transits = badness_of_transits
         self.valid_transit_mask = valid_transit_mask
@@ -1274,17 +1307,18 @@ class WisTCE(object):
             self.mean_transit_amplitude = np.nan
             self.mean_transit_ppm = np.nan
             self.mean_transit_ppm_std = np.nan
-            self.transit_amplitudes = np.nan
-            self.transit_amplitude_stds = np.nan
-            self.transit_normalized_amplitudes = np.nan
-            self.transit_normalized_amplitude_stds = np.nan
-            self.transit_ppms = np.nan
-            self.transit_ppm_stds = np.nan
+            self.transit_amplitudes = np.nan * np.ones(len(self.summed_transit_times))
+            self.transit_amplitude_stds = np.nan * np.ones(len(self.summed_transit_times))
+            self.transit_normalized_amplitudes = np.nan * np.ones(len(self.summed_transit_times))
+            self.transit_normalized_amplitude_stds = np.nan * np.ones(len(self.summed_transit_times))
+            self.transit_ppms = np.nan * np.ones(len(self.summed_transit_times))
+            self.transit_ppm_stds = np.nan * np.ones(len(self.summed_transit_times))
 
             self.rp_to_rs = np.nan
             self.rp_to_rs_std = np.nan
             self.rp_to_r_earth = np.nan
             self.rp_to_r_earth_std = np.nan
+            self.rp_to_r_earth_std_conservative = np.nan
         else:
             tb = tm.TemplateBank(templates=None, shifts=None, template_index='all', load_essentials=True)
             ti_sh = tb.indices_of_templates[int(self.best_temp)][0]
@@ -1312,21 +1346,25 @@ class WisTCE(object):
             # self.mean_two_noises_model_ppm_std = ut.get_mean_and_std_of_mean_two_sigmas_model(
             #     self.transit_ppm_stds[self.valid_transit_mask])[1]
 
-        ppm_factor = 1e3
-        self.rp_to_rs = - np.sign(self.mean_transit_ppm) * (np.abs(self.mean_transit_ppm)) ** 0.5 / ppm_factor
-        # -> Radius estimation is subjected to big error and bias! The template contains depth factor at least,
-        # and the depth factor can be different even if the same template triggered. And of course, all the
-        # templates have different depth factors for their parameters.
-        self.rp_to_rs_std = self.mean_transit_ppm_std / (2 * np.abs(self.mean_transit_ppm) ** 0.5) / ppm_factor
-        n_samp = len(self.transit_ppm_stds[self.valid_transit_mask])
-        sum_ppm = np.sum(self.transit_ppm_stds[self.valid_transit_mask])
-        sum_var_ppm = np.sum(self.transit_ppm_stds[self.valid_transit_mask] ** 2)
-        # self.rp_to_rs_std = 1 / (2 * self.rp_to_rs) * (np.sum(self.transit_ppm_stds[self.valid_transit_mask] ** 2)
-        #                                                / len(self.transit_ppm_stds[self.valid_transit_mask])) ** 0.5 / 1e3 ???
-        self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
-        self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
-        self.rp_to_r_earth_std_conservative = ((1 / (4 * n_samp) * 1 / sum_ppm * sum_var_ppm) ** 0.5 / ppm_factor
-                                               * self.stellar_radius * R_sun_R_e)
+            ppm_factor = 1e3
+            self.rp_to_rs = - np.sign(self.mean_transit_ppm) * (np.abs(self.mean_transit_ppm)) ** 0.5 / ppm_factor
+            # -> Radius estimation is subjected to big error and bias! The template contains depth factor at least,
+            # and the depth factor can be different even if the same template triggered. And of course, all the
+            # templates have different depth factors for their parameters.
+            self.rp_to_rs_std = self.mean_transit_ppm_std / (2 * np.abs(self.mean_transit_ppm) ** 0.5) / ppm_factor
+            self.rp_to_r_earth = self.rp_to_rs * self.stellar_radius * R_sun_R_e
+            self.rp_to_r_earth_std = self.rp_to_rs_std * self.stellar_radius * R_sun_R_e
+            valid_ppm_stds = self.transit_ppm_stds[self.valid_transit_mask]
+            if not hasattr(valid_ppm_stds, '__len__'):
+                n_samp = 1
+            else:
+                n_samp = len(self.transit_ppm_stds[self.valid_transit_mask])
+            sum_ppm = np.sum(self.transit_ppm_stds[self.valid_transit_mask])
+            sum_var_ppm = np.sum(self.transit_ppm_stds[self.valid_transit_mask] ** 2)
+            # self.rp_to_rs_std = 1 / (2 * self.rp_to_rs) * (np.sum(self.transit_ppm_stds[self.valid_transit_mask] ** 2)
+            #                                                / len(self.transit_ppm_stds[self.valid_transit_mask])) ** 0.5 / 1e3 ???
+            self.rp_to_r_earth_std_conservative = ((1 / (4 * n_samp) * 1 / sum_ppm * sum_var_ppm) ** 0.5 / ppm_factor
+                                                   * self.stellar_radius * R_sun_R_e)
 
     def veto_fold_residuals(self, fn_fold_veto=Fn_fold_veto, ignore_moving_template_shape=True,
                             save_byproducts_to_file=False):
@@ -1768,7 +1806,7 @@ class WisTCE(object):
                 bins_time = bins_time[selection]
                 bins_flux = bins_flux[selection]
                 bins_counts = bins_counts[selection]
-                bins_std = bins_std[selection]
+                # bins_std = bins_std[selection]
                 flux_normalized_vars = np.zeros(len(bins_flux))
                 flux_normalized_vars[bins_counts > 0] = bins_flux[bins_counts > 0] / bins_counts[bins_counts > 0] ** 0.5
 
