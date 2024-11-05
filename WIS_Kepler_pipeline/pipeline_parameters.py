@@ -18,6 +18,13 @@ R_sun_R_e = 109.076  # sun radii to Earth radii
 Default_limb_darkening_coefs = (0.47, 0.23)
 
 
+def get_a_from_p(period, m_1_3_r_s):
+    # a = (G * M /(4*np.pi**2) * (per*24*60*60)**2)**(1/3) / R #3rd Kepler law #in units of R
+    a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * m_1_3_r_s * (
+            M_sun ** (1 / 3) / R_sun)  # 3rd Kepler law #in units of R
+    return a
+
+
 # Way to use the occurrence table:
 def get_occurrence_table_old(stellar_radius):
     """

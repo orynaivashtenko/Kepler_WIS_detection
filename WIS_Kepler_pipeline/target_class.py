@@ -1256,8 +1256,19 @@ class KeplerTarget(object):
                     to_mask = True
             elif mask_bright_candidates:
                 if self.koi_dict['koi_disposition'][i] == 'CANDIDATE' or self.koi_dict['koi_pdisposition'][i] == 'CANDIDATE':
-                    if float(self.koi_dict['koi_max_mult_ev'][i]) >= bright_candidate_mes or \
-                            float(self.koi_dict['koi_max_sngle_ev'][i]) >= bright_candidate_ses:
+                    max_mul = self.koi_dict['koi_max_mult_ev'][i]
+                    try:
+                        max_mul = float(max_mul)
+                    except ValueError:
+                        max_mul = 0.
+
+                    max_sin = self.koi_dict['koi_max_sngle_ev'][i]
+                    try:
+                        max_sin = float(max_sin)
+                    except ValueError:
+                        max_sin = 0.
+
+                    if max_mul >= bright_candidate_mes or max_sin >= bright_candidate_ses:
                         to_mask = True
             # If decided that we need to mask:
             if to_mask:
@@ -1521,8 +1532,7 @@ class KeplerTarget(object):
         self.d_ftt_0 = tm.dt_lc  # Should be taken from KeplerLightCurve._phases, but hopefully, this is correct
         # Preparing densities for renormalizing the integral score
         self.log_baseline_int_score_rate_density = np.log(tm.get_number_of_transiting_planets_density_per_dp(
-            baseline_rate_period, m_1_3_r_s=1., dp=1.
-        ) / baseline_rate_period)
+            baseline_rate_period, m_1_3_r_s=1., dp=1.) / baseline_rate_period)
         # -> the function gives density per dp, and dividing it by the period, we get it also for dt.
 
         self.log_baseline_phase_space_measure = np.log(self.dp_0 * self.d_ftt_0)
@@ -2129,7 +2139,7 @@ class KeplerTarget(object):
                 new_seed = np.random.randint(int(2 ** 30))
                 if seeds_scrambling_run_file is not None:
                     with open(seeds_scrambling_run_file, 'a') as fil:
-                        print(self.target_id, new_seed, file=fil)
+                        print(self.target_id, new_seed, time.strftime("%Y-%m-%d %H:%M:%S"), file=fil)
                 self.klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
                                              min_piece=spip.Min_piece_scrambling, random_seed=new_seed,
                                              regenerate_pieces=False)  # we run many jobs, they will have different pieces
@@ -2515,7 +2525,8 @@ class KeplerTarget(object):
         count_orbit_transiting_relevant_radii = 0
         for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
             # Semi major axis of the orbit in units of R_star
-            a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (M_sun ** (1 / 3) / R_sun)
+            # a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (M_sun ** (1 / 3) / R_sun)
+            a = get_a_from_p(period=period, m_1_3_r_s=self.m_1_3_r_s)
             e_max = min(1 - 2 / a, 0.97)
             assert e_max > 0, 'Semi-major axis is too small or stellar radius is too large!'
             # The eccentricity distribution is normalized to unity in the allowed range.

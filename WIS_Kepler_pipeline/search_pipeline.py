@@ -1406,6 +1406,11 @@ class KeplerLightCurve(object):
         """
         self.big_hole_masks = []
         for q in self.quarters:
+            # Warning: the exclusion of individual points from the regular masks was added after the run_12 main search was done!
+            # It was needed because the individual points in the mask make problems after that, and not always it happens
+            # that the big hole mask individual point removal removes them.,
+            if exclude_individual_points:
+                self.masks[q] *= np.array(~ut.clean_small_holes(np.array(~self.masks[q]), max_hole=1)).astype(bool)
             big_mask = ut.clean_small_holes(np.array(self.masks[q]), max_hole=max_small_hole)
             if exclude_individual_points:
                 big_mask = np.array(~ut.clean_small_holes(np.array(~big_mask), max_hole=1))
@@ -3702,7 +3707,7 @@ class KeplerLightCurve(object):
                                   use_occurrence_rate=True, log_baseline_integral_score_rate=0):
         """
         Calculates the integral score around the best trigger. The integral score is the sum of all the statistics
-        in the period-phase plane arount the specified maximum. The point should really be a maximum because the
+        in the period-phase plane around the specified maximum. The point should really be a maximum because the
         summing indices are selected by the threshold above the background.
         The integral score is combined with the occurrence rate for this period range, so that when different
         periods are compared, it is done according to the prior. Also, integral is really integral, meaning it

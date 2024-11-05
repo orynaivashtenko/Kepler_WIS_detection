@@ -18,11 +18,11 @@ from file_operations import check_number_of_submitted_jobs
 from pipeline_parameters import Run_technical_folder
 
 # ################################################################################################
-# LAUNCH MANAGER WHICH DOES NOT MOVE OR DELETE OUTPUTFILES AND ERRORFILES AND DOES NOT MOVE JOB FILES
+# LAUNCH MANAGER WHICH DOES NOT MOVE OR DELETE OUTPUTFILES AND ERRORFILES AND DOES NOT MOVE JOB FILES (FOR NOW DOES)
 # ################################################################################################
 
 Max_work_time = 6.9 * 24 * 60 * 60  # in seconds; the job in physics-short is killed after 7 days
-Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at a certain time
+Max_jobs_submitted = 9500  # Maximal number of jobs that we can have in bjobs at a certain time
 
 # generate a random number and name the output file accordingly
 # if "Successfully completed." in the output, then delete it
@@ -30,7 +30,7 @@ Max_jobs_submitted = 4950  # Maximal number of jobs that we can have in bjobs at
 queues = Queues_check
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
 
-minutes_between_checks = 10.
+minutes_between_checks = 5.
 timeout_start = time.time()
 time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to start immediately
 while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):
@@ -42,13 +42,18 @@ while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_file
             wc = sum(wcs)
         else:
             wc = wcs
-        for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-            os.system('bsub < ' + os.path.join(Job_files_folder, ff))
-            time.sleep(0.1)
-            os.remove(os.path.join(Job_files_folder, ff))
-            # -> In slides and injections, just remove the submitted job; there are too many of them
+        if wc < Max_jobs_submitted:
+            for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
+                os.system('bsub < ' + os.path.join(Job_files_folder, ff))
+                time.sleep(0.005)
+                os.replace(os.path.join(Job_files_folder, ff), os.path.join(Submitted_jobs_folder, ff))
+                # os.remove(os.path.join(Job_files_folder, ff))
+                # -> In slides and injections, just remove the submitted job; there are too many of them
     else:
-        time.sleep(30)  # sleep 30 seconds if the time to check did not yet come
+        time.sleep(10)  # sleep 30 seconds if the time to check did not yet come
 
+# bsub -q physics-short -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
 # bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
-# bsub -q long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q physics-medium -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q risk -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q long -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py

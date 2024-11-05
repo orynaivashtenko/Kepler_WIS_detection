@@ -94,7 +94,7 @@ def get_red_noise(support, n_vectors=0, dt=tm.dt_lc, psd='saved', return_psd=Fal
 
 def get_simulated_star(n_quarters=14, mean_flux=1e4, sigma_high_rel=1e-4, tmin=131, t_between=1.,
                        inject_planet=False, period=100, first_transit_center=141, rp=0.02, a=215., inc=90., ecc=0., w=90., u1=0.47,
-                       u2=0.23):
+                       u2=0.23, snr_required=None):
     lenquart = int(91 / tm.dt_lc)
     noises = []
     noise, psd = get_red_noise(support=lenquart, n_vectors=0, return_psd=True)
@@ -112,19 +112,26 @@ def get_simulated_star(n_quarters=14, mean_flux=1e4, sigma_high_rel=1e-4, tmin=1
     times = [times[i] + tmin for i in range(len(noises))]
 
     if inject_planet:
-        fluxes, transits = inject_planet_to_data(times=times, fluxes=noises,
-                                                 period=period, first_transit_center=first_transit_center, rp=rp, a=a, inc=inc, ecc=ecc,
-                                                 w=w, u1=u1, u2=u2,
-                                                 supersample_factor=20, return_template=True)
-        transits = [transits[i] * mean_flux
-                    for i in range(len(transits))]
-        snr = 0
-        for transit in transits:
-            # getting expected snr
-            if len(np.where(transit > 0)[0]) > 0:
-                transit = np.roll(transit, -np.argmax(transit))
-                snr_1 = np.sum(np.fft.irfft(np.fft.rfft(transit, norm='ortho') / psd_ortho_there ** 0.5, norm='ortho') ** 2) ** 0.5
-                snr = (snr ** 2 + snr_1 ** 2) ** 0.5
+        snr = None
+        fluxes = None
+        for _ in range(1 if snr_required is None else 2):  # if there is an snr request, do it twice to adjust the snr
+            fluxes, transits = inject_planet_to_data(times=times, fluxes=noises,
+                                                     period=period, first_transit_center=first_transit_center, rp=rp, a=a,
+                                                     inc=inc, ecc=ecc, w=w, u1=u1, u2=u2,
+                                                     supersample_factor=20, return_template=True)
+            transits = [transits[i] * mean_flux
+                        for i in range(len(transits))]
+            snr = 0
+            for transit in transits:
+                # getting expected snr
+                if len(np.where(transit > 0)[0]) > 0:
+                    transit = np.roll(transit, -np.argmax(transit))
+                    snr_1 = np.sum(np.fft.irfft(np.fft.rfft(transit, norm='ortho') / psd_ortho_there ** 0.5, norm='ortho') ** 2) ** 0.5
+                    snr = (snr ** 2 + snr_1 ** 2) ** 0.5
+            if snr_required is None:
+                snr_required = snr
+            rp = rp * (snr_required / snr)**0.5
+
         return times, fluxes, snr
     else:
         return times, noises

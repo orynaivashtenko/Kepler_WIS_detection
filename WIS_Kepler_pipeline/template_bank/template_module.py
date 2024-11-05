@@ -321,7 +321,9 @@ class TemplateBank(object):
         if templates_of_indices_file_dir is None:
             templates_of_indices_file_dir = self.templates_of_indices_file_dir
 
-        for file_dir, value in [[templates_file_dir, self.templates], [shifts_file_dir, self.shifts], [durations_file_dir, self.durations],
+        for file_dir, value in [[templates_file_dir, self.templates],
+                                [shifts_file_dir, self.shifts],
+                                [durations_file_dir, self.durations],
                                 [templates_shifts_file_dir, self.templates_shifts],
                                 [indices_of_templates_file_dir, self.indices_of_templates],
                                 [templates_of_indices_file_dir, self.templates_of_indices]]:

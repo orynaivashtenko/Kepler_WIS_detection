@@ -157,4 +157,4 @@ while (time.time() < timeout_start + Max_work_time) and (
         time.sleep(30)  # sleep 30 seconds if the time to check did not yet come
 
 # bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_main_search.py
-# bsub -q long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_main_search.py
+# bsub -q long -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_main_search.py

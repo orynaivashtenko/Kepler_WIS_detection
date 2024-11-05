@@ -23,6 +23,7 @@ from catalog_functions import write_trigger_table
 from tce_parameters import Catalog_names_properties_dict, Trigger_table_file, Trigger_table_format
 from plotting_functions import plot_all_after_slides_injections, plot_neighbors_maps
 from astropy.table import Table, MaskedColumn
+from locations import Triggers_plots_location
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -63,13 +64,24 @@ for i, name in enumerate(Catalog_names_properties_dict.keys()):
     trigger_table.add_column(col)
 # ---------------------------------------------------------------------------------------------------------------------
 for tid in target_ids:
-    targ = target_class.KeplerTarget(target_id=tid,
-                                     output_location=Output_location, data_location=Data_location,
-                                     load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
-    targ.unpickle_small_attributes()
-    targ.analyze_injections_and_background()
-    targ.pickle_small_attributes()
-    targ.print_dict_file()
+    # ----------------------------------------------
+    # A temporary piece which makes it so that the analysis is not done twice because I thought it will not take so much time
+    plots_folder = str(os.path.join(Triggers_plots_location, tid))
+    neighbor_maps_files = [f for f in os.listdir(plots_folder) if 'neighbors_maps' in f]
+    if len(neighbor_maps_files) > 0:
+        do_analysis = False
+    else:
+        do_analysis = True
+    # ----------------------------------------------
+
+    if do_analysis:
+        targ = target_class.KeplerTarget(target_id=tid,
+                                         output_location=Output_location, data_location=Data_location,
+                                         load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
+        targ.unpickle_small_attributes()
+        targ.analyze_injections_and_background()
+        targ.pickle_small_attributes()
+        targ.print_dict_file()
 
     # Updating the TCE dict:
     tce = tce_class.WisTCE(target_id=tid,
@@ -78,8 +90,9 @@ for tid in target_ids:
                            load_pickled_attributes=False, load_target_attributes=False)
     tce.unpickle_small_attributes(load_target_attributes=True, overwrite_existing_by_target=True,
                                   overwrite_location_parameters=False)
-    tce.pickle_small_attributes()
-    tce.print_dict_file()
+    if do_analysis:
+        tce.pickle_small_attributes()
+        tce.print_dict_file()
 
     # Entering the target ino the trigger table:
     trigger_table.add_row()
@@ -92,10 +105,11 @@ for tid in target_ids:
                 # trigger_table[key][-1] = np.ma.masked
                 trigger_table[key].mask[-1] = True
 
-    plot_all_after_slides_injections(target=targ, save_fig=True, no_show=True)
-    plot_neighbors_maps(tce=tce, save_fig=True, no_show=True)
+    if do_analysis:
+        plot_all_after_slides_injections(target=targ, save_fig=True, no_show=True)
+        plot_neighbors_maps(tce=tce, save_fig=True, no_show=True)
 
 write_trigger_table(trigger_table, file_path=Trigger_table_file, overwrite=True,
                     trigger_table_format=Trigger_table_format, fill_values=None)
 
-# bsub -q short -R "rusage[mem=2GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_calculate_significance.py
+# bsub -q long -R "rusage[mem=6.9GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_calculate_significance.py

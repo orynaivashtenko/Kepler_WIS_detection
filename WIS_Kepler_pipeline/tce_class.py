@@ -266,13 +266,13 @@ class WisTCE(object):
             period = self.best_per
         if first_transit_time is None:
             first_transit_time = self.best_ftt
-        if template is None:
-            template = int(self.best_temp)
-        if data_location is None:
-            data_location = self.data_location
-        if output_location is None:
-            output_location = self.output_location
         if from_real_klc:
+            if data_location is None:
+                data_location = self.data_location
+            if output_location is None:
+                output_location = self.output_location
+            if template is None:
+                template = int(self.best_temp)
             klc = spip.get_fold_quickly(target_id=self.target_id, data_location=data_location,
                                         output_location=output_location, period=period,
                                         overlap_period_bins=0)
@@ -1857,7 +1857,7 @@ class WisTCE(object):
             template_number = int(self.best_temp)
         self.transit_duration_hours = tm.Durations[template_number] * 24.  # in hours
 
-    def get_target_gaia_table(self, file_path=Gaia_trigger_file):
+    def get_target_gaia_table(self, file_path=Gaia_trigger_table_file):
         self.gaia_trigger_file = file_path
         self.gaia_target_table = read_gaia_table_for_target_id(self.target_id, file_path=file_path)
 

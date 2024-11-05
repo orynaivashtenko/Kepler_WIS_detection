@@ -21,7 +21,7 @@ if isinstance(trigger_list_file, list):
 
 with open(trigger_list_file, 'r') as tlf:
     trig_ids = tlf.readlines()
-trig_ids = [tid.split()[0] for tid in trig_ids]
+trig_ids = [tid.split()[Index_tid] for tid in trig_ids]
 
 for tid in trig_ids:
     for i in np.arange(int(N_injections_total // N_injections_chunk)  # how many times we need to repeat

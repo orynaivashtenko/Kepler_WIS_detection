@@ -65,7 +65,7 @@ Gaia_fields = [
 # TECHNICAL PARAMS
 # ################################################################################################
 Pixel_scale = 3.98  # arcsec
-Neighbors_search_radius_pix = 5  # how many pixels around to search for neighbors
+Neighbors_search_radius_pix = 6  # how many pixels around to search for neighbors
 Overlapping_transits_check_radius_pixels = 100
 # ----------------------------------------------------------------------
 # PSF:
@@ -148,7 +148,7 @@ Overlap_timing_error = 0.08  # days  # Error fof defining when our transit overl
 Catalog_names_properties_dict = dict([  # name,
                                         # type, dtype, unit, fill_value, description
     ['target_id',
-     [str,  '<U10', None, 'None', '',
+     [str,  '<U10', None, 'None',
       'Kepler Input Catalog ID of the target star']],
     ['prob_density_planet_not_noise',
      [float, float, 'prob', np.nan,
@@ -343,24 +343,24 @@ Catalog_names_properties_dict = dict([  # name,
     ['prob_density_h1_trigger',
      [float, float, 'prob', np.nan,
       'Probability density for the best_stat value in the expected true planet distribution']],
-    ['is_good_pre_filtering', [bool, bool, '', 'All the tests before the statistical significance estimation were passed']],
-    ['too_few_valid_transits', [bool, bool, '', 'Too few transits of good quality and not nan']],
-    ['is_bad_seasons', [bool, bool, '', 'Too many transits fall in the same season']],
-    ['is_bad_fold_residuals', [bool, bool, '', 'A contaminant was detected in the residuals after folding']],
-    ['is_bad_fold_residuals_fft', [bool, bool, '', 'A contaminant was detected in the fft of residuals after folding']],
-    ['is_bad_fold_residuals_parts', [bool, bool, '', 'Amplitudes of pieces of template after folding are inconsistent']],
-    ['is_bad_fold_parts_time', [bool, bool, '', 'Amplitudes of pieces of template after folding are inconsistent in time domain']],
-    ['is_bad_fold_parts_fourier', [bool, bool, '', 'Amplitudes of pieces of template in Fourier after folding are inconsistent']],
-    ['is_centroid_bad', [bool, bool, '', 'Centroid deviation has a too high SNR']],
-    ['is_bad_bg_pixels', [bool, bool, '',
+    ['is_good_pre_filtering', [bool, bool, '', '', 'All the tests before the statistical significance estimation were passed']],
+    ['too_few_valid_transits', [bool, bool, '', '', 'Too few transits of good quality and not nan']],
+    ['is_bad_seasons', [bool, bool, '', '', 'Too many transits fall in the same season']],
+    ['is_bad_fold_residuals', [bool, bool, '', '', 'A contaminant was detected in the residuals after folding']],
+    ['is_bad_fold_residuals_fft', [bool, bool, '', '', 'A contaminant was detected in the fft of residuals after folding']],
+    ['is_bad_fold_residuals_parts', [bool, bool, '', '', 'Amplitudes of pieces of template after folding are inconsistent']],
+    ['is_bad_fold_parts_time', [bool, bool, '', '', 'Amplitudes of pieces of template after folding are inconsistent in time domain']],
+    ['is_bad_fold_parts_fourier', [bool, bool, '', '', 'Amplitudes of pieces of template in Fourier after folding are inconsistent']],
+    ['is_centroid_bad', [bool, bool, '', '', 'Centroid deviation has a too high SNR']],
+    ['is_bad_bg_pixels', [bool, bool, '', '',
                           'Depth of the transit of light curve made from background pixels is too high compared to the star pixels']],
-    ['is_period_short', [bool, bool, '', 'The best period is shorter than the considered range']],
-    ['is_bad_periodicity', [bool, bool, '', 'The periodicity was found to coincide with a known contaminant']],
-    ['bad_periodicity_reasons', [str, '', '', 'The contaminants that the periodicity was found to coincide with']],
-    ['is_bad_even_odd_ampl', [bool, bool, '', 'The amplitudes of the even and odd transits are inconsistent']],
-    ['is_too_short', [bool, bool, '', 'Was marked as too short data for the search']],
-    ['is_bad_fft', [bool, bool, '', 'Was marked by the pipeline as not quiet enough spectrum']],
-    ['is_koi', [bool, bool, '', 'The star is Kepler object of interest']]
+    ['is_period_short', [bool, bool, '', '', 'The best period is shorter than the considered range']],
+    ['is_bad_periodicity', [bool, bool, '', '', 'The periodicity was found to coincide with a known contaminant']],
+    ['bad_periodicity_reasons', [str, '<U100', '', '', 'The contaminants that the periodicity was found to coincide with']],
+    ['is_bad_even_odd_ampl', [bool, bool, '', '', 'The amplitudes of the even and odd transits are inconsistent']],
+    ['is_too_short', [bool, bool, '', '', 'Was marked as too short data for the search']],
+    ['is_bad_fft', [bool, bool, '', '', 'Was marked by the pipeline as not quiet enough spectrum']],
+    ['is_koi', [bool, bool, '', '', 'The star is Kepler object of interest']]
     ])
 
 Flags = dict([  # name, type, value

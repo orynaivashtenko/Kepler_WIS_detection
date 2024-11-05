@@ -257,13 +257,13 @@ def plot_stats(target, temp_number=None, units='snr', edge_gap_time=10, plot_tri
             statistics = ut.safe_div(statistics, variances ** 0.5, fill_value=0.)
 
         axx.plot(time, statistics, color=color, **kwargs)
-        plt.plot(time[~mask], statistics[~mask], 'o', **masked_points_kwargs, label='masked')
+        plt.plot(time[~mask], statistics[~mask], 'o', **masked_points_kwargs, label='Masked')
 
         if plot_trigger:
             if target.klc.summed_times is not None:
                 plot_vlines(times=target.klc.summed_times, ax=axx)
                 plot_points_at_times(times=[time], values=[statistics], point_times=target.klc.summed_times, ax=axx, **points_kwargs,
-                                     label='transits')
+                                     label='Transits')
 
         if mark_zero:
             axx.axhline(0, linewidth=Linewidth_zero_level, color='k', zorder=0)
@@ -413,12 +413,12 @@ def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=Fals
         # If someone wants to repeat the period two times as it is often done in the literature:
         if plot_twice:
             time_shifts_plotting = [0, target.best_per]
-            labels_binning = ['binning, bin ' + ut.fstr(binwid) + ' days', None]
-            labels_template = ['average per-transit SNR', None]
+            labels_binning = ['Binning, bin ' + ut.fstr(binwid) + ' days', None]
+            labels_template = ['Average per-transit SNR', None]
         else:
             time_shifts_plotting = [0]
-            labels_binning = ['binning, bin ' + ut.fstr(binwid) + ' days']
-            labels_template = ['average per-transit SNR']
+            labels_binning = ['Binning, bin ' + ut.fstr(binwid) + ' days']
+            labels_template = ['Average per-transit SNR']
 
         # Actual plotting:
         for j in range(len(time_shifts_plotting)):
@@ -500,12 +500,12 @@ def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed
         # If someone wants to repeat the period two times as it is often done in the literature:
         if plot_twice:
             time_shifts_plotting = [0, target.best_per]
-            labels_binning = ['binning, bin ' + ut.fstr(binwid) + ' days', None]
-            labels_template = ['average whitened template', None]
+            labels_binning = ['Binning, bin ' + ut.fstr(binwid) + ' days', None]
+            labels_template = ['Average whitened template', None]
         else:
             time_shifts_plotting = [0]
-            labels_binning = ['binning, bin ' + ut.fstr(binwid) + ' days']
-            labels_template = ['average whitened template']
+            labels_binning = ['Binning, bin ' + ut.fstr(binwid) + ' days']
+            labels_template = ['Average whitened template']
 
         # Actual plotting:
         for j in range(len(time_shifts_plotting)):
@@ -785,7 +785,6 @@ def plot_snrs_and_wh_fluxes_even_odd(target,
                 ax.axhline(0, linewidth=Linewidth_zero_level, color='k', zorder=0)
                 # ax.legend(loc='upper left')
                 axs[-1, i_ax].set_xlabel('Time from transit, days')
-                # ax.set_title(title + ev_od_label + ' transits')
                 axs[0, i_ax].set_title(ev_od_label + ' transits')
             ax_row[0].set_ylabel(ylabel)
         axs[0, 1].legend(loc='upper right', fontsize=Fontsize_legend)
@@ -796,6 +795,8 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
                                  fontsize_legend=Fontsize_legend,
                                  fontsize_title=Fontsize_title,
                                  fontsize_label=Fontsize_label,
+                                 fontsize_ticks=Fontsize_label-1,
+                                 dpi=Plots_dpi,
                                  linewidth=Linewidth_p_planet_hist,
                                  use_integral=True, use_clean=True,
                                  ax=None, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
@@ -828,7 +829,7 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         min_plot_mes2 = 0.9 * bins[0]
         max_plot_mes2 = bins[-1] + 0.1 * bins[0]
     # UNIFORMLY FORMATTED PLOT
-    with PlotWrapper(target_id=target.target_id, save_fig=save_fig, no_show=no_show, ax=ax, figsize=figsize,
+    with PlotWrapper(target_id=target.target_id, save_fig=save_fig, no_show=no_show, ax=ax, figsize=figsize, dpi=dpi,
                      filename_postfix=filename_postfix, plot_output_location=plot_output_location, gridspec_kw=None) as (fig, axx):
 
         # --------------------------------------------
@@ -836,7 +837,7 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         axx.axvline(best_score, color='k', linewidth=linewidth,
                     label=(' ' * 13 + r'$SNR^2$=' + (str(np.round(np.abs(best_score), 1))
                                                      if best_score is not None else 'None')
-                           + ',\n' + 'trigger: period=' + ((str(int(np.round(target.best_per, 0))) + ' d')
+                           + ',\n' + 'Trigger: period=' + ((str(int(np.round(target.best_per, 0))) + ' d')
                                                            if best_score is not None else 'None')
                            + ',\n' + ' ' * 13 + 'duration='
                            + ((str(int(np.round(target.templates_durations_hours[target.best_temp], 0))) + ' h')
@@ -845,12 +846,12 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         # --------------------------------------------
         # PLOTTING HISTOGRAMS
         if distr_score_inj_all is not None:
-            axx.stairs(distr_score_inj_all, bins, label='all injections in \nrelative period range', linewidth=linewidth, color=def_cols[0],
+            axx.stairs(distr_score_inj_all, bins, label='All injections in \nrelative period range', linewidth=linewidth, color=def_cols[0],
                        linestyle='--', zorder=10)  # after density correction factor, get per one star
-            axx.stairs(distr_score_inj_success, bins, label='success injections',
+            axx.stairs(distr_score_inj_success, bins, label='Success injections',
                        linewidth=linewidth, color=def_cols[0], linestyle='-', zorder=10)
             # -> after density correction factor, get per one star
-        axx.stairs(distr_score_h0, bins, label='background, scrambling', linewidth=linewidth, color=def_cols[1], zorder=10)
+        axx.stairs(distr_score_h0, bins, label='Background, scrambling', linewidth=linewidth, color=def_cols[1], zorder=10)
 
         # --------------------------------------------
         # PLOTTING CLEAN
@@ -859,7 +860,7 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
                 distr_score_h0_clean = target.distr_int_score_h0_clean
             else:
                 distr_score_h0_clean = target.distr_stat_h0_clean
-            axx.stairs(distr_score_h0_clean, bins, label='background, no trigger\nscrambling',
+            axx.stairs(distr_score_h0_clean, bins, label='Background, no trigger\nscrambling',
                        linewidth=linewidth, color=def_cols[1], linestyle='--', zorder=10)
 
         # --------------------------------------------
@@ -879,7 +880,7 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
             # bin_extra_min = int((bin_extra_min + bin_extra_max) / 2)
             bin_extra_min = bin_extra_min + int(np.abs(bin_extra_min - bin_min_distr) / 2)
             bins_extra = np.linspace(bin_extra_min, bin_extra_max, 10)
-            label = 'extrapolation'
+            label = 'Extrapolation'
             if target.false_alarm_prob_trigger is not None:
                 label += ',\nFAP=' + f"{target.false_alarm_prob_trigger:.2e}"
             axx.plot(bins_extra, np.exp(bins_extra * coefs[1] + coefs[0]), '--', label=label, color=def_cols[1], zorder=10)
@@ -891,11 +892,11 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         else:
             axx.legend(loc='upper right')
 
-        title = 'KID' + target.target_id
+        title = 'KIC' + target.target_id
         if target.injections_period_range is not None:
             title = (title + ', periods ['
                      + str(np.round(target.injections_period_range[0], 1)) + '-'
-                     + str(np.round(target.injections_period_range[1], 1)) + ']'
+                     + str(np.round(target.injections_period_range[1], 1))
                      + '] days')
         if fontsize_title is not None:
             axx.set_title(title, fontsize=fontsize_title)
@@ -916,6 +917,9 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         major_bin_factor = int(np.ceil(((max_plot_mes2 - min_plot_mes2) / (max_n_xlabels - 1)) / minor_grid_bin))
         axx.xaxis.set_major_locator(ticker.MultipleLocator(minor_grid_bin * major_bin_factor))
         # axx.grid(which='both', zorder=0, color=0.7 * np.ones(3), linewidth=0.7)
+        axx.minorticks_off()
+        axx.tick_params(axis='x', labelsize=fontsize_ticks)
+        axx.tick_params(axis='y', labelsize=fontsize_ticks)
 
         if fontsize_legend is not None:
             axx.legend(loc=(1.01, 0), fontsize=fontsize_legend)
@@ -963,35 +967,35 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
         xmax = np.nanmax(pers) + np.nanmin(pers) * 0.1
 
         ax = axs[0]
-        ax.plot(pers, int_scores, color=def_cols[0], linewidth=lw, zorder=4, label='best scores')
+        ax.plot(pers, int_scores, color=def_cols[0], linewidth=lw, zorder=4, label='Best scores')
         ax.plot(short_pers, short_int_scores, color=def_cols[0], linewidth=lw, zorder=4)
-        ax.plot(pers, stats, color=def_cols[1], linewidth=lw_thin, label='best statistics')
+        ax.plot(pers, stats, color=def_cols[1], linewidth=lw_thin, label='Best statistics')
         ax.plot(short_pers, short_stats, color=def_cols[1], linewidth=lw_thin)
-        ax.plot(pers, gauss_stats, color=def_cols[2], linewidth=lw_thin, label='best gaussianized statistics')
+        ax.plot(pers, gauss_stats, color=def_cols[2], linewidth=lw_thin, label='Best gaussianized statistics')
         ax.plot(short_pers, short_gauss_stats, color=def_cols[2], linewidth=1)
         ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline)
         ax.set_xticks(xticks)
         ax.set_xlabel('Period, days')
         ax.set_ylabel('Statistic, $SNR^2$')
         ax.set_xlim(xmin, xmax)
-        ax.axvline(Per_min_candidate, zorder=0, color='k', linewidth=lw_vline, linestyle='--', label='min period candidate')
+        ax.axvline(Per_min_candidate, zorder=0, color='k', linewidth=lw_vline, linestyle='--', label='Min period candidate')
         ax.legend(loc='best')
 
         ax = axs[1]
         durs_plot = [Durations[int(temp)] if not np.isnan(temp) else np.nan for temp in temps]
-        ax.plot(pers, durs_plot, color=def_cols[0], linewidth=lw, zorder=2, label='best templates')
+        ax.plot(pers, durs_plot, color=def_cols[0], linewidth=lw, zorder=2, label='Best templates')
         durs_plot = [Durations[int(temp)] if not np.isnan(temp) else np.nan for temp in short_temps]
         ax.plot(short_pers, durs_plot, color=def_cols[0], linewidth=2, zorder=100)
-        ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline, label='trigger period')
+        ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline, label='Trigger period')
         ax.set_xticks(xticks)
         ax.set_xlabel('Period, days')
         ax.set_ylabel('Template Duration, days')
         ax.set_xlim(xmin, xmax)
-        ax.axvline(Per_min_candidate, zorder=0, color='k', linewidth=lw_vline, linestyle='--', label='min period candidate')
+        ax.axvline(Per_min_candidate, zorder=0, color='k', linewidth=lw_vline, linestyle='--', label='Min period candidate')
         ax.legend(loc='best')
 
         ax = axs[2]
-        ax.plot(pers, (ftts - np.nanmin(short_ftts)) / pers, color=def_cols[0], linewidth=lw, zorder=2, label='best first transit phases')
+        ax.plot(pers, (ftts - np.nanmin(short_ftts)) / pers, color=def_cols[0], linewidth=lw, zorder=2, label='Best first transit phases')
         ax.plot(short_pers, (short_ftts - np.nanmin(short_ftts)) / short_pers, color=def_cols[0], linewidth=2, zorder=100)
         ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline)
         ax.set_xlabel('Period, days')
@@ -999,7 +1003,7 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
         ax.set_ylabel('First transit phase')
         ax.set_xlim(xmin, xmax)
         ax.set_ylim(-0.1, 1.2)
-        ax.axvline(Per_min_candidate, zorder=0, color='k', linewidth=lw_vline, linestyle='--', label='min period candidate')
+        ax.axvline(Per_min_candidate, zorder=0, color='k', linewidth=lw_vline, linestyle='--', label='Min period candidate')
         ax.legend(loc='best')
         fig.suptitle('Periodogram of maximized scores\n' + get_target_title(tce), y=1)
 
@@ -1080,7 +1084,7 @@ def plot_folding_residuals_histograms(tce=None, target_id=None, output_location=
         axx.axvline(limit_line_resid, color=def_cols[1], zorder=1,
                     linestyle='-', linewidth=lw, label='Threshold')
         axx.set_yscale('log')
-        axx.set_xlabel('Residual squared', fontsize=fontsize_label)
+        axx.set_xlabel('Residual score squared', fontsize=fontsize_label)
         axx.set_ylabel('Probability density', fontsize=fontsize_label)
         title = 'Residuals of the folded flux distribution KIC' + target_id
         fig.suptitle(title, fontsize=fontsize_title, y=1)
@@ -1138,7 +1142,7 @@ def plot_fold_veto_parts(tce, save_fig=Save_fig, no_show=No_show, plot_output_lo
                                 ((ampls_parts[i_temp] + ampls_stds_parts[i_temp]) * temp_plot),
                                 alpha=0.5, color=def_cols[i_temp % 10])
             ax.set_xlabel('Time from the transit center, days')
-            ax.set_title('p-values: $p_{total}=$' + str(np.round(tce.veto_fold_parts_results[i][1], 3))
+            ax.set_title(r'$p$' + '-values: $p_{total}=$' + str(np.round(tce.veto_fold_parts_results[i][1], 3))
                          + ', $p_{worst}=$' + str(np.round(tce.veto_fold_parts_results[i][2], 3)),
                          y=0.9, bbox={'facecolor': 'white', 'edgecolor': 'None', 'boxstyle': 'square,pad=0.11'},
                          fontsize=Fontsize)
@@ -1193,6 +1197,11 @@ def plot_injections_corners(target, save_fig=Save_fig, no_show=No_show, plot_out
     for key in pars_dict.keys():
         pars_dict[key][0] = np.array(pars_dict[key][0])[mask_not_nan_success]
         pars_dict[key][1] = np.array(pars_dict[key][1])[mask_not_nan_bad]
+
+    # Add a little noise because sometimes all the bad scores are from the same place in the sata, then all these
+    # values are equal, and then corner plot is not satisfied:
+    pars_dict['dur_retr'][1] += np.random.normal(0, 0.0001, len(pars_dict['dur_retr'][1]))
+    pars_dict['ftt_retr'][1] += np.random.normal(0, 0.0001, len(pars_dict['ftt_retr'][1]))
 
     for keys_corner, fig_name_postfix in [
             [['inc_inj', 'ecc_inj', 'w_inj', 'rp_inj', 'dur_inj', 'int_score_retr'],
@@ -1319,10 +1328,10 @@ def plot_injections_radii_durations_score(target, save_fig=Save_fig, no_show=No_
         ax = axs[0]
         durs = np.array(target.dur_inj_bad)
         scors = np.array(target.retrieved_int_score_bad)
-        ax.scatter(durs, scors, s=ms_small, color=color_bad, label='bad')
+        ax.scatter(durs, scors, s=ms_small, color=color_bad, label='Bad')
         durs = np.array(target.dur_inj_success)
         scors = np.array(target.retrieved_int_score_success)
-        ax.scatter(durs, scors, s=ms_small, color=color_all, label='all success')
+        ax.scatter(durs, scors, s=ms_small, color=color_all, label='All success')
 
         rps = np.array(target.rp_inj_success) * target.stellar_radius * pp.R_sun_R_e
         rps_sorted = np.sort(rps)
@@ -1349,10 +1358,10 @@ def plot_injections_radii_durations_score(target, save_fig=Save_fig, no_show=No_
 
         rps = np.array(target.rp_inj_bad) * target.stellar_radius * pp.R_sun_R_e
         scors = np.array(target.retrieved_int_score_bad)
-        ax.scatter(rps, scors, s=ms_small, color=color_bad, label='bad')
+        ax.scatter(rps, scors, s=ms_small, color=color_bad, label='Bad')
         rps = np.array(target.rp_inj_success) * target.stellar_radius * pp.R_sun_R_e
         scors = np.array(target.retrieved_int_score_success)
-        ax.scatter(rps, scors, s=ms_small, color=color_all, label='all success')
+        ax.scatter(rps, scors, s=ms_small, color=color_all, label='All success')
 
         durs = np.array(target.dur_inj_success)
         durs_sorted = np.sort(durs)
@@ -1360,9 +1369,9 @@ def plot_injections_radii_durations_score(target, save_fig=Save_fig, no_show=No_
         dur_low = np.ceil(durs_sorted[np.searchsorted(part, part_points_highlight)]*1000)/1000  # ceil with decimals
         dur_high = np.round(durs_sorted[np.searchsorted(part, 1 - part_points_highlight)], 3)
         inds_selection = (durs <= dur_low)
-        ax.scatter(rps[inds_selection], scors[inds_selection], s=ms_big, color=color_low, label='dur < ' + str(dur_low) + ' d')
+        ax.scatter(rps[inds_selection], scors[inds_selection], s=ms_big, color=color_low, label=r'$dur$' + ' < ' + str(dur_low) + ' d')
         inds_selection = (durs >= dur_high)
-        ax.scatter(rps[inds_selection], scors[inds_selection], s=ms_big, color=color_high, label='dur > ' + str(dur_high) + ' d')
+        ax.scatter(rps[inds_selection], scors[inds_selection], s=ms_big, color=color_high, label=r'$dur$' + ' > ' + str(dur_high) + ' d')
 
         ax.axhline(50, color='k', linewidth=Linewidth_grid)
         ax.axhline(70, color='k', linewidth=Linewidth_grid)
@@ -1442,7 +1451,7 @@ def plot_transit_info(tce, save_fig=Save_fig, no_show=No_show, plot_output_locat
             col = def_cols[int(seasons[i])] if not np.isnan(seasons[i]) else 'k'
             ax.plot([tce.summed_transit_times[i]], [tce.transit_ppms[i]],
                     marker='o', linestyle='', color=col,
-                    markersize=markersize, label='depth' if i == 0 else None, zorder=20)
+                    markersize=markersize, label='Depth' if i == 0 else None, zorder=20)
             text = texts[i]
             if len(text) > 0:
                 text = '\n'.join(text.split())
@@ -1465,7 +1474,7 @@ def plot_transit_info(tce, save_fig=Save_fig, no_show=No_show, plot_output_locat
         ax.set_ylabel('Depth of transits, ppm')
         ax2.set_ylabel('SES of transits, SNR')
         ax.axhline(0, linewidth=linewidth_zero_level, color='k')
-        ax.bar([], [],  color=def_cols[0], alpha=0.3, width=bar_width, label='snr')
+        ax.bar([], [],  color=def_cols[0], alpha=0.3, width=bar_width, label='SNR')
         ax.legend(loc='best')
 
         fig.suptitle('Transit depths, SNRs and flags \n' + get_target_title(tce), y=1)
@@ -1487,14 +1496,14 @@ def plot_bg_star_pixels_ppm(tce, save_fig=Save_fig, no_show=No_show, plot_output
         lwt = linewidth_thin
         if tce.transit_ppms is not None:
             ax.errorbar(tce.summed_transit_times + 0.025 * tce.best_per, tce.transit_ppms, yerr=tce.transit_ppm_stds,
-                        marker='o', linestyle=':', color=def_cols[2], label='search', markersize=markersize,
+                        marker='o', linestyle=':', color=def_cols[2], label='Kepler aperture', markersize=markersize,
                         capsize=3, linewidth=lwt, elinewidth=lw, capthick=lw)
 
         ax.errorbar(tce.summed_transit_times, tce.star_pixels_ppms, yerr=tce.star_pixels_stds_of_ppms,
-                    marker='o', linestyle=':', color=def_cols[0], label='star', markersize=markersize,
+                    marker='o', linestyle=':', color=def_cols[0], label='Central pixels', markersize=markersize,
                     capsize=3, linewidth=lwt, elinewidth=lw, capthick=lw)
         ax.errorbar(tce.summed_transit_times+0.05 * tce.best_per, tce.bg_pixels_ppms, yerr=tce.bg_pixels_stds_of_ppms,
-                    marker='o', linestyle=':', color=def_cols[1], label='bg', markersize=markersize,
+                    marker='o', linestyle=':', color=def_cols[1], label='BG pixels', markersize=markersize,
                     capsize=3, linewidth=lwt, elinewidth=lw, capthick=lw)
 
         ax.set_xlabel('Transit time, days')
@@ -1512,11 +1521,11 @@ def plot_bg_star_pixels_ppm(tce, save_fig=Save_fig, no_show=No_show, plot_output
             seasons_plot[seasons == i] += sh_step * np.arange(-n_points / 2., n_points / 2 + 1., 1)[:n_points]
             # seasons_plot[seasons == i] += (i % 2) * sh_step / 3
         ax.errorbar(tce.star_pixels_ppms, seasons_plot, xerr=tce.star_pixels_stds_of_ppms,
-                    marker='o', linestyle='', markersize=markersize, label='star', linewidth=lwt,
+                    marker='o', linestyle='', markersize=markersize, label='Central pixels', linewidth=lwt,
                     capsize=3, elinewidth=lw, capthick=lw)
         seasons_plot += 0.25
         ax.errorbar(tce.bg_pixels_ppms, seasons_plot, xerr=tce.bg_pixels_stds_of_ppms,
-                    marker='o', linestyle='', markersize=markersize, label='bg', linewidth=lwt,
+                    marker='o', linestyle='', markersize=markersize, label='BG pixels', linewidth=lwt,
                     capsize=3, elinewidth=lw, capthick=lw)
         ax.set_yticks([0, 1, 2, 3])
         ax.set_xlabel('Depth of transits, ppm')
@@ -1525,8 +1534,8 @@ def plot_bg_star_pixels_ppm(tce, save_fig=Save_fig, no_show=No_show, plot_output
         ax.legend(loc='best')
 
         fig.suptitle(get_target_title(tce) + '\nTransit depths of star and background pixels comparison '
-                     + 'p-values of the veto: $p_{total}=$' + (str(np.round(tce.p_value_mean_bg_pixels, 3))
-                                                               if tce.p_value_mean_bg_pixels is not None else 'None')
+                     + r'$p$' + '-values of the veto: $p_{total}=$' + (str(np.round(tce.p_value_mean_bg_pixels, 3))
+                                                                       if tce.p_value_mean_bg_pixels is not None else 'None')
                      + ', $p_{worst}=$' + (str(np.round(tce.p_value_worst_bg_pixels, 3))
                                            if tce.p_value_worst_bg_pixels is not None else 'None'), y=1)
 
@@ -1563,9 +1572,9 @@ def plot_bg_star_pixels_stats(tce, edge_gap_time=10, save_fig=Save_fig, no_show=
                 temp_index=temp_num_local, indices_of_templates=indices_of_templates, shift_reduction='minimize', renormalize=True)
 
             ax.plot(time_full, statistic_full, color=def_cols[i_flux], alpha=0.7, linewidth=Linewidth_coarse,
-                    label='star' if i_flux == 0 else 'bg')
+                    label='Star pixels' if i_flux == 0 else 'BG pixels')
             plt.plot(time_full[~stat_mask_full], statistic_full[~stat_mask_full], 'o',
-                     color='k', markersize=1, label='masked' if i_flux == 1 else None,)
+                     color='k', markersize=1, label='Masked' if i_flux == 1 else None,)
 
         if transit_times is not None:
             for i_tt, tt in enumerate(transit_times):
@@ -1606,9 +1615,9 @@ def plot_centroid_full_stats(tce, edge_gap_time=10, save_fig=Save_fig, no_show=N
                 temp_index=temp, indices_of_templates=indices_of_templates, shift_reduction='minimize', renormalize=True)
 
             ax.plot(time_full, statistic_full, color=def_cols[i_flux], alpha=0.7, linewidth=Linewidth_coarse,
-                    label='ra' if i_flux == 0 else 'dec')
+                    label='RA' if i_flux == 0 else 'Dec')
             plt.plot(time_full[~stat_mask_full], statistic_full[~stat_mask_full], 'o',
-                     color='k', markersize=1, label='masked' if i_flux == 1 else None,)
+                     color='k', markersize=1, label='Masked' if i_flux == 1 else None,)
 
         if transit_times is not None:
             for i_tt, tt in enumerate(transit_times):
@@ -1620,7 +1629,7 @@ def plot_centroid_full_stats(tce, edge_gap_time=10, save_fig=Save_fig, no_show=N
         ylabel = 'SES statistics [SNR]'
         ax.set_ylabel(ylabel)
         title = get_target_title(tce, score=None, per=None, temp=temp_number)
-        ax.set_title(title + '\n RA and DEC of centroid single-transit statistics')
+        ax.set_title(title + '\n RA and Dec of centroid single-transit statistics')
         ax.legend(loc='upper right')
 
 
@@ -1646,8 +1655,8 @@ def plot_centroids_stat_periodic(tce=None, target_id=None,
     with PlotWrapper(target_id=target_id, save_fig=save_fig, no_show=no_show, ax=None, figsize=figsize,
                      filename_postfix=filename_postfix, plot_output_location=plot_output_location,
                      grid=True) as (fig, ax):
-        ax.plot(ftts_coords[0], stats_2_max_periodic_coords[0], label='Centroid ra', zorder=6)
-        ax.plot(ftts_coords[1], stats_2_max_periodic_coords[1], label='Centroid dec', zorder=8)
+        ax.plot(ftts_coords[0], stats_2_max_periodic_coords[0], label='Centroid RA', zorder=6)
+        ax.plot(ftts_coords[1], stats_2_max_periodic_coords[1], label='Centroid Dec', zorder=8)
         ax.plot(ftts_total, stats_2_max_periodic_total, label='Centroid total \ndeviation', zorder=10)
         ax.axvline(ftt_center, color='r', label='$t0$ of the trigger', zorder=0, linewidth=Linewidth_zero_level)
         if max_centroid_snr_2 is not None:
@@ -1721,7 +1730,7 @@ def plot_centroid_coordinates_snr_pieces(target_id, transit_times, centr_coords_
             # ax.set_title('ra' if i_coor == 1 else 'dec', y=0.85, x=0.05, bbox={
             #              'facecolor': 'None', 'edgecolor': 'black', 'boxstyle': 'square,pad=0.1'})
         axs[0, 0].set_title('RA')
-        axs[0, 1].set_title('DEC')
+        axs[0, 1].set_title('Dec')
 
         axs[-1, 0].set_xlabel(' ' * 140 + 'Time from the transit, days')
         axs[-2, 0].set_ylabel(' ' * 20 + 'SNR of centroid deviation')
@@ -1783,7 +1792,7 @@ def plot_centroid_coordinates_cloud(target_id, transit_times, centr_coords_snr_n
                 seasons_labeled[season] = True
         ax.legend(loc='best', borderpad=0.05, handletextpad=0.05)
         ax.set_xlabel('SNR of RA of centroid deviation')
-        ax.set_ylabel('SNR of DEC of centroid deviation')
+        ax.set_ylabel('SNR of Dec of centroid deviation')
         ax.set_aspect('equal')
         max_lim = np.max(np.abs(np.array(list(ax.get_xlim()) + list(ax.get_ylim()))))
         ax.set_xlim(-max_lim, max_lim)
@@ -1885,7 +1894,10 @@ def plot_all_after_slides_injections(tce=None, target=None, save_fig=Save_fig, n
 def plot_neighbors_maps(tce, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
                         figsize=Figsize_neighbors_maps_quarters,
                         filename_postfix=locs.Neighbors_maps_plot_filename_postfix,
-                        ms_target=18, ms_neighbors=6, ms_kois=3):
+                        ms_target=18, ms_neighbors=6, ms_kois=3,
+                        neighbors_file_path=None, neighbors_file_name=None,
+                        neighbors_folder=locs.Neighbors_folder, gaia_trigger_table_file=locs.Gaia_trigger_table_file
+                        ):
     import warnings
     from catalog_functions import test_gaia_table
     from auxiliary_functions import get_orig_quarters, get_target_pixel_sky_coords_fun, get_splitted_saps_from_pixels
@@ -1895,9 +1907,10 @@ def plot_neighbors_maps(tce, save_fig=Save_fig, no_show=No_show, plot_output_loc
     # Mark in which quarters it had transits!
 
     if tce.gaia_target_table is None:
-        tce.get_target_gaia_table()
+        tce.get_target_gaia_table(file_path=gaia_trigger_table_file)
     if tce.neighbors_table is None:
-        tce.get_neighbors_info()
+        tce.get_neighbors_info(neighbors_file_path=neighbors_file_path, neighbors_file_name=neighbors_file_name,
+                               neighbors_folder=neighbors_folder)
     if tce.neighboring_kois is None:
         tce.check_neighboring_koi()
     trigger_table_gaia = tce.gaia_target_table
@@ -1976,9 +1989,9 @@ def plot_neighbors_maps(tce, save_fig=Save_fig, no_show=No_show, plot_output_loc
             ax.set_aspect(aspect)
             ax.set_title('Q' + str(q_orig) + ', '+str(int(n_trans_in_q))+' transits', y=0.92, x=0.2, fontsize=Fontsize_legend)
             if ax_row == 3:
-                ax.set_xlabel('ra, deg')
+                ax.set_xlabel('RA, deg')
             if ax_col == 0:
-                ax.set_ylabel('dec, deg')
+                ax.set_ylabel('Dec, deg')
         for q in range(1, 17):
             if np.sum(np.isclose(np.abs(orig_quarters - q), 0)) == 0:
                 ax_row = (q - 1) // 4
@@ -1988,7 +2001,7 @@ def plot_neighbors_maps(tce, save_fig=Save_fig, no_show=No_show, plot_output_loc
         # ax.set_aspect(1 / np.cos(dec_tid / 180 * np.pi), adjustable='datalim')
         ax = fig.add_axes([0.05, 0.95, 0.9, 0.04], frame_on=False)
         ax.axis('off')
-        plt.colorbar(mpbl, ax=ax, aspect=90, label='log10 flux', orientation='horizontal')
+        plt.colorbar(mpbl, ax=ax, aspect=90, label=r'$log_{10}$' + ' flux', orientation='horizontal')
         fig.suptitle(get_target_title(tce) + '\nTarget pixel maps for quarters with neighboring stars', y=1., fontsize=Fontsize_title)
 
 
@@ -2124,11 +2137,11 @@ def plot_neighbors_pixel_map_from_tables(
                             np.concatenate((positions[1], [positions[1][0]])), color=def_cols[3],
                             linestyle='--', linewidth=0.7, zorder=10)
     if add_colorbar:
-        plt.colorbar(mpbl, ax=ax, aspect=40, label='log10 flux')
+        plt.colorbar(mpbl, ax=ax, aspect=40, label=r'$log_{10}$' + ' flux')
 
     # ----------------------------------------------------------------------------
     # Plotting the target:
-    ax.plot([ra_tid], [dec_tid], marker='o', linestyle='', color=def_cols[9], markersize=ms_t, label='target', zorder=20)
+    ax.plot([ra_tid], [dec_tid], marker='o', linestyle='', color=def_cols[9], markersize=ms_t, label='Target', zorder=20)
     flux_target = trigger_table_gaia['phot_g_mean_flux'][0]
 
     # ----------------------------------------------------------------------------
@@ -2142,7 +2155,7 @@ def plot_neighbors_pixel_map_from_tables(
     suspicious_labeled = False
     for i_n in range(len(neighbors_table)):
         ra_1, dec_1 = neighbors_table['ra'][i_n], neighbors_table['dec'][i_n]
-        ax.plot([ra_1], [dec_1], 'o', color=cols[i_n], markersize=sizes[i_n], label='neighbors' if i_n == 0 else None,
+        ax.plot([ra_1], [dec_1], 'o', color=cols[i_n], markersize=sizes[i_n], label='Neighbors' if i_n == 0 else None,
                 zorder=23)
         # Plotting the direction to each neighbor:
         # ax.plot([ra_tid, ra_1], [dec_tid, dec_1], '--', color='k', linewidth=0.5)
@@ -2159,7 +2172,7 @@ def plot_neighbors_pixel_map_from_tables(
                 flag += reasons_dict_plot[reasons_bad[i_m]] + '\n '
         if flag != '':
             ax.plot([ra_1], [dec_1], 'x', color='k', markersize=sizes[i_n],
-                    label='suspicious' if (not suspicious_labeled) else None, zorder=28)
+                    label='Suspicious' if (not suspicious_labeled) else None, zorder=28)
             suspicious_labeled = True
             ax.text(ra_1, dec_1 - 2e-4, str(flag), fontsize=9, color='k', zorder=30, ha='center', va='top')
 
@@ -2167,8 +2180,8 @@ def plot_neighbors_pixel_map_from_tables(
         plot_circular_grid(ax=ax, center=(ra_tid, dec_tid), dr=pix_scale_degrees, r_max=plot_radius_pix*Pix_scale_degrees)
 
     if set_axes_labels:
-        ax.set_xlabel('ra, deg')
-        ax.set_ylabel('dec, deg')
+        ax.set_xlabel('RA, deg')
+        ax.set_ylabel('Dec, deg')
     ax.legend(fontsize=8, loc='upper right')
     ax.set_title(tid, fontsize=14)
     ax.set_ylim(min_dec, max_dec)

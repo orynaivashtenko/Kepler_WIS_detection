@@ -57,7 +57,7 @@ def load_triggers_unique(file, sep=' '):
         inds = np.where(np.array(target_ids) == tid)[0]
         if len(inds) > 1:
             inds = [ind for ind in inds if (~np.isnan(integral_scores[ind])) and (~np.isnan(stats[ind]))]
-        inds_selection.append(inds[-1])
+        inds_selection.append(inds[-1])  # Take the last one because all the saved files are consistent with it
     target_ids = target_ids[inds_selection]
     integral_scores = integral_scores[inds_selection]
     stats = stats[inds_selection]

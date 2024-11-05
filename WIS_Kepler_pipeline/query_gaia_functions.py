@@ -57,7 +57,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import numpy as np
 from tce_parameters import (Pixel_scale, Neighbors_search_radius_pix, Gaia_fields, Neighbors_folder,
-                            Gaia_trigger_table_filename)
+                            Gaia_trigger_table_file)
 
 from astropy import units
 from astropy.coordinates import SkyCoord
@@ -126,7 +126,7 @@ def get_gaia_id_from_gaia_kepler_crossmatch(tid_list, only_if_found=False):
 
 
 def get_gaia_table_for_kepler_id(tid_list, write_to_file=False,
-                                 file_path=Gaia_trigger_table_filename, overwrite_file=True):
+                                 file_path=Gaia_trigger_table_file, overwrite_file=True):
     tid_list = ensure_list_str(tid_list)
     gaia_id_list, failed_tids_info = query_gaia_id_for_kepler_id(tid_list)
     failed_tids = [e[:9] for e in failed_tids_info]

@@ -20,7 +20,8 @@ from pipeline_parameters import (Best_scrambled_periodic_scores_filename_postfix
                                  Threshold_g_crossing_scrambled_list_filename,
                                  Threshold_crossing_scrambled_list_multiple_triggers_filename,
                                  Threshold_g_crossing_scrambled_list_multiple_triggers_filename,
-                                 Seeds_scrambling_run_file)
+                                 Seeds_scrambling_run_file,
+                                 Problems_folder_scrambled)
 import traceback
 
 import argparse
@@ -30,11 +31,13 @@ args = parser.parse_args()
 Target_id = args.target_id[0]
 
 targ = target_class.KeplerTarget(target_id=Target_id,
-                                 load_pickled_attributes=False)  # all the arguments are set to the defaults of the class
+                                 load_pickled_attributes=False,
+                                 problems_folder=Problems_folder_scrambled)  # all the arguments are set to the defaults of the class
 # targ.clean_output_directory()
 
 if not targ.is_good_for_processing:  # is villanova binary or is not in Gaia
-    targ.print_dict_file()
+    # targ.print_dict_file()
+    pass
 else:  # for now, run the search only if it is not a villanova binary
     try:
         targ.run_main_search(

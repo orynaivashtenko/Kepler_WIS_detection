@@ -58,6 +58,7 @@ for ii in range(len(trig_ids)):
                            arg_jobind=False,
                            other_args=[['target_id', tid], ['period', per]])
 
+# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py
 # bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers_for_slides_injections.txt
 # bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py --trigger_list_file /home/labs/barakz/orynai/run_11/threshold_crossing_scrambled_triggers_to_slide.txt
 # bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides.py --trigger_list_file /home/labs/barakz/Collaboration-Kepler/orynai/triggers_global_slides_to_slide_rerun.txt

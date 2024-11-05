@@ -18,14 +18,12 @@ if Working_place is None:
         Working_place = 'WEXAC'
 
 # Definitions for Home:
-Data_location = os.path.join(os.getcwd(), 'light_curves')  # in this directory, a file named after target_id will be created
-Output_location = os.path.join(os.getcwd(), 'outputs')  # in this directory, a file named after target_id will be created
+Data_location = '/Users/orynai/Work/Kepler_Project/KeplerDataLocal'  # in this directory, a file named after target_id will be created
+Target_pixels_location = '/Users/orynai/Work/Kepler_Project/KeplerTargetPixelsLocal'
+Run_outputs_folder = '/Users/orynai/Work/Kepler_Project/run_12_local'
+Output_location = os.path.join(Run_outputs_folder, 'output_' + str(Run_name))
 Triggers_plots_location = os.path.join(os.getcwd(), 'triggers_outputs')
-Target_pixels_location = os.path.join(os.getcwd(), 'target_pixels')
-Run_outputs_folder = os.path.join(os.getcwd(), 'outputs')
-Trigger_lists_folder = Run_outputs_folder
-Problems_folder = None
-Kepler_files_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'KeplerFiles')
+Run_technical_folder = Run_outputs_folder
 
 if Working_place == 'Home':
     pass
@@ -34,25 +32,28 @@ if Working_place == 'Marvin':
     Data_location = '/Collaboration-Kepler/KeplerData'
     Target_pixels_location = '/Collaboration-Kepler/KeplerTargetPixels'
     Run_outputs_folder = '/Collaboration-Kepler/orynai/' + str(Run_name)
-    Output_location = os.path.join(Run_outputs_folder, 'output_' + str(Run_name))
-    Triggers_plots_location = os.path.join(Run_outputs_folder, 'triggers_plots_' + str(Run_name))
-    Trigger_lists_folder = os.path.join(Run_outputs_folder, 'triggers_' + str(Run_name))
     Run_technical_folder = '/SMALLDATA/orynai/' + str(Run_name)
-    Problems_folder = os.path.join(Run_outputs_folder, 'problems_stars')
 
 if Working_place == 'WEXAC':
     Data_location = '/home/labs/barakz/Collaboration-Kepler/KeplerData'
     Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
     Run_outputs_folder = '/home/labs/barakz/Collaboration-Kepler/orynai/' + str(Run_name)
-    Output_location = os.path.join(Run_outputs_folder, 'output_' + str(Run_name))
-    Triggers_plots_location = os.path.join(Run_outputs_folder, 'triggers_plots_' + str(Run_name))
-    Trigger_lists_folder = os.path.join(Run_outputs_folder, 'triggers_' + str(Run_name))
     Run_technical_folder = '/home/labs/barakz/orynai/' + str(Run_name)
-    Problems_folder = os.path.join(Run_outputs_folder, 'problems_stars')
+
+Output_location = os.path.join(Run_outputs_folder, 'output_' + str(Run_name))
+Triggers_plots_location = os.path.join(Run_outputs_folder, 'triggers_plots_' + str(Run_name))
+Trigger_lists_folder = os.path.join(Run_outputs_folder, 'triggers_' + str(Run_name))
+Problems_folder = os.path.join(Run_outputs_folder, 'problems_stars')
+Problems_folder_scrambled = os.path.join(Run_outputs_folder, 'problems_stars_scrambled')
+Kepler_files_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'KeplerFiles')
 
 if force_data_output_locations_creation:
     if not os.path.isdir(Data_location):
         os.mkdir(Data_location)
+    if not os.path.isdir(Target_pixels_location):
+        os.mkdir(Target_pixels_location)
+    if not os.path.isdir(Run_outputs_folder):
+        os.mkdir(Run_outputs_folder)
     if not os.path.isdir(Output_location):
         os.mkdir(Output_location)
 
@@ -143,9 +144,9 @@ Dict_tce_txt_filename_postfix = 'tce_class_dict.txt'
 Pickle_tce_small_attributes_filename_postfix = 'tce_class_small_attributes.pickle'
 Pickle_tce_all_attributes_filename_postfix = 'tce_class_all_attributes.pickle'
 Gaia_trigger_table_filename = 'gaia_trigger_table.ecsv'
-Gaia_trigger_file = os.path.join(Trigger_lists_folder, Gaia_trigger_table_filename)
+Gaia_trigger_table_file = os.path.join(Trigger_lists_folder, Gaia_trigger_table_filename)
 """The Gaia table corresponding to the individual Kepler target"""
-Neighbors_folder = os.path.join(Run_outputs_folder, 'Neighbors_run_' + Run_name)
+Neighbors_folder = os.path.join(Run_outputs_folder, 'neighbors_' + Run_name)
 Problems_tce_txt_filename_postfix = 'tce_problems.txt'
 
 # ----------------------------------------------------------------------

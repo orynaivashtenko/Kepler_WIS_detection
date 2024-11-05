@@ -128,7 +128,7 @@ def read_neighbor_info(target_id, neighbors_file_path=None, neighbors_file_name=
     return neighbors_table
 
 
-def read_gaia_trigger_table(file_path=locs.Gaia_trigger_file):
+def read_gaia_trigger_table(file_path=locs.Gaia_trigger_table_file):
     return read_table(file_path)
 
 
@@ -153,7 +153,7 @@ def read_gaia_kepler_crossmatch_table_for_target_id(tid_list, gaia_kepler_file_p
     return retrieve_line_for_target_id(tid_list, gaia_kepler_table, only_if_found=only_if_found)
 
 
-def read_gaia_table_for_target_id(tid_list, file_path=locs.Gaia_trigger_file):
+def read_gaia_table_for_target_id(tid_list, file_path=locs.Gaia_trigger_table_file):
     tid_list = ensure_list_str(tid_list)
     gaia_trigger_table = read_gaia_trigger_table(file_path=file_path)
     return retrieve_line_for_target_id(tid_list, gaia_trigger_table)

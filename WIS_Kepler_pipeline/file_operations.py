@@ -398,7 +398,7 @@ def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_outp
                 command += '-pe '
             os.system(command + '| wc > ' + output_file)
         except Exception as e:
-            with open(output_file) as fil1:
+            with open(output_file, 'w') as fil1:
                 print(str(e), file=fil1)
 
         with open(output_file, 'r') as out_file:
