@@ -13,11 +13,11 @@ This module should be used once to get those tables, and then not used again.
 To copy the tables to Marvin or Wexac:
 --------------------------------------------------------------------------------------------
 scp -r -O /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/Neighbors_run_11_1
-orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
+orynai@accessv01.wexac.weizmann.ac.il:/home/projects/barakz/Collaboration-Kepler/orynai
 # use -O option if it refuses to copy the folder. This is to use the old version of scp which for
 # some reason did not have this problem.
 scp /Users/orynai/Work/Kepler_Project/Intermediate_tasks/Forming_catalog/tids_table_gaia.ecsv
-orynai@accessv01.wexac.weizmann.ac.il:/home/labs/barakz/Collaboration-Kepler/orynai
+orynai@accessv01.wexac.weizmann.ac.il:/home/projects/barakz/Collaboration-Kepler/orynai
 --------------------------------------------------------------------------------------------
 
 # --------------------------------------------------------------------------------------------

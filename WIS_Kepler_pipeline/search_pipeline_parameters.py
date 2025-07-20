@@ -38,8 +38,6 @@ Nsig_outliers_stat = 4.  # is supposed to happen less than once per quarter
 Detr_length_outliers = 256
 Detr_method_outliers = 'median'
 Detr_endmethod_outliers = 'mean'
-Detr_ends_outliers = 'symmetric'
-Detr_endlen_outliers = None
 
 # Measuring PSD:
 Nperseg_psd = 128
@@ -48,10 +46,13 @@ Window_psd = 'hann'
 Npsdsmin = 40
 Use_rfft = True
 Subtract_mean_in_psd = True
-Smoothen_psds = True
+Multi_resolution_psds = True
 Always_zero_zeroth_freq_psd = False
 Tukey_steps_len_psd = 16
 Wf_td_window_extension_coef = 2.5
+Reject_outliers_psd = True
+Psd_outlier_sf = 2e-2  # Reject approximately one slice
+N_repetitions_outliers_psd = 4
 
 # Ends treatment:
 Alpha_windowing_fluxes = 0.1  # tukey window smoothness parameter, roughly part of the data which is affected by the window
@@ -78,7 +79,7 @@ Template_ind_detection = 'all'
 
 # Veto single-event:
 Margin_snr_veto = 2.
-Max_abs_stat_veto = 6.5  # something more than snr 6 will not be considered
+Max_abs_stat_veto = 6.5  # something more than this will not be considered
 Fn_fit_veto = 0.01
 N_parts_veto_snr = 4
 Min_bins_veto_part_time = 4  # Minimal size of one part in veto_parts_time
@@ -99,8 +100,6 @@ Snr_0_fit_hist_ses = 2.5
 Beg_min_hist_ses = 3
 
 # Periodicity search:
-Pmin = 30  # days
-Pmax = 500
 P_bins_overlap = 5  # add this to the periods array for the best trigger not to be at the boundary (integral score will not be full)
 Duty_cycle = 0.02  # this was 0.1, but I changed it because sometimes it is not enough
 Fn_threshold_veto_mes = 0.02  # False negative for veto MES
@@ -131,6 +130,9 @@ Best_per_results_length = 7
 # Data types used in the search (memory concerns):
 Dtype_r = np.float32
 Dtype_c = np.complex64
-
+Dtype_timings = np.float64  # Times in the periodicity summation should have a good resolution, otherwise
+# the resolution of the folded periodic timings will suffer
+Use_pyfftw = False  # Use pyfftw for the FFTs, otherwise use numpy
+# It creates some numerical difference in SNR, which sometimes can reach 1e-3, so I preferred not to.
 
 

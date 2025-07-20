@@ -33,27 +33,29 @@ for tid in trig_ids:
     per_search = float(trigger_main_search[Indices_dict['per']])
     if int_score_search >= Score_candidate_postprocess and per_search >= Per_min_candidate:
         # noinspection DuplicatedCode
+        job_name = fop.compose_job_name(job_type_prefix=Short_periodicity_job_filename_prefix,
+                                        target_id=tid, additional_params=())
         fop.write_job_file(code_file=None,
                            code_filename=Short_periodicity_code_filename,
                            code_file_dir=Run_files_folder,
-                           jobname=Short_periodicity_job_filename_prefix + '_' + tid + '.bsub',
+                           jobname=job_name,
                            job_file=None,
-                           job_filename=Short_periodicity_job_filename_prefix + '_' + tid + '.bsub',
+                           job_filename=job_name + '.bsub',
                            job_file_dir=Job_files_folder,
                            queue=Queue_submit,
                            mem_per_job_gb=Mem_per_job_gb,
                            array_indices=None,
                            output_file=None,
-                           output_filename=Short_periodicity_output_filename_prefix + '_' + tid + '.out',
+                           output_filename=job_name + '.out',
                            output_file_dir=Output_files_folder,
                            error_file=None,
-                           error_filename=Short_periodicity_error_filename_prefix + '_' + tid + '.err',
+                           error_filename=job_name + '.err',
                            error_file_dir=Error_files_folder,
                            output_error_overwrite=False,
                            arg_jobind=False,
-                           other_args=[['target_id', tid]])
+                           other_args=[['target_id', tid], ['job_name', job_name]])
 
 
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers/triggers_prefiltered.txt
+# bsub -q short source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py
+# bsub -q short source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_short_periodicity.py --trigger_list_file /home/projects/barakz/orynai/run_11/triggers/triggers_prefiltered.txt
 

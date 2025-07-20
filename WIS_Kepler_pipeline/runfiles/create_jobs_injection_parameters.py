@@ -25,7 +25,7 @@ tid_selected_list_file = args.tid_selected_list_file
 if isinstance(tid_selected_list_file, list):
     tid_selected_list_file = tid_selected_list_file[0]
 
-mem_per_job_gb = '6.9'
+mem_per_job_gb = '7.9'
 
 with open(trigger_list_file, 'r') as tlf:
     trigs = tlf.readlines()
@@ -41,30 +41,48 @@ if tid_selected_list_file != '':
     trig_ids = [trig_ids[i] for i in inds_selected]
     periods = [periods[i] for i in inds_selected]
 
+
+job_type_prefix = Injection_parameters_job_prefix
+fop.arrange_job_folders(job_type_prefix=job_type_prefix,
+                        jobs_folder=Job_files_folder,
+                        output_files_folder=Output_files_folder,
+                        error_files_folder=Error_files_folder,
+                        jobs_monitor_folder=Jobs_monitor_folder,
+                        use_last_digit=False)
+# -> do not use last digit here because it is only for triggers, and they are not that many
+
+# Folders for this specific type of lob (main search):
+job_files_folder = os.path.join(Job_files_folder, job_type_prefix)
+output_files_folder = os.path.join(Output_files_folder, job_type_prefix)
+error_files_folder = os.path.join(Error_files_folder, job_type_prefix)
+
+
 # noinspection DuplicatedCode
 for ii in range(len(trig_ids)):
     tid = trig_ids[ii]
     per = periods[ii]
+    job_name = fop.compose_job_name(job_type_prefix=job_type_prefix,
+                                    target_id=tid, additional_params=())
     fop.write_job_file(code_file=None,
                        code_filename=Injection_parameters_runfile_filename,
                        code_file_dir=Run_files_folder,
-                       jobname=Injection_parameters_job_filename_prefix+'_'+tid+'.bsub',
+                       jobname=job_name,
                        job_file=None,
-                       job_filename=Injection_parameters_job_filename_prefix+'_'+tid+'.bsub',
-                       job_file_dir=Job_files_folder,
+                       job_filename=job_name+'.bsub',
+                       job_file_dir=job_files_folder,
                        queue=Queue_submit,
                        mem_per_job_gb=mem_per_job_gb,
                        array_indices=None,
                        output_file=None,
-                       output_filename=Injection_parameters_output_filename_prefix+'_'+tid+'.out',
-                       output_file_dir=Output_files_folder,
+                       output_filename=job_name+'.out',
+                       output_file_dir=output_files_folder,
                        error_file=None,
-                       error_filename=Injection_parameters_error_filename_prefix+'_'+tid+'.out',
-                       error_file_dir=Error_files_folder,
+                       error_filename=job_name+'.out',
+                       error_file_dir=error_files_folder,
                        output_error_overwrite=False,
                        arg_jobind=False,
-                       other_args=[['target_id', tid], ['period', per]])
+                       other_args=[['target_id', tid], ['period', per], ['job_name', job_name]])
 
 
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_injection_parameters.py
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_injection_parameters.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers_for_slides_injections.txt --tid_selected_list_file /home/labs/barakz/orynai/run_11/not_run_tids.txt
+# bsub -q short source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_injection_parameters.py
+# bsub -q short source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_injection_parameters.py --trigger_list_file /home/projects/barakz/orynai/run_11/triggers_for_slides_injections.txt --tid_selected_list_file /home/projects/barakz/orynai/run_11/not_run_tids.txt

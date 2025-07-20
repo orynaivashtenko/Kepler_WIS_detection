@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 
 core_num = "1"
@@ -7,7 +9,11 @@ os.environ["MKL_NUM_THREADS"] = core_num  # export MKL_NUM_THREADS=6
 os.environ["VECLIB_MAXIMUM_THREADS"] = core_num  # export VECLIB_MAXIMUM_THREADS=4
 os.environ["NUMEXPR_NUM_THREADS"] = core_num  # export NUMEXPR_NUM_THREADS=6
 import numpy as np
-from template_bank.template_bank_generation_parameters import *
+import sys
+# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# from template_bank.template_bank_generation_parameters import *
+from template_bank_generation_parameters import *
 from astropy.io import fits
 import pipeline_parameters as pp
 

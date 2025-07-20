@@ -15,7 +15,7 @@ from numba.core.removerefctpass import remove_unnecessary_nrt_usage
 
 
 def is_int(string):
-    assert type(string) == str, 'Input must be string!'
+    assert isinstance(string, str), 'Input must be string!'
     if string.isdecimal():
         return True
     elif string[0] == '-' and (string[1:]).isdecimal():
@@ -84,9 +84,9 @@ def read_quarters_from_file(file_name, location='', dimension=2, to_array=True):
 
     Parameters
     ----------
-     file_name : str
+     file_name : path-like
         Name of the file ('.txt' is not needed).
-    location : str
+    location : path-like
         Location where to create the file. If None, the current local directory
         will be used
     dimension : int
@@ -239,21 +239,21 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     """Creates a job or job array file which can be submitted to WEXAC IBM bsub command.
 
     :param job_file: bash file in which the job will be written
-    :type job_file: str or None
+    :type job_file: str or None or LiteralString or bytes
     :param job_filename: if `job_file` is None, it will be created from `job_filename` which is the name of the file without the
     path to its folder, and `job_file_dir`, which is the path to its folder.
     :type job_filename: str or None
     :param job_file_dir: if `job_file` is None, it will be created from `job_filename` which is the name of the file without the
     path to its folder, and `job_file_dir`, which is the path to its folder.
-    :type job_file_dir: str or None
+    :type job_file_dir: str or None or LiteralString or bytes
     :param code_file: the full path to the file of the code which needs to be executed in the job
-    :type code_file: str or None
+    :type code_file: str or None or LiteralString or bytes
     :param code_filename: if `code_file` is None, it will be created from `code_filename` which is the name of the file without the
     path to its folder, and `code_file_dir`, which is the path to its folder.
     :type code_filename: str or None
     :param code_file_dir: if `code_file` is None, it will be created from `code_filename` which is the name of the file without the
     path to its folder, and `code_file_dir`, which is the path to its folder.
-    :type code_file_dir: str or None
+    :type code_file_dir: str or None or LiteralString or bytes
     :param jobname: the name of the job to appear in the job code. Works like job identifier to see it easier in the jobs list
     :type jobname: str
     :param queue: queue in the WEXAC IBM submission machinery to which the job will be submitted. The default is physics-short.
@@ -265,21 +265,21 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     `jobname`[array_indices[0]-array_indices[1]].
     :type array_indices: tuple or None
     :param output_file: full path to the file in which the output will be collected.
-    :type output_file: str or None
+    :type output_file: str or None or LiteralString or bytes
     :param output_filename: if `output_file` is None, it will be created from `output_filename` which is the name of the file without the
     path to its folder, and `output_file_dir`, which is the path to its folder.
     :type output_filename: str or None
     :param output_file_dir: if `output_file` is None, it will be created from `output_filename` which is the name of the file without the
     path to its folder, and `output_file_dir`, which is the path to its folder.
-    :type output_file_dir: str or None
+    :type output_file_dir: str or None or LiteralString or bytes
     :param error_file: full path to the file in which the error info will be collected.
-    :type error_file: str or None
+    :type error_file: str or None or LiteralString or bytes
     :param error_filename: if `error_file` is None, it will be created from `error_filename` which is the name of the file without the
     path to its folder, and `error_file_dir`, which is the path to its folder.
     :type error_filename: str or None
     :param error_file_dir: if `error_file` is None, it will be created from `error_filename` which is the name of the file without the
     path to its folder, and `error_file_dir`, which is the path to its folder.
-    :type error_file_dir: str or None
+    :type error_file_dir: str or None or LiteralString or bytes
     :param output_error_overwrite: whether to overwrite `error_file` and `output_file` or to append the new outputs to the end.
     :type output_error_overwrite: bool
     :param arg_jobind: whether to parse the job index as an argument of the code which will be run in the job.
@@ -313,7 +313,7 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
         error_file = os.path.join(error_file_dir, error_filename)
     if error_file is not None:
         if (error_file[-4] != '.') and (error_file[-3] != '.') and (error_file[-5] != '.'):
-            error_file += '.out'
+            error_file += '.err'
 
     if array_indices is not None:
         array_indices = '[' + str(int(array_indices[0])) + '-' + str(int(array_indices[1])) + ']'
@@ -336,10 +336,33 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
         else:
             text_to_write += '#BSUB -e ' + str(error_file) + '\n'
 
-    # text_to_write += "'conda init; conda activate " + str(env_name) + "; "
+    # # text_to_write += "'conda init; conda activate " + str(env_name) + "; "
+    # text_to_write += "source ~/.bashrc\n"
+    # text_to_write += "conda activate " + env_name + "\n"
+    # # text_to_write += "conda activate " + str(env_name) + "\n"
+
+    # === Load Conda or Micromamba or whatever is here:===
     text_to_write += "source ~/.bashrc\n"
-    text_to_write += "conda activate " + env_name + "\n"
-    # text_to_write += "conda activate " + str(env_name) + "\n"
+    # === Setup safe per-job cache isolation ===
+    text_to_write += 'export PYTHONPYCACHEPREFIX=$(mktemp -d /tmp/pycache_${USER}_${LSB_JOBID}_XXXXXX)\n'
+    text_to_write += 'export NUMBA_CACHE_DIR=$(mktemp -d /tmp/numba_cache_${USER}_${LSB_JOBID}_XXXXXX)\n'
+    text_to_write += 'export PYFFTW_NO_WISDOM=1\n'
+    text_to_write += 'trap "rm -rf ' + "'$PYTHONPYCACHEPREFIX' '$NUMBA_CACHE_DIR'" + '" EXIT\n'
+
+    # === Detect CPU type ===
+    text_to_write += "vendor=$(lscpu | awk -F: '/Vendor ID/ {print $2}' | xargs)\n"
+    text_to_write += "model=$(lscpu | awk -F: '/Model name/ {print $2}' | xargs)\n"
+    text_to_write += '\n'
+    text_to_write += 'if echo "$vendor" | grep -q "AuthenticAMD"; then\n'
+    text_to_write += '    micromamba activate planets_env_amd_epyc\n'
+    text_to_write += 'elif echo "$vendor" | grep -q "GenuineIntel"; then\n'
+    text_to_write += '    micromamba activate planets_env_intel_skylake\n'
+    text_to_write += 'else\n'
+    text_to_write += '    echo "Unknown CPU type: $vendor"\n'
+    text_to_write += '    exit 1\n'
+    text_to_write += 'fi\n'
+
+    # === Run your Python code ===
     text_to_write += str(code_file)
     if arg_jobind:
         text_to_write += " $LSB_JOBINDEX"
@@ -351,7 +374,99 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     with open(job_file, 'w') as fil1:
         print(text_to_write, file=fil1)
 
-    # !/usr/bin/env python3
+
+def arrange_job_folders(job_type_prefix, jobs_folder, output_files_folder, error_files_folder, jobs_monitor_folder,
+                        use_last_digit=True, make_monitor_folder=True, use_last_digit_monitor=False):
+    for fldr in [jobs_folder, output_files_folder, error_files_folder]:
+        if not os.path.exists(fldr) or not os.path.isdir(fldr):
+            os.mkdir(fldr, mode=0o777)
+        os.system('find ' + fldr + ' -maxdepth 1 -type f -delete')
+        job_type_folder = os.path.join(fldr, job_type_prefix)
+        if not os.path.exists(job_type_folder) or not os.path.isdir(job_type_folder):
+            os.mkdir(job_type_folder, mode=0o777)
+        os.system('find ' + job_type_folder + ' -maxdepth 1 -type f -delete')
+        if use_last_digit:
+            for last_digit in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
+                dig_fol = os.path.join(job_type_folder, last_digit)
+                if not os.path.exists(dig_fol) or not os.path.isdir(dig_fol):
+                    os.mkdir(dig_fol, mode=0o777)
+                os.system('find ' + dig_fol + ' -maxdepth 1 -type f -delete')
+
+    if make_monitor_folder:
+        if not os.path.exists(jobs_monitor_folder) or not os.path.isdir(jobs_monitor_folder):
+            os.mkdir(jobs_monitor_folder, mode=0o777)
+        os.system('find ' + jobs_monitor_folder + ' -maxdepth 1 -type f -delete')
+        job_type_folder = os.path.join(jobs_monitor_folder, job_type_prefix)
+        if not os.path.exists(job_type_folder) or not os.path.isdir(job_type_folder):
+            os.mkdir(job_type_folder, mode=0o777)
+        os.system('find ' + job_type_folder + ' -maxdepth 1 -type f -delete')
+        if use_last_digit_monitor:
+            for last_digit in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
+                dig_fol = os.path.join(jobs_monitor_folder, last_digit)
+                if not os.path.exists(dig_fol) or not os.path.isdir(dig_fol):
+                    os.mkdir(dig_fol, mode=0o777)
+                os.system('find ' + dig_fol + ' -maxdepth 1 -type f -delete')
+
+
+def compose_job_name(job_type_prefix, target_id, additional_params=()):
+    name = str(job_type_prefix) + '_' + str(target_id)
+    if len(additional_params) > 0:
+        name += '_' + '_'.join([str(param) for param in additional_params])
+    return name
+
+
+def decompose_job_name(job_name):
+    target_id = None
+    job_type_prefix = ''
+    res = job_name.split('_')
+    for i in range(len(res)):
+        if res[i].isnumeric() and len(res[i]) == 9:
+            target_id = res[i]
+            job_type_prefix = '_'.join(res[:i])
+            if len(res) > i+1:
+                additional_params = res[i+1:]
+            else:
+                additional_params = ()
+    if target_id is None:
+        job_type_prefix = job_name
+        additional_params = ()
+    return job_type_prefix, target_id, additional_params
+
+
+def is_job_done(job_name, jobs_monitor_folder):
+    job_type_prefix, target_id, additional_params = decompose_job_name(job_name)
+    job_type_folder = os.path.join(jobs_monitor_folder, job_type_prefix)
+    if not os.path.exists(job_type_folder) or not os.path.isdir(job_type_folder):
+        return False
+    last_digit_folder = os.path.join(job_type_folder, target_id[-1])
+    if not os.path.exists(last_digit_folder) or not os.path.isdir(last_digit_folder):
+        return False
+    tid_file = os.path.join(last_digit_folder, target_id + '.txt')
+    if not os.path.exists(tid_file) or not os.path.isfile(tid_file):
+        return False
+    with open(tid_file, 'r') as fil1:
+        lines = fil1.readlines()
+    lines = [line.strip() for line in lines if line.strip() != '']
+    if job_name in lines:
+        return True
+    else:
+        return False
+
+
+def report_job_done(job_name, jobs_monitor_folder, in_last_digit_folder=False, str_to_add=''):
+    job_type_prefix, target_id, additional_params = decompose_job_name(job_name)
+    job_type_folder = os.path.join(jobs_monitor_folder, job_type_prefix)
+    if not os.path.exists(job_type_folder) or not os.path.isdir(job_type_folder):
+        os.mkdir(job_type_folder, mode=0o777)
+    if in_last_digit_folder:
+        last_digit_folder = os.path.join(job_type_folder, target_id[-1])
+        if not os.path.exists(last_digit_folder) or not os.path.isdir(last_digit_folder):
+            os.mkdir(last_digit_folder, mode=0o777)
+        target_file = os.path.join(last_digit_folder, target_id + '.txt')
+    else:
+        target_file = os.path.join(job_type_folder, target_id[-1] + '.txt')
+    with open(target_file, 'a') as fil1:
+        print(job_name + ' ' + str_to_add, file=fil1)
 
 
 def check_number_of_submitted_jobs(output_file=None, output_filename='bjobs_output.txt', output_dir=None,

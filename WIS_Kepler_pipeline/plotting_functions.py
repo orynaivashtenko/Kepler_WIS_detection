@@ -39,7 +39,7 @@ class PlotWrapper(object):
                  filename_postfix='plot.png', plot_output_location=locs.Triggers_plots_location,
                  gridspec_kw=Fig_gridspec_kw, dpi=Plots_dpi, tight_layout=True,
                  grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid, which_grid='both',
-                 allow_plot_folder_creation=False):
+                 allow_plot_folder_creation=False, file_format='png'):
         self.save_fig = save_fig
         self.no_show = no_show
         self.plot_output_location = plot_output_location
@@ -56,7 +56,7 @@ class PlotWrapper(object):
             self.file_saving_path = get_saving_file_path(output_location=tid_folder,
                                                          target_id=target_id,
                                                          filename_postfix=filename_postfix,
-                                                         file_format='png')
+                                                         file_format=file_format)
         # fig.subplots_adjust(left=None, bottom=None, right=None, top=0.94, wspace=None, hspace=0)
         if ax is None:
             self.fig = plt.figure(figsize=figsize, dpi=self.dpi)
@@ -95,7 +95,7 @@ class SubplotsWrapper(object):
                  filename_postfix='plot.png', plot_output_location=locs.Triggers_plots_location, dpi=Plots_dpi,
                  grid=True, color_grid=Color_grid, linewidth_grid=Linewidth_grid, tight_layout=True, fig_bbox=False,
                  zero_lines=True, zero_vline_color='k', zero_hline_color='k', zero_lines_linewidth=Linewidth_zero_level,
-                 allow_plot_folder_creation=False):
+                 allow_plot_folder_creation=False, file_format='png'):
         self.nrows = nrows
         self.ncols = ncols
         self.save_fig = save_fig
@@ -118,7 +118,7 @@ class SubplotsWrapper(object):
             self.file_saving_path = get_saving_file_path(output_location=tid_folder,
                                                          target_id=target_id,
                                                          filename_postfix=filename_postfix,
-                                                         file_format='png')
+                                                         file_format=file_format)
         if self.gridspec_kw is not None:
             self.fig, self.axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize, sharex=sharex, sharey=sharey,
                                               gridspec_kw=self.gridspec_kw, dpi=self.dpi)
@@ -365,20 +365,29 @@ def plot_all_folds(target, save_fig=Save_fig, no_show=No_show, figsize=Figsize_a
 
 def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=False, zoom_wing=Zoom_wing_folded_plots,
                          ax=None, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
-                         figsize=Figsize_flux, add_title=True, add_legend=True,
+                         figsize=Figsize_flux, add_title=True, add_legend=True, binwid=None, fold_marker_color=(0.55, 0.55, 0.55),
                          filename_postfix=locs.Folded_statistics_plot_filename_postfix,
                          filename_postfix_zoomed=locs.Folded_statistics_zoomed_plot_filename_postfix,
-                         template_linewidth=Linewidth):
+                         template_linewidth=None, markersize_bin=None, elinewidth=None, markersize_fold=None):
     if zoomed:
         filename_postfix = filename_postfix_zoomed
-        markersize_bin = 2.5
-        markersize_fold = 0.6
-        elinewidth = 1.2
+        if markersize_bin is None:
+            markersize_bin = 2.5
+        if markersize_fold is None:
+            markersize_fold = 0.6
+        if template_linewidth is None:
+            template_linewidth = Linewidth
+        if elinewidth is None:
+            elinewidth = 1.2
     else:
-        markersize_bin = 1.5
-        markersize_fold = 0.4
-        template_linewidth = template_linewidth * 0.7
-        elinewidth = 1
+        if markersize_bin is None:
+            markersize_bin = 1.5
+        if markersize_fold is None:
+            markersize_fold = 0.4
+        if template_linewidth is None:
+            template_linewidth = Linewidth * 0.7
+        if elinewidth is None:
+            elinewidth = 1
 
     prepare_target_for_plotting(target, initialize_templates=False,
                                 condition_templates=False, detect_single_transits=False)
@@ -389,9 +398,10 @@ def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=Fals
     statistics = ut.safe_div(statistics, variances ** 0.5, fill_value=0.)
 
     # FOLDING
-    binwid = get_binwid(temp_dur_days=target.templates_durations_hours[temp_number] / 24, dt=target.klc.dt_days,
-                        min_binwid_to_dt=0.2, min_part_duration=None,
-                        max_binwid_to_dt=5., max_part_duration=0.2)
+    if binwid is None:
+        binwid = get_binwid(temp_dur_days=target.templates_durations_hours[temp_number] / 24, dt=target.klc.dt_days,
+                            min_binwid_to_dt=0.2, min_part_duration=None,
+                            max_binwid_to_dt=5., max_part_duration=0.2)
     # min(target.templates_durations_hours[temp_number] / 24 / 5, 0.1))
     bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
         times=time, fluxes=statistics, period=target.best_per, first_time=target.best_ftt,
@@ -425,7 +435,7 @@ def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=Fals
             # Plot the folded data:
             for i in range(len(folds_times)):
                 axx.plot(folds_times[i] + time_shifts_plotting[j], folds_fluxes[i], 'o',
-                         markersize=markersize_fold, color=(0.55, 0.55, 0.55))
+                         markersize=markersize_fold, color=fold_marker_color)
             # Plot the binned folded data:
             axx.errorbar(bins_time[bins_counts > 0] + time_shifts_plotting[j], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0],
                          xerr=None, markersize=markersize_bin, fmt='o', markerfacecolor='k', markeredgecolor='k',
@@ -454,28 +464,38 @@ def plot_folded_stat_snr(target, temp_number=None, plot_twice=False, zoomed=Fals
 
 def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed=False, zoom_wing=Zoom_wing_folded_plots,
                               ax=None, save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
-                              figsize=Figsize_flux, add_title=True, add_legend=True,
+                              figsize=Figsize_flux, add_title=True, add_legend=True, binwid=None, fold_marker_color=(0.55, 0.55, 0.55),
                               filename_postfix=locs.Folded_whitened_fluxes_plot_filename_postfix,
                               filename_postfix_zoomed=locs.Folded_whitened_fluxes_zoomed_plot_filename_postfix,
-                              template_linewidth=Linewidth_thin*0.8):
+                              template_linewidth=None, markersize_bin=None, elinewidth=None, markersize_fold=None):
     if zoomed:
         filename_postfix = filename_postfix_zoomed
-        markersize_bin = 2.5
-        markersize_fold = 0.6
-        elinewidth = 1.2
+        if markersize_bin is None:
+            markersize_bin = 2.5
+        if markersize_fold is None:
+            markersize_fold = 0.6
+        if template_linewidth is None:
+            template_linewidth = Linewidth_thin * 0.8
+        if elinewidth is None:
+            elinewidth = 1.2
     else:
-        markersize_bin = 1.5
-        markersize_fold = 0.4
-        template_linewidth = template_linewidth * 0.7
-        elinewidth = 1
+        if markersize_bin is None:
+            markersize_bin = 1.5
+        if markersize_fold is None:
+            markersize_fold = 0.4
+        if template_linewidth is None:
+            template_linewidth = Linewidth_thin * 0.8 * 0.7
+        if elinewidth is None:
+            elinewidth = 1
     prepare_target_for_plotting(target, initialize_templates=False,
                                 condition_templates=False, detect_single_transits=False)
     if temp_number is None:
         temp_number = target.best_temp
     # FOLDING
-    binwid = get_binwid(temp_dur_days=target.templates_durations_hours[temp_number] / 24, dt=target.klc.dt_days,
-                        min_binwid_to_dt=0.2, min_part_duration=0.2,
-                        max_binwid_to_dt=5., max_part_duration=0.2)
+    if binwid is None:
+        binwid = get_binwid(temp_dur_days=target.templates_durations_hours[temp_number] / 24, dt=target.klc.dt_days,
+                            min_binwid_to_dt=0.2, min_part_duration=0.2,
+                            max_binwid_to_dt=5., max_part_duration=0.2)
     # min(target.templates_durations_hours[temp_number] / 24 / 5, 0.1)
     bins_time, bins_flux, bins_counts, folds_times, folds_fluxes, bins_std = fold_fluxes(
         times=target.klc.times, fluxes=target.klc.whitened_fluxes_td, period=target.best_per, first_time=target.best_ftt,
@@ -511,7 +531,7 @@ def plot_folded_whitened_flux(target, plot_twice=False, temp_number=None, zoomed
         for j in range(len(time_shifts_plotting)):
             for i in range(len(folds_times)):
                 axx.plot(folds_times[i] + time_shifts_plotting[j], folds_fluxes[i], 'o', markersize=markersize_fold,
-                         color=(0.55, 0.55, 0.55))
+                         color=fold_marker_color)
             axx.errorbar(bins_time[bins_counts > 0] + time_shifts_plotting[j], bins_flux[bins_counts > 0], yerr=bins_std[bins_counts > 0],
                          xerr=None, markersize=markersize_bin, fmt='o', markerfacecolor='k', markeredgecolor='k',
                          ecolor='k', elinewidth=elinewidth, capsize=None, barsabove=False, lolims=False, uplims=False,
@@ -851,7 +871,7 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
             axx.stairs(distr_score_inj_success, bins, label='Success injections',
                        linewidth=linewidth, color=def_cols[0], linestyle='-', zorder=10)
             # -> after density correction factor, get per one star
-        axx.stairs(distr_score_h0, bins, label='Background, scrambling', linewidth=linewidth, color=def_cols[1], zorder=10)
+        axx.stairs(distr_score_h0, bins, label='Background (scrambling)', linewidth=linewidth, color=def_cols[1], zorder=15)
 
         # --------------------------------------------
         # PLOTTING CLEAN
@@ -860,30 +880,41 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
                 distr_score_h0_clean = target.distr_int_score_h0_clean
             else:
                 distr_score_h0_clean = target.distr_stat_h0_clean
-            axx.stairs(distr_score_h0_clean, bins, label='Background, no trigger\nscrambling',
-                       linewidth=linewidth, color=def_cols[1], linestyle='--', zorder=10)
+            axx.stairs(distr_score_h0_clean, bins, label='Background, no trigger',
+                       linewidth=linewidth*0.9, color=def_cols[3], linestyle=(0, (1, 1)), zorder=16)
 
         # --------------------------------------------
         # PLOTTING EXTRAPOLATION
         if plot_extrapolation and use_integral:
             # MAKE EXTRAPOLATION
-            if not hasattr(target, 'extrapolation_coefs_int_score_h0_hist') or target.extrapolation_coefs_int_score_h0_hist is None:
-                from auxiliary_functions import get_histogram_extrapolation_coefs_in_log
-                target.extrapolation_coefs_int_score_h0_hist = get_histogram_extrapolation_coefs_in_log(
-                        target.distr_int_score_h0, target.bins_int_score_histogram)
-            coefs = target.extrapolation_coefs_int_score_h0_hist
-            # determine intersection with horizontal axis in log scale:
-            bin_extra_max = (np.log(np.nanmin(target.distr_int_score_h0[target.distr_int_score_h0 != 0])) - coefs[0]) / coefs[1]
-            bin_extra_max = np.nanmax([target.best_int_score + 1, bin_extra_max + 1])
-            bin_extra_min = bins[np.nanargmax(target.distr_int_score_h0) + 1]
-            bin_min_distr = bins[:-1][((~np.isnan(target.distr_int_score_h0)) & (target.distr_int_score_h0 > 0))][0]
-            # bin_extra_min = int((bin_extra_min + bin_extra_max) / 2)
-            bin_extra_min = bin_extra_min + int(np.abs(bin_extra_min - bin_min_distr) / 2)
-            bins_extra = np.linspace(bin_extra_min, bin_extra_max, 10)
+            from auxiliary_functions import chi2_1
+            x_extra = np.linspace(target.extrapolation_limit_int_score_h0_hist, target.best_int_score + 1, 10)
+            extrap_density = target.background_normalization_coef * target.extrapolation_amplitude_int_score_h0_hist * chi2_1(
+                x2=x_extra, coef=target.extrapolation_coef_int_score_h0_hist)  # , stat2_limit=target.extrapolation_limit_int_score_h0_hist)
             label = 'Extrapolation'
             if target.false_alarm_prob_trigger is not None:
                 label += ',\nFAP=' + f"{target.false_alarm_prob_trigger:.2e}"
-            axx.plot(bins_extra, np.exp(bins_extra * coefs[1] + coefs[0]), '--', label=label, color=def_cols[1], zorder=10)
+            axx.plot(x_extra, extrap_density, linestyle=(0, (5, 1, 1, 1)),
+                     label=label, linewidth=linewidth * 0.7, color=def_cols[1], zorder=10)
+
+            # if not hasattr(target, 'extrapolation_coefs_int_score_h0_hist') or target.extrapolation_coefs_int_score_h0_hist is None:
+            #     from auxiliary_functions import get_histogram_extrapolation_coefs_in_log
+            #     target.extrapolation_coefs_int_score_h0_hist = get_histogram_extrapolation_coefs_in_log(
+            #             target.distr_int_score_h0, target.bins_int_score_histogram)
+            # coefs = target.extrapolation_coefs_int_score_h0_hist
+            # # determine intersection with horizontal axis in log scale:
+            # bin_extra_max = (np.log(np.nanmin(target.distr_int_score_h0[target.distr_int_score_h0 != 0])) - coefs[0]) / coefs[1]
+            # bin_extra_max = np.nanmax([target.best_int_score + 1, bin_extra_max + 1])
+            # bin_extra_min = bins[np.nanargmax(target.distr_int_score_h0) + 1]
+            # bin_min_distr = bins[:-1][((~np.isnan(target.distr_int_score_h0)) & (target.distr_int_score_h0 > 0))][0]
+            # # bin_extra_min = int((bin_extra_min + bin_extra_max) / 2)
+            # bin_extra_min = bin_extra_min + int(np.abs(bin_extra_min - bin_min_distr) / 2)
+            # bins_extra = np.linspace(bin_extra_min, bin_extra_max, 10)
+            # label = 'Extrapolation'
+            # if target.false_alarm_prob_trigger is not None:
+            #     label += ',\nFAP=' + f"{target.false_alarm_prob_trigger:.2e}"
+            # axx.plot(bins_extra, np.exp(bins_extra * coefs[1] + coefs[0]), linestyle=(0, (5, 1, 1, 1)),
+            #          label=label, linewidth=linewidth*0.7, color=def_cols[1], zorder=10)
 
         # --------------------------------------------
         # FORMATTING
@@ -920,6 +951,8 @@ def plot_significance_histograms(target, fixed_limits=False, limits=None, plot_e
         axx.minorticks_off()
         axx.tick_params(axis='x', labelsize=fontsize_ticks)
         axx.tick_params(axis='y', labelsize=fontsize_ticks)
+        for spine in axx.spines.values():
+            spine.set_zorder(50)
 
         if fontsize_legend is not None:
             axx.legend(loc=(1.01, 0), fontsize=fontsize_legend)
@@ -931,7 +964,7 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
                             best_periodic_scores_filename_postfix=locs.Best_periodic_scores_filename_postfix,
                             save_fig=Save_fig, no_show=No_show, plot_output_location=locs.Triggers_plots_location,
                             figsize=Figsize_periodogram, filename_postfix=locs.Periodogram_chunks_plot_filename_postfix,
-                            ):
+                            include_short_periodicity=True):
     from search_pipeline_parameters import (Best_per_results_index_best_integral, Best_per_results_index_per,
                                             Best_per_results_index_stats, Best_per_results_index_stats_gauss,
                                             Best_per_results_index_ftt, Best_per_results_index_template)
@@ -945,15 +978,24 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
     ftts = res_array[Best_per_results_index_ftt]
     temps = res_array[Best_per_results_index_template]
 
-    res_array = tce.get_periodicity_results(short_periodicity=True,
-                                            best_short_periodic_scores_filename_postfix=best_short_periodic_scores_filename_postfix,
-                                            return_lists=True, set_attributes=False)
-    short_int_scores = res_array[Best_per_results_index_best_integral]
-    short_stats = res_array[Best_per_results_index_stats]
-    short_pers = res_array[Best_per_results_index_per]
-    short_gauss_stats = res_array[Best_per_results_index_stats_gauss]
-    short_ftts = res_array[Best_per_results_index_ftt]
-    short_temps = res_array[Best_per_results_index_template]
+    if include_short_periodicity:
+        res_array = tce.get_periodicity_results(short_periodicity=True,
+                                                best_short_periodic_scores_filename_postfix=best_short_periodic_scores_filename_postfix,
+                                                return_lists=True, set_attributes=False)
+        short_int_scores = res_array[Best_per_results_index_best_integral]
+        short_stats = res_array[Best_per_results_index_stats]
+        short_pers = res_array[Best_per_results_index_per]
+        short_gauss_stats = res_array[Best_per_results_index_stats_gauss]
+        short_ftts = res_array[Best_per_results_index_ftt]
+        short_temps = res_array[Best_per_results_index_template]
+    else:
+        short_int_scores = np.array([])
+        short_stats = np.array([])
+        short_pers = np.array([])
+        short_gauss_stats = np.array([])
+        short_ftts = np.array([])
+        short_temps = np.array([])
+
 
     with SubplotsWrapper(nrows=3, ncols=1, sharex=True, sharey=False, gridspec_kw=Subplots_gridspec_kw,
                          save_fig=save_fig, no_show=no_show,
@@ -968,11 +1010,14 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
 
         ax = axs[0]
         ax.plot(pers, int_scores, color=def_cols[0], linewidth=lw, zorder=4, label='Best scores')
-        ax.plot(short_pers, short_int_scores, color=def_cols[0], linewidth=lw, zorder=4)
+        if include_short_periodicity:
+            ax.plot(short_pers, short_int_scores, color=def_cols[0], linewidth=lw, zorder=4)
         ax.plot(pers, stats, color=def_cols[1], linewidth=lw_thin, label='Best statistics')
-        ax.plot(short_pers, short_stats, color=def_cols[1], linewidth=lw_thin)
+        if include_short_periodicity:
+            ax.plot(short_pers, short_stats, color=def_cols[1], linewidth=lw_thin)
         ax.plot(pers, gauss_stats, color=def_cols[2], linewidth=lw_thin, label='Best gaussianized statistics')
-        ax.plot(short_pers, short_gauss_stats, color=def_cols[2], linewidth=1)
+        if include_short_periodicity:
+            ax.plot(short_pers, short_gauss_stats, color=def_cols[2], linewidth=1)
         ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline)
         ax.set_xticks(xticks)
         ax.set_xlabel('Period, days')
@@ -985,7 +1030,8 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
         durs_plot = [Durations[int(temp)] if not np.isnan(temp) else np.nan for temp in temps]
         ax.plot(pers, durs_plot, color=def_cols[0], linewidth=lw, zorder=2, label='Best templates')
         durs_plot = [Durations[int(temp)] if not np.isnan(temp) else np.nan for temp in short_temps]
-        ax.plot(short_pers, durs_plot, color=def_cols[0], linewidth=2, zorder=100)
+        if include_short_periodicity:
+            ax.plot(short_pers, durs_plot, color=def_cols[0], linewidth=2, zorder=100)
         ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline, label='Trigger period')
         ax.set_xticks(xticks)
         ax.set_xlabel('Period, days')
@@ -995,8 +1041,13 @@ def plot_periodogram_chunks(tce, best_short_periodic_scores_filename_postfix=loc
         ax.legend(loc='best')
 
         ax = axs[2]
-        ax.plot(pers, (ftts - np.nanmin(short_ftts)) / pers, color=def_cols[0], linewidth=lw, zorder=2, label='Best first transit phases')
-        ax.plot(short_pers, (short_ftts - np.nanmin(short_ftts)) / short_pers, color=def_cols[0], linewidth=2, zorder=100)
+        if include_short_periodicity:
+            ax.plot(pers, (ftts - np.nanmin(short_ftts)) / pers, color=def_cols[0], linewidth=lw, zorder=2,
+                    label='Best first transit phases')
+            ax.plot(short_pers, (short_ftts - np.nanmin(short_ftts)) / short_pers, color=def_cols[0], linewidth=2, zorder=100)
+        else:
+            ax.plot(pers, (ftts - np.nanmin(ftts)) / pers, color=def_cols[0], linewidth=lw, zorder=2,
+                    label='Best first transit phases')
         ax.axvline(tce.best_per, zorder=0, color='r', linewidth=lw_vline)
         ax.set_xlabel('Period, days')
         ax.set_xticks(xticks)
@@ -1159,7 +1210,7 @@ def plot_injections_corners(target, save_fig=Save_fig, no_show=No_show, plot_out
                             alpha_points=0.8, smooth=0.1, level_sigmas=(1, 2, 3), axes_scale='linear',
                             n_bins=16, ms_points=2, plot_points_where_scarce=True):
     import corner
-    # We cannot pass linewidth for the contours in the corber, therefore we update the default, and then will restore
+    # We cannot pass linewidth for the contours in the corner, therefore we update the default, and then will restore
     old_lw = plt.rcParams.get('lines.linewidth')  # saving to return in the end
     plt.rcParams.update({'lines.linewidth': lw_contour})
 
@@ -1875,7 +1926,8 @@ def plot_all_postprocessing(tce, save_fig=Save_fig, no_show=No_show, fluxes_and_
 
 
 def plot_all_after_slides_injections(tce=None, target=None, save_fig=Save_fig, no_show=No_show,
-                                     plots_output_location=locs.Triggers_plots_location):
+                                     plots_output_location=locs.Triggers_plots_location,
+                                     include_periodogram=True):
     if target is None:
         target = get_target_for_tce(tce)
     target.fetch_saved_lightcurve()
@@ -1886,7 +1938,8 @@ def plot_all_after_slides_injections(tce=None, target=None, save_fig=Save_fig, n
     if not hasattr(target, 'int_scores_slides_clean') or target.int_scores_slides_clean is None:
         target.retrieve_background_clean()
     plot_significance_histograms(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
-    plot_periodogram_chunks(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
+    if include_periodogram:
+        plot_periodogram_chunks(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
     plot_injections_corners(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
     plot_injections_radii_durations_score(target, save_fig=save_fig, no_show=no_show, plot_output_location=plots_output_location)
 

@@ -34,6 +34,21 @@ for i_tid, tid in enumerate(trig_ids_0):
         periods.append(periods_0[i_tid])
         ftts.append(ftts_0[i_tid])
 
+job_type_prefix = Slides_clean_job_prefix
+fop.arrange_job_folders(job_type_prefix=job_type_prefix,
+                        jobs_folder=Job_files_folder,
+                        output_files_folder=Output_files_folder,
+                        error_files_folder=Error_files_folder,
+                        jobs_monitor_folder=Jobs_monitor_folder,
+                        use_last_digit=False)
+# -> do not use last digit here because it is only for triggers, and they are not that many
+
+# Folders for this specific type of lob (main search):
+job_files_folder = os.path.join(Job_files_folder, job_type_prefix)
+output_files_folder = os.path.join(Output_files_folder, job_type_prefix)
+error_files_folder = os.path.join(Error_files_folder, job_type_prefix)
+
+
 # # noinspection DuplicatedCode
 for ii in range(len(trig_ids)):
     tid = trig_ids[ii]
@@ -42,24 +57,28 @@ for ii in range(len(trig_ids)):
     for i in range(int(N_slides_total // N_slides_chunk)  # how many times we need to repeat timeslides
                    + int(bool(N_slides_total % N_slides_chunk))):  # stupid way to make np.ceil (otherwise numpy import)
         # noinspection DuplicatedCode
+        job_name = fop.compose_job_name(job_type_prefix=job_type_prefix,
+                                        target_id=tid, additional_params=(str(i),))
+        out_name = fop.compose_job_name(job_type_prefix=job_type_prefix,
+                                        target_id=tid, additional_params=())
         fop.write_job_file(code_file=None,
                            code_filename=Slides_clean_runfile_filename,
                            code_file_dir=Run_files_folder,
-                           jobname=Slides_clean_job_filename_prefix + '_' + tid + '.bsub',
+                           jobname=job_name,
                            job_file=None,
-                           job_filename=Slides_clean_job_filename_prefix + '_' + tid + '_' + str(i) + '.bsub',
-                           job_file_dir=Job_files_folder,
+                           job_filename=job_name + '.bsub',
+                           job_file_dir=job_files_folder,
                            queue=Queue_submit,
                            mem_per_job_gb=Mem_per_job_gb,
                            array_indices=None,
                            output_file=None,
-                           output_filename=Slides_clean_output_filename_prefix + '_' + tid + '.out',
-                           output_file_dir=Output_files_folder,
+                           output_filename=out_name + '.out',
+                           output_file_dir=output_files_folder,
                            error_file=None,
-                           error_filename=Slides_clean_error_filename_prefix + '_' + tid + '.out',
-                           error_file_dir=Error_files_folder,
+                           error_filename=out_name + '.err',
+                           error_file_dir=error_files_folder,
                            output_error_overwrite=False,
                            arg_jobind=False,
                            other_args=[['target_id', tid], ['period', per], ['ftt', ftt]])
 
-# bsub -q short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides_clean.py --trigger_list_file /home/labs/barakz/orynai/run_11/triggers_for_slides_injections.txt
+# bsub -q short source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_timeslides_clean.py --trigger_list_file /home/projects/barakz/orynai/run_11/triggers_for_slides_injections.txt

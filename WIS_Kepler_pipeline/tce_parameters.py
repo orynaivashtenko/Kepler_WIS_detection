@@ -10,7 +10,9 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 import numpy as np
 from locations import *
-from catalog_functions import read_table, get_koi_ttv_dicts
+import catalog_functions
+read_table = catalog_functions.read_table
+get_koi_ttv_dicts = catalog_functions.get_koi_ttv_dicts
 from search_pipeline_parameters import Nperseg_psd
 
 

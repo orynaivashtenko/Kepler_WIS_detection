@@ -12,10 +12,11 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import target_class
 import datetime
 from runfiles_parameters import *
+from file_operations import report_job_done
 from pipeline_parameters import (Best_scrambled_periodic_scores_filename_postfix,
                                  Threshold_crossing_scrambled_list_file,
                                  Threshold_g_crossing_scrambled_list_file,
-                                 Run_technical_folder,
+                                 Run_outputs_folder,
                                  Threshold_crossing_scrambled_list_filename,
                                  Threshold_g_crossing_scrambled_list_filename,
                                  Threshold_crossing_scrambled_list_multiple_triggers_filename,
@@ -27,8 +28,11 @@ import traceback
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--target_id", type=str, nargs=1, help="KIC number", default="003097222")
+parser.add_argument("--job_name", type=str, nargs=1, help="name of the job to report", default="003097222")
 args = parser.parse_args()
 Target_id = args.target_id[0]
+job_name = args.job_name[0]
+
 
 targ = target_class.KeplerTarget(target_id=Target_id,
                                  load_pickled_attributes=False,
@@ -41,7 +45,8 @@ if not targ.is_good_for_processing:  # is villanova binary or is not in Gaia
 else:  # for now, run the search only if it is not a villanova binary
     try:
         targ.run_main_search(
-            scramble=True, allow_load_connected_klc=True,
+            scramble=True, seed_scramble=None, get_new_seed=True,
+            allow_load_connected_klc=False,
             save_to_threshold_crossing_list=True,
             clean_dir_if_not_threshold_crossing=False,
             save_multiple_triggers=True,
@@ -51,13 +56,14 @@ else:  # for now, run the search only if it is not a villanova binary
             best_periodic_scores_filename_postfix=Best_scrambled_periodic_scores_filename_postfix,
             threshold_crossing_list_file=Threshold_crossing_scrambled_list_file,
             threshold_g_crossing_list_file=Threshold_g_crossing_scrambled_list_file,
-            threshold_crossing_list_location=Run_technical_folder,
+            threshold_crossing_list_location=Run_outputs_folder,
             threshold_crossing_list_filename=Threshold_crossing_scrambled_list_filename,
             threshold_g_crossing_list_filename=Threshold_g_crossing_scrambled_list_filename,
             threshold_crossing_list_multiple_triggers_filename=Threshold_crossing_scrambled_list_multiple_triggers_filename,
             threshold_g_crossing_list_multiple_triggers_filename=Threshold_g_crossing_scrambled_list_multiple_triggers_filename,
             clean_problems_file=False,
-            seeds_scrambling_run_file=Seeds_scrambling_run_file)
+            seeds_scrambling_run_file=Seeds_scrambling_run_file,
+            print_message_to_history=False)
 
     except Exception as exc:
         tb = sys.exc_info()
@@ -69,4 +75,6 @@ else:  # for now, run the search only if it is not a villanova binary
                 print(str_exc.strip(), file=err_list_fil)
             print('', file=err_list_fil)
 
-# bsub -q physics-short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_all_stars.py
+report_job_done(job_name=job_name, jobs_monitor_folder=Jobs_monitor_folder)
+
+# bsub -q physics-short /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_main_search_all_stars.py

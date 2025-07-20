@@ -65,13 +65,14 @@ for i, name in enumerate(Catalog_names_properties_dict.keys()):
 # ---------------------------------------------------------------------------------------------------------------------
 for tid in target_ids:
     # ----------------------------------------------
+    do_analysis = True
     # A temporary piece which makes it so that the analysis is not done twice because I thought it will not take so much time
-    plots_folder = str(os.path.join(Triggers_plots_location, tid))
-    neighbor_maps_files = [f for f in os.listdir(plots_folder) if 'neighbors_maps' in f]
-    if len(neighbor_maps_files) > 0:
-        do_analysis = False
-    else:
-        do_analysis = True
+    # plots_folder = str(os.path.join(Triggers_plots_location, tid))
+    # neighbor_maps_files = [f for f in os.listdir(plots_folder) if 'neighbors_maps' in f]
+    # if len(neighbor_maps_files) > 0:
+    #     do_analysis = False
+    # else:
+    #     do_analysis = True
     # ----------------------------------------------
 
     if do_analysis:
@@ -107,9 +108,9 @@ for tid in target_ids:
 
     if do_analysis:
         plot_all_after_slides_injections(target=targ, save_fig=True, no_show=True)
-        plot_neighbors_maps(tce=tce, save_fig=True, no_show=True)
+        # plot_neighbors_maps(tce=tce, save_fig=True, no_show=True)
 
 write_trigger_table(trigger_table, file_path=Trigger_table_file, overwrite=True,
                     trigger_table_format=Trigger_table_format, fill_values=None)
 
-# bsub -q long -R "rusage[mem=6.9GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_calculate_significance.py
+# bsub -q long -R "rusage[mem=6.9GB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_calculate_significance.py

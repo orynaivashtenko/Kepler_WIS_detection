@@ -1,16 +1,92 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import os
+os.environ["OMP_NUM_THREADS"] = "1"  #
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"  #
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import copy
 import warnings
 
 import numpy as np
+from numba import njit
 from scipy.optimize import minimize
-from scipy.stats import chi2, norm, binom
-from scipy.special import erfc, erfinv
+from scipy.stats import chi2, norm, binom, poisson
+from scipy.special import erfc, erfinv, ndtr, gammaincc, gammainccinv
 from scipy.interpolate import interp1d
 from scipy.signal import iirnotch, tf2sos, tf2zpk
 from scipy.signal.windows import tukey
 
 from search_pipeline_parameters import *
-from numba import float32
+# from numba import float32
+# -> I forgot why I did this, and there may be implications...
+
+if Use_pyfftw:
+    from pyfftw.interfaces.numpy_fft import rfft as rfft
+    from pyfftw.interfaces.numpy_fft import irfft as irfft
+    import pyfftw.interfaces.cache
+    pyfftw.interfaces.cache.enable()
+    pyfftw.forget_wisdom()
+else:
+    rfft = np.fft.rfft
+    irfft = np.fft.irfft
+
+
+def isgood(vec):
+    return (~np.isnan(vec)) & np.isfinite(vec)
+
+
+def standard_normal_pdf(x):
+    """Is faster than scipy.norm.pdf"""
+    return np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi)
+
+
+def safe_nanargmin(x, axis=0):
+    return safe_nanfun(x=x, axis=axis, fun='argmin')
+
+
+def safe_nanargmax(x, axis=0):
+    return safe_nanfun(x=x, axis=axis, fun='argmax')
+
+
+def safe_nanmin(x, axis=0):
+    return safe_nanfun(x=x, axis=axis, fun='min')
+
+
+def safe_nanmax(x, axis=0):
+    return safe_nanfun(x=x, axis=axis, fun='max')
+
+
+def safe_nanfun(x, axis=0, fun='min'):
+    if fun == 'min':
+        fun = np.nanmin
+        repl = np.nan
+    elif fun == 'max':
+        fun = np.nanmax
+        repl = np.nan
+    elif fun == 'argmin':
+        fun = np.nanargmin
+        repl = -1
+    elif fun == 'argmax':
+        fun = np.nanargmax
+        repl = -1
+    else:
+        raise ValueError('Function `fun` not recognized!')
+    if hasattr(x[0], '__len__'):
+        x = np.array(x)
+        inds_notnan = np.max((~np.isnan(x)).astype(float), axis=axis).astype(bool)
+        res = np.array(x, dtype=float)
+        res[np.isnan(res)] = np.inf
+        res = fun(res, axis=axis)
+        res[~inds_notnan] = repl
+    else:
+        if np.sum(~np.isnan(x)) == 0:
+            res = repl
+        else:
+            res = fun(x)
+    return res
 
 
 def nanargsort(array):
@@ -24,6 +100,46 @@ def nansort(array):
     array = np.array(array)
     notnan_mask = ~np.isnan(array)
     return np.sort(array[notnan_mask])
+
+
+def sliding_nanargmin(array, window_size):
+    return sliding_nanargfun(array=array, window_size=window_size, fun='argmin')
+
+
+def sliding_nanargmax(array, window_size):
+    return sliding_nanargfun(array=array, window_size=window_size, fun='argmax')
+
+
+def sliding_nanargfun(array, window_size, fun='nanargmin'):
+    """
+    Sliding window nanargmin. Is faster than a for loop for some window sizes. Uses a 2D array construction
+    :param array: 1D numpy array
+    :param window_size: size of the sliding window
+    :param fun: function to apply to the sliding windows, can be 'min', 'max', 'argmin', 'argmax'
+    :return: indices of the minimums in the sliding windows
+    """
+    if fun == 'argmin':
+        fun = np.nanargmin
+        repl = -1
+    elif fun == 'argmax':
+        fun = np.nanargmax
+        repl = -1
+    else:
+        raise ValueError('Function `fun` not recognized!')
+
+    window_size = int(window_size)
+    stacked_array = np.full((window_size, len(array)), np.nan)
+    shifts = np.arange(-((window_size+1) // 2), window_size // 2, 1, dtype=np.int64) + 1
+    for i, shift in enumerate(shifts):
+        ind_0 = max(0, shift)
+        ind_1 = min(len(array), len(array) + shift)
+        stacked_array[window_size-i-1, ind_0:ind_1] = np.roll(array, shift)[ind_0:ind_1]
+
+    not_nan_mask = np.sum((np.isnan(stacked_array)).astype(int), axis=0) != window_size
+    res_array = np.full(len(array), repl).astype(int)
+    res_array[not_nan_mask] = fun(stacked_array[:, not_nan_mask], axis=0)
+    res_array += np.arange(len(res_array)) - (window_size // 2)
+    return res_array
 
 
 def safe_div(numerators, denominators, fill_value=0.):
@@ -48,21 +164,65 @@ def dec_to_bin(num, return_list=False, return_str=False):
     :return:
     :rtype:
     """
-    num = int(num)
-    if num == 0:
-        bits = [0]
+    if not hasattr(num, '__len__'):
+        num = int(num)
+        if num == 0:
+            bits = [0]
+        else:
+            max_ord = int(np.log2(num))
+            bits = []
+            for i in range(max_ord + 1):
+                bits.append(num % 2)
+                num = num // 2
+        if return_list:
+            return bits  # bits[0] is 2**0
+        elif return_str:
+            return ''.join([str(b) for b in bits[::-1]])
+        else:
+            return int(''.join([str(b) for b in bits[::-1]]))
     else:
-        max_ord = int(np.log2(num))
-        bits = []
+        return dec_to_bin_vec(num=num, return_list=return_list, return_str=return_str)
+
+
+def dec_to_bin_vec(num, return_list=True, return_str=False):
+    """
+    From decimal to binary for vectors
+    :param num:
+    :type num:
+    :param return_list:
+    :type return_list:
+    :param return_str:
+    :type return_str:
+    :return:
+    :rtype:
+    """
+    if not hasattr(num, '__len__'):
+        num = np.array([num])
+    num = num.astype(int)
+    if np.max(num) > 0:
+        max_ord = int(np.log2(np.max(num)))
+        bits = np.zeros((max_ord + 1, len(num)), dtype=int)
         for i in range(max_ord + 1):
-            bits.append(num % 2)
+            bits[i] = (num % 2)
             num = num // 2
+        bits = bits
+    else:
+        return np.zeros(len(num))
+
     if return_list:
         return bits  # bits[0] is 2**0
-    elif return_str:
-        return ''.join([str(b) for b in bits[::-1]])
     else:
-        return int(''.join([str(b) for b in bits[::-1]]))
+        str_bits = [''.join(list((b.astype(int)).astype(str))) for b in (bits[::-1]).T]
+        if return_str:
+            return str_bits
+        else:
+            return np.array(str_bits).astype(int)
+
+
+def get_specific_bit_from_dec(x_dec, bit):
+    x_res = x_dec % (2**(bit+1))
+    x_res = x_res // (2**bit)
+    return x_res
 
 
 def get_unique_indices(data_list):
@@ -106,11 +266,435 @@ def cos_vec(h1, h2, wf_fd=None, freqmask=None):
     if wf_fd is None:
         wf_fd = np.ones(len(freqmask))
     # Warning! freq mask is not participating in the normalization!
-    norm_1 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))) ** 2)
-    norm_2 = np.sum(np.abs(np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2))) ** 2)
-    return (np.sum(np.fft.irfft(np.fft.rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))
-                   * np.fft.irfft(np.fft.rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2)))
+    norm_1 = np.sum(np.abs(irfft(rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))) ** 2)
+    norm_2 = np.sum(np.abs(irfft(rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2))) ** 2)
+    return (np.sum(irfft(rfft(h1, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h1))
+                   * irfft(rfft(h2, norm='ortho') * wf_fd * freqmask, norm='ortho', n=len(h2)))
             / (norm_1 ** 0.5 * norm_2 ** 0.5))
+
+
+def moving_mean(data, nwind, ngap=0, mask=None, nsamples_min=32,
+                remove_outliers=False, nsig_outliers=6,
+                return_mask=False, return_total_mean=False,
+                replace_ends=False, endmethod='mean', replace_len=None, endlen=None):
+    """
+    Function which is faster than detrend_moving_ave, but less sophisticated
+    Calculates the moving mean of the signal. At every point, takes the window of length
+    `nwind` symmetrically from the two sides, excludes from the middle the window of length
+    `ngap` and calculates the mean or median of the remaining. It is needed to
+    avoid the impact of the entries correlated with the considered point to the
+    variance estimation. For example, if there is a transit in this point, the
+    variance is taken around the transit, so its presence does not alter the measurement.
+    At the ends of the signal, the data is taken only from one side of the
+    considered point up to the available length.
+    :param data: The array from which the moving variance should be calculated.
+    :type data: numpy.ndarray of float, NO NANS
+    :param nwind: Size of the moving window
+    :type nwind: int
+    :param ngap: Size of the gap inside the moving window to exclude the point around which the variance is taken.
+        Points are excluded around each bin when calculating the variance in this bin in order to avoid influence of these
+        points on the variance estimation.
+    :type ngap: int, should be <`nwind`
+    :param mask: Array with `True` where `signal` is food for processing and `False` where it is bad
+    :type mask: None or numpy.ndarray (of bool)
+    :param nsamples_min: Minimal number of samples in the window to take the variance
+    :type nsamples_min: int
+    :param remove_outliers: Whether to remove outliers before calculating the moving variance
+    :type remove_outliers: bool
+    :param nsig_outliers: Threshold in units of sigma if `remove_outliers` is True
+    :type nsig_outliers: float
+    :param return_mask: whether to return the mask
+    :type return_mask: bool
+    :param return_total_mean: whether to return the total scalar variance of `signal`
+    :type return_total_mean: bool
+    :param replace_ends:
+    :type replace_ends:
+    :param replace_len:
+    :type replace_len:
+    :param endmethod:
+    :type endmethod:
+    :param endlen:
+    :type endlen:
+    :return: mov_var Moving variance estimate at each point of the signal
+    :rtype: numpy.ndarray 1d of float, len(`signal`)
+    """
+    data = np.array(data)
+
+    if mask is None:
+        mask = isgood(data)
+    else:
+        mask = np.array(mask).astype(bool)
+        mask &= isgood(data)
+    mask &= np.isfinite(data)
+
+    if remove_outliers:
+        data_minus_mov_ave = data - moving_mean(data=data, nwind=nwind, ngap=ngap, mask=mask, nsamples_min=nsamples_min,
+                                                remove_outliers=False, nsig_outliers=nsig_outliers, return_mask=False,
+                                                return_total_mean=False)
+        outlier_mask = np.abs(data_minus_mov_ave) < nsig_outliers * np.nanstd(data_minus_mov_ave[mask])
+        mask &= outlier_mask
+
+    tot_mean = np.nanmean(data[mask])
+    data[~mask] = 0.
+    sum1 = np.nancumsum(data * mask.astype(float))
+    sum1 = np.concatenate(([0], sum1[:-1]))
+    counts = np.nancumsum(mask)
+    counts = np.concatenate(([0], counts[:-1]))
+
+    hnw = nwind // 2
+    hng = ngap // 2
+    vecs = [sum1, counts]
+    for i in range(len(vecs)):
+        vec = vecs[i]
+        temp_vec_w = np.roll(vec, -hnw - 1)
+        temp_vec_w[len(temp_vec_w) - hnw - 1:] = vec[-1]
+        temp_vec_g = np.roll(vec, -hng - 1)
+        temp_vec_g[len(temp_vec_g) - hng - 1:] = vec[-1]
+        right_vec = temp_vec_w - temp_vec_g
+
+        temp_vec_w = np.roll(vec, hnw)
+        temp_vec_w[:hnw] = vec[0]
+        temp_vec_g = np.roll(vec, hng)
+        temp_vec_g[:hng] = vec[0]
+        left_vec = temp_vec_g - temp_vec_w
+        vecs[i] = right_vec + left_vec
+    sum1, counts = vecs
+    mask_counts = (counts >= max(nsamples_min, 2))
+    counts = counts.astype(float)  # for the next row
+    counts[~mask_counts] = np.nan  # only for division, to avoid dividing by zero is there is some
+    mov_mean = sum1 / counts
+    mov_mean[~mask_counts] = tot_mean
+
+    if replace_ends:
+        if replace_len is None:
+            len_repl = int(np.ceil(nwind // 2))
+        else:
+            len_repl = replace_len
+        len_calc = 2 * len_repl
+        if endmethod == 'mean':
+            if endlen is None:
+                endlen = -1
+            endlen = int(endlen)
+            mov_mean[:len_repl] = moving_mean_edge_fast(data[:len_calc],
+                                                        left_mask_int=np.array(mask[:len_calc], dtype=int),
+                                                        endlen=endlen)[:len_repl]
+            mov_mean[-len_repl:] = moving_mean_edge_fast(data[-len_calc:][::-1],
+                                                         left_mask_int=np.array(mask[-len_calc:][::-1], dtype=int),
+                                                         endlen=endlen)[:len_repl][::-1]
+        else:
+            mov_mean[:len_repl] = moving_average_edge(data[:len_calc], left_mask=mask[:len_calc],
+                                                      endmethod=endmethod, ends='symmetric', endlen=endlen)[:len_repl]
+            mov_mean[-len_repl:] = moving_average_edge(data[-len_calc:][::-1], left_mask=mask[-len_calc:][::-1],
+                                                       endmethod=endmethod, ends='symmetric', endlen=endlen)[:len_repl][::-1]
+
+    if not return_total_mean:
+        if not return_mask:
+            return mov_mean
+        else:
+            return mov_mean, mask
+    else:
+        if not return_mask:
+            return mov_mean, tot_mean
+        else:
+            return mov_mean, mask, tot_mean
+
+
+@njit(parallel=False, fastmath=False)
+def moving_mean_edge_fast(left_data, left_mask_int, endlen=-1):
+    """
+    Substitute for the ends of calculating moving average. If this is applied throughout, it will be too slow.
+    :param left_data: Data sample from which the moving average has to be subtracted
+    :type left_data: np.array 1d of float. no nans!
+    :param left_mask_int:
+    :type left_mask_int: numpy.ndarray of int
+
+    :param endlen: Minimal length to take from the end for determining the average in the
+        first (last) point. If None, will be assigned depending on the method (see description of ends)
+    :type endlen: int: if -1, will be measured
+    :return: if not return_trend: left_data with subtracted mean, np.array
+             if return_trend: left_data with subtracted mean, np.array; trend (moving mean), np.array
+    :rtype:
+    """
+    ldat = len(left_data)
+    trend = np.full(ldat, np.nan)
+
+    if endlen == -1:
+        endlen = int(np.ceil(ldat / 4))  # use ceil to avoid zero length
+    if endlen > int(ldat / 2):
+        endlen = int(ldat / 2)
+    if endlen == 0:
+        endlen = 1
+
+    for i in range(0, endlen):
+        i1 = i + endlen
+        i1 = min(i1, ldat)
+        summed = 0.
+        counts = 0
+        for j in range(i1):
+            summed += left_data[j] * left_mask_int[j]
+            counts += left_mask_int[j]
+        if counts > 0:
+            m = summed / counts
+        else:
+            m = np.mean(left_data[:i1])
+        trend[i] = m
+    for i in range(endlen, ldat):
+        i1 = min(2 * i, ldat)
+        summed = 0.
+        counts = 0
+        for j in range(i1):
+            summed += left_data[j] * left_mask_int[j]
+            counts += left_mask_int[j]
+        if counts > 0:
+            m = summed / counts
+        else:
+            m = np.mean(left_data[:i1])
+        trend[i] = m
+    return trend
+
+
+# _ = moving_mean_edge_fast(left_data=np.arange(10, dtype=np.float64),
+#                           left_mask_int=np.arange(10, dtype=int), endlen=-1)
+# _ = moving_mean_edge_fast(left_data=np.arange(10, dtype=np.float32),
+#                           left_mask_int=np.arange(10, dtype=int), endlen=-1)
+
+# We initialize the full thing instead of just the edge thing because for some reason, it does not work as initialization then
+_ = moving_mean(data=np.arange(20, dtype=np.float64), nwind=4, ngap=0, mask=None, nsamples_min=1,
+                remove_outliers=False, nsig_outliers=6,
+                return_mask=False, return_total_mean=False,
+                replace_ends=True, endmethod='mean', replace_len=4, endlen=None)
+
+_ = moving_mean(data=np.arange(20, dtype=np.float32), nwind=4, ngap=0, mask=None, nsamples_min=1,
+                remove_outliers=False, nsig_outliers=6,
+                return_mask=False, return_total_mean=False,
+                replace_ends=True, endmethod='mean', replace_len=4, endlen=None)
+
+
+def moving_average_edge(left_data, left_mask=None, endmethod='mean', ends='symmetric', endlen=None):
+    """
+    Substitute for the ends of calculating moving average. If this is applied throughout, it will be too slow.
+    :param left_data: Data sample from which the moving average has to be subtracted
+    :type left_data: np.array 1d or list
+    :param left_mask:
+    :type left_mask:
+    :param endmethod: Kind of moving value to subtract at the ends of the left_data (see below): 'median' or 'mean'.
+                    The default is 'mean', because it is less sensitive to small
+                    amount of left_data samples available in the ends.
+    :type endmethod: str
+    :param ends: How to treat the points closer than length/2 to the ends of the left_data:
+                'symmetric' :  endlen is length/4
+                               1) if point<endlen, take endlen samples from the right, and up to zero from the left
+                               2) if endlen<point<half-length, take the same number of points from left and right
+                               3) if point>half-length, take usual half-length from both sides
+                               for the second end, the same in opposite direction
+                'asymmetric' : endlen is length/16
+                               1) if point<half-length, take up to zero from the left, and the length to the
+                                    right linearly increases from endlen for point=0 to length/2 at point=length/2
+                               2) if point>half-length, take usual half-length from both sides
+                               for the second end, the same in opposite direction
+    :type ends: str
+    :param endlen: Minimal length to take from the end for determining the average in the
+        first (last) point. If None, will be assigned depending on the method (see description of ends)
+    :type endlen: int or None
+    :return: if not return_trend: left_data with subtracted mean, np.array
+             if return_trend: left_data with subtracted mean, np.array; trend (moving mean), np.array
+    :rtype:
+    """
+    assert ((endmethod == 'mean') or (endmethod == 'median')), 'Incorrect method specified'
+    left_data = np.array(left_data)
+
+    if left_mask is None:
+        left_mask = isgood(left_data)
+    else:
+        left_mask = np.array(left_mask) & isgood(left_data)
+
+    assert len(left_data) == len(left_mask), 'Data and left_mask must be of the same length!'
+    ldat = len(left_data)
+
+    trend = np.ones(len(left_data)) * np.nan
+    if ends == 'asymmetric':
+        f1 = (ldat - endlen) / ldat
+        if endlen is None:
+            endlen = int(np.ceil(ldat / 16))
+        if endlen > ldat:
+            endlen = ldat
+        if endmethod == 'median':
+            for i in np.arange(0, ldat):
+                i1 = i + int(endlen + f1 * i)
+                if (left_mask[0:i1]).any():
+                    m = np.median((left_data[0:i1])[left_mask[0:i1]])
+                else:
+                    m = np.median(left_data[0:i1])
+                trend[i] = m
+        elif endmethod == 'mean':
+            for i in np.arange(0, ldat):
+                i1 = i + int(endlen + f1 * i)
+                if (left_mask[0:i1]).any():
+                    m = np.mean((left_data[0:i1])[left_mask[0:i1]])
+                else:
+                    m = np.mean(left_data[0:i1])
+                trend[i] = m
+
+    elif ends == 'symmetric':
+        if endlen is None:
+            endlen = int(np.ceil(ldat / 4))
+        if endlen > ldat:
+            endlen = ldat
+        if endmethod == 'median':
+            for i in np.arange(0, endlen):
+                i1 = i + endlen
+                if (left_mask[0:i1]).any():
+                    m = np.median((left_data[0:i1])[left_mask[0:i1]])
+                else:
+                    m = np.median(left_data[0:i1])
+                trend[i] = m
+            for i in np.arange(endlen, ldat):
+                i1 = 2 * i
+                if (left_mask[0:i1]).any():
+                    m = np.median((left_data[0:i1])[left_mask[0:i1]])
+                else:
+                    m = np.median(left_data[0:i1])
+                trend[i] = m
+        elif endmethod == 'mean':
+            for i in np.arange(0, endlen):
+                i1 = i + endlen
+                if (left_mask[0:i1]).any():
+                    m = np.mean((left_data[0:i1])[left_mask[0:i1]])
+                else:
+                    m = np.mean(left_data[0:i1])
+                trend[i] = m
+            for i in np.arange(endlen, ldat):
+                i1 = 2 * i
+                if (left_mask[0:i1]).any():
+                    m = np.mean((left_data[0:i1])[left_mask[0:i1]])
+                else:
+                    m = np.mean(left_data[0:i1])
+                trend[i] = m
+    else:
+        raise AssertionError('Incorrect way to treat ends specified!')
+    return trend
+
+
+def left_right_moving_mean_and_var(data, nwind, ngap=0, mask=None, nsamples_min=None,
+                                   remove_outliers=False, nsig_outliers=6,
+                                   return_mask=False, return_total_mean_var=False):
+    """
+    Function which is faster than detrend_moving_ave, but less sophisticated
+    Calculates the moving mean of the signal. At every point, takes the window of length
+    `nwind` symmetrically from the two sides, excludes from the middle the window of length
+    `ngap` and calculates the mean or median of the remaining. It is needed to
+    avoid the impact of the entries correlated with the considered point to the
+    variance estimation. For example, if there is a transit in this point, the
+    variance is taken around the transit, so its presence does not alter the measurement.
+    At the ends of the data, the data is taken only from one side of the
+    considered point up to the available length.
+    :param data: The array from which the moving variance should be calculated.
+    :type data: numpy.ndarray of float, NO NANS
+    :param nwind: Size of the moving window
+    :type nwind: int
+    :param ngap: Size of the gap inside the moving window to exclude the point around which the variance is taken.
+        Points are excluded around each bin when calculating the variance in this bin in order to avoid influence of these
+        points on the variance estimation.
+    :type ngap: int, should be <`nwind`
+    :param mask: Array with `True` where `signal` is food for processing and `False` where it is bad
+    :type mask: None or numpy.ndarray (of bool)
+    :param nsamples_min: Minimal number of samples in the window to take the variance
+    :type nsamples_min: int
+    :param remove_outliers: Whether to remove outliers before calculating the moving variance
+    :type remove_outliers: bool
+    :param nsig_outliers: Threshold in units of sigma if `remove_outliers` is True
+    :type nsig_outliers: float
+    :param return_mask: whether to return the mask
+    :type return_mask: bool
+    :param return_total_mean_var: whether to return the total scalar variance of `signal`
+    :type return_total_mean_var: bool
+    :return: mov_var Moving variance estimate at each point of the signal
+    :rtype: numpy.ndarray 1d of float, len(`signal`)
+    """
+    if nsamples_min is None:
+        nsamples_min = nwind // 2
+
+    data = np.array(data)
+
+    if mask is None:
+        mask = isgood(data)
+    else:
+        mask = np.array(mask).astype(bool)
+        mask &= isgood(data)
+        assert len(data) == len(mask), 'Data and mask have to be of the same length!'
+
+    if remove_outliers:
+        data_minus_mov_ave = data - moving_mean(data=data, nwind=nwind, ngap=ngap, mask=mask, nsamples_min=nsamples_min,
+                                                remove_outliers=False, nsig_outliers=nsig_outliers, return_mask=False,
+                                                return_total_mean=False)
+        outlier_mask = np.abs(data_minus_mov_ave) < nsig_outliers * np.nanstd(data_minus_mov_ave[mask])
+        mask &= outlier_mask
+        expected_power_part = get_expected_power_after_outlier_removal(nsig_outliers=nsig_outliers)
+    else:
+        expected_power_part = 1.
+
+    tot_mean = np.nanmean(data[mask])
+    tot_var = unb_var(data[mask])
+    data[~mask] = 0.
+    sum_left = np.nancumsum(data * mask.astype(float))
+    sum_left = np.concatenate(([0], sum_left[:-1]))
+    sum_right = np.nancumsum(data[::-1] * mask[::-1].astype(float))
+    sum_right = np.concatenate(([0], sum_right[:-1]))
+    counts_left = np.nancumsum(mask)
+    counts_left = np.concatenate(([0], counts_left[:-1]))
+    counts_right = np.nancumsum(mask[::-1])
+    counts_right = np.concatenate(([0], counts_right[:-1]))
+    sum2_left = np.nancumsum((data * mask.astype(float)) ** 2)
+    sum2_left = np.concatenate(([0], sum2_left[:-1]))
+    sum2_right = np.nancumsum((data[::-1] * mask[::-1].astype(float)) ** 2)
+    sum2_right = np.concatenate(([0], sum2_right[:-1]))
+
+    # Left and right processing while right is reversed
+    vecs = [sum_left, counts_left, sum2_left, sum_right, counts_right, sum2_right]
+    for i in range(len(vecs)):
+        vec = vecs[i]
+        temp_vec_w = np.roll(vec, nwind)
+        temp_vec_w[:nwind] = vec[0]  # fills for rolling over
+        temp_vec_g = np.roll(vec, ngap)
+        temp_vec_g[:ngap] = vec[0]
+        left_vec = temp_vec_g - temp_vec_w
+        # See another moving something function if you want to use both left and right sides
+        vecs[i] = left_vec
+
+    means_left_right = []
+    vars_left_right = []
+    for inds in [[0, 1, 2], [3, 4, 5]]:
+        sum_side, counts_side, sum2_side = vecs[inds[0]], vecs[inds[1]], vecs[inds[2]]
+        mask_counts_side = (counts_side >= max(nsamples_min, 2)) | (np.arange(len(counts_side)) <= nwind)
+        # -> but for edges, will have a different thing
+        counts_side = counts_side.astype(float)  # for the next row
+        counts_side[~mask_counts_side] = np.nan  # only for division, to avoid dividing by zero is there is some
+        mov_mean_side = sum_side / counts_side
+        mov_mean_side[~mask_counts_side] = tot_mean
+        if nsamples_min > 2:
+            mov_mean_side[:nsamples_min] = mov_mean_side[nsamples_min]
+        means_left_right.append(mov_mean_side)
+
+        mov_var_side = (sum2_side / counts_side - (sum_side / counts_side) ** 2) * counts_side / (counts_side - 1)
+        mov_var_side = mov_var_side / expected_power_part
+        mov_var_side[~mask_counts_side] = tot_var
+        if nsamples_min > 2:
+            mov_var_side[:nsamples_min] = mov_var_side[nsamples_min]
+        vars_left_right.append(mov_var_side)
+
+    means_left_right[1] = means_left_right[1][::-1]
+    vars_left_right[1] = vars_left_right[1][::-1]
+
+    if not return_total_mean_var:
+        if not return_mask:
+            return means_left_right[0], means_left_right[1], vars_left_right[0], vars_left_right[1]
+        else:
+            return means_left_right[0], means_left_right[1], vars_left_right[0], vars_left_right[1], mask
+    else:
+        if not return_mask:
+            return means_left_right[0], means_left_right[1], vars_left_right[0], vars_left_right[1], tot_mean, tot_var
+        else:
+            return means_left_right[0], means_left_right[1], vars_left_right[0], vars_left_right[1], mask, tot_mean, tot_var
 
 
 def unb_var(arr):
@@ -124,14 +708,44 @@ def unb_var(arr):
     :return: Unbiased variance estimate of arr
     :rtype: float
     """
-    arr = np.array(arr[~np.isnan(arr)])
+    arr = np.array(arr[isgood(arr)])
     return 1 / (len(arr) - 1) * np.sum(np.abs(arr - np.mean(arr)) ** 2)
 
 
-def moving_std(data, window_len, mask=None, gap_len=0):
+def renormalize_variance_fun(movvar_meas, statmask, stat_snr, stat, nsig_outliers=None):
+    # RE-NORMALIZING THE VARIANCE
+    # The vetted triggers could have changed the true variance, now we want the cleaned stat to have
+    # unit variance. Also, positive can have bad distr which I do not want to impact the negative
+    # So we just repeat what was done before for moving variance correctness, but now after we updated masks with veto
+    if nsig_outliers is not None:
+        expected_power = get_expected_power_after_outlier_removal(nsig_outliers=nsig_outliers)
+    else:
+        expected_power = 1.
+    # Making positive values unit variance:
+    indices_sign = statmask & (stat > 0)
+    var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
+    if nsig_outliers is not None:
+        msk_outliers = (stat_snr[indices_sign]) ** 2 <= var_snr_indices * nsig_outliers ** 2
+        var_snr_indices = np.nanmean((stat_snr[indices_sign][msk_outliers]) ** 2)
+        var_snr_indices = var_snr_indices / expected_power
+    movvar_meas[indices_sign] *= var_snr_indices
+    # Making negative values unit variance:
+    indices_sign = statmask & (stat < 0)
+    var_snr_indices = np.nanmean((stat_snr[indices_sign]) ** 2)
+    if nsig_outliers is not None:
+        msk_outliers = (stat_snr[indices_sign]) ** 2 <= var_snr_indices * nsig_outliers ** 2
+        var_snr_indices = np.nanmean((stat_snr[indices_sign][msk_outliers]) ** 2)
+        var_snr_indices = var_snr_indices / expected_power
+    movvar_meas[indices_sign] *= var_snr_indices
+    # Use this new moving variance for all the rest:
+    stat_snr[statmask] = stat[statmask] / (movvar_meas[statmask]) ** 0.5  # now should be N(0,1) for sure
+    return stat_snr, movvar_meas
+
+
+def moving_std_naive(data, window_len, mask=None, gap_len=0):
     """NAIVE AND SLOW. USE IT ONLY FOR DEBUGGING OF MOVING_VAR"""
     if mask is None:
-        mask = ~np.isnan(data)
+        mask = isgood(data)
     d = window_len // 2
     if gap_len == 0:
         return [unb_var(data[max(0, i - d): min(i + d + 1, len(data))][
@@ -145,6 +759,100 @@ def moving_std(data, window_len, mask=None, gap_len=0):
             if len(
         np.where(np.concatenate((mask[max(0, i - d): max(0, i - g)], mask[min(i + g + 1, len(data)): min(i + d + 1, len(data))])))[0]) > 1
             else np.inf for i in range(len(data))]
+
+
+def moving_var_maybe_faster(signal, nwind, ngap=0, mask=None, nsamples_min=32,
+                            remove_outliers=False, nsig_outliers=6,
+                            detrend_remove_outliers=False, detr_length_outliers=512,
+                            return_mask=False, return_total_var=False):
+    """
+    Calculates the moving variance of the signal. At every point, takes the window of length
+    `nwind` symmetrically from the two sides, excludes from the middle the window of length
+    `ngap` and calculates the unbiased variance of the remaining. It is needed to
+    avoid the impact of the entries correlated with the considered point to the
+    variance estimation. For example, if there is a transit in this point, the
+    variance is taken around the transit, so its presence does not alter the measurement.
+    At the ends of the singal, the data is taken only from one side of the
+    considered point up to the available length.
+    :param signal: The array from which the moving variance should be calculated.
+    :type signal: numpy.ndarray of float, NO NANS
+    :param nwind: Size of the moving window
+    :type nwind: int
+    :param ngap: Size of the gap inside the moving window to exclude the point around which the variance is taken.
+        Points are excluded around each bin when calculating the variance in this bin in order to avoid influence of these
+        points on the variance estimation.
+    :type ngap: int, should be <`nwind`
+    :param mask: Array with `True` where `signal` is food for processing and `False` where it is bad
+    :type mask: None or numpy.ndarray (of bool)
+    :param nsamples_min: Minimal number of samples in the window to take the variance
+    :type nsamples_min: int
+    :param remove_outliers: Whether to remove outliers before calculating the moving variance
+    :type remove_outliers: bool
+    :param nsig_outliers: Threshold in units of sigma if `remove_outliers` is True
+    :type nsig_outliers: float
+    :param detrend_remove_outliers: Whether to detrend the signal before removing the outliers from it
+    :type detrend_remove_outliers: bool
+    :param detr_length_outliers: Detrending length to use if `detrend_remove_outliers` is true
+    :type detr_length_outliers: int
+    :param return_mask: whether to return the mask
+    :type return_mask: bool
+    :param return_total_var: whether to return the total scalar variance of `signal`
+    :type return_total_var: bool
+    :return: mov_var Moving variance estimate at each point of the signal
+    :rtype: numpy.ndarray 1d of float, len(`signal`)
+    """
+    if mask is None:
+        mask = isgood(signal)
+    else:
+        mask = np.array(mask).astype(bool)
+        assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
+    signal_masked = signal * mask.astype(float)
+
+    if remove_outliers:
+        tot_var, mask = outlier_free_std(data=np.array(signal), nsig=nsig_outliers, n_iterations=2, mask=mask,
+                                         detrend=detrend_remove_outliers, detr_len=detr_length_outliers,
+                                         renormalize=True, return_var=True, return_mask=True)
+        # When outliers are removed, the variance is expected to be smaller in any case, therefore we will use
+        # the renormalization to make in unbiased. In the `outlier_free_std` function, it was already done.
+        expected_power_part = get_expected_power_after_outlier_removal(nsig_outliers=nsig_outliers)
+    else:
+        tot_var = unb_var(signal[mask])
+        expected_power_part = 1.
+
+    signal[~mask] = 0.
+    sum1 = np.nancumsum(np.insert(signal_masked, 0, 0.))[:-1]
+    sum2 = np.nancumsum(np.insert(signal_masked ** 2, 0, 0.))[:-1]
+    counts = np.nancumsum(np.insert(mask.astype(float), 0, 0.))[:-1]
+
+    n = len(signal)
+    hnw = nwind // 2
+    hng = ngap // 2
+
+    left = np.maximum(0, np.arange(n) - hnw)
+    midl = np.maximum(0, np.arange(n) - hng)
+    midr = np.minimum(n - 1, np.arange(n) + hng + 1)
+    righ = np.minimum(n - 1, np.arange(n) + hnw + 1)
+
+    sum1 = sum1[midl] - sum1[left] + sum1[righ] - sum1[midr]
+    sum2 = sum2[midl] - sum2[left] + sum2[righ] - sum2[midr]
+    counts = counts[midl] - counts[left] + counts[righ] - counts[midr]
+
+    mask_counts = (counts >= max(nsamples_min, 2))
+    counts = counts.astype(float)  # for the next row
+    counts[~mask_counts] = np.nan  # only for division, to avoid dividing by zero is there is some
+    mov_var = (sum2 / counts - (sum1 / counts) ** 2) * counts / (counts - 1)
+    mov_var = mov_var / expected_power_part
+    mov_var[~mask_counts] = tot_var
+    if not return_total_var:
+        if not return_mask:
+            return mov_var
+        else:
+            return mov_var, mask
+    else:
+        if not return_mask:
+            return mov_var, tot_var
+        else:
+            return mov_var, mask, tot_var
 
 
 def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
@@ -190,9 +898,10 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
     signal = np.array(signal)
 
     if mask is None:
-        mask = ~np.isnan(signal)
+        mask = isgood(signal)
     else:
         mask = np.array(mask).astype(bool)
+        mask &= isgood(signal)
         assert len(signal) == len(mask), 'Data and mask have to be of the same length!'
 
     if remove_outliers:
@@ -269,8 +978,62 @@ def moving_var(signal, nwind, ngap=0, mask=None, nsamples_min=32,
             return mov_var, mask, tot_var
 
 
+def get_p_value_gaussian(x, mean, std):
+    """
+    Calculates the integral from x to infinity of the
+    Gaussian with `mean` and `std`
+    :param x:
+    :type x: float
+    :param mean:
+    :type mean: float
+    :param std:
+    :type std: float
+    :return:
+    :rtype: float
+    """
+    return 0.5 * erfc((x - mean) / (2 ** 0.5 * std))
+
+
+def fast_chi2_01_sf(x, df):
+    """
+    Faster than chi2(loc=0, scale=1).sf(x, df). For very long arrays, it is similar. For small arrays and
+    single number, it is much faster
+    :param x: the value for which the survival function is calculated
+    :type x: float or numpy.ndarray of float
+    :param df: number of degrees of freedom
+    :type df: int
+    :return:
+    :rtype: same as `x`
+    """
+    if not hasattr(x, '__iter__'):
+        if x <= 0:
+            return 1.
+        else:
+            return gammaincc(df / 2.0, x / 2.0)
+    else:
+        res = gammaincc(df / 2.0, x / 2.0)
+        res[x <= 0] = 1.
+        return res
+
+
+def fast_chi2_01_isf(x, df):
+    return 2. * gammainccinv(df / 2.0, x)
+
+
 def get_expected_power_after_outlier_removal(nsig_outliers):
-    return norm(loc=0, scale=1).expect(func=lambda x: x ** 2, lb=-nsig_outliers, ub=nsig_outliers, conditional=False)
+    # conditional: bool, optional. If True, the integral is corrected by the conditional probability of
+    # the integration interval. The return value is the expectation of the function, conditional on being
+    # in the given interval. Default is False.
+    # This is what we want to compute:
+    # return norm(loc=0, scale=1).expect(func=lambda x: x ** 2, lb=-nsig_outliers, ub=nsig_outliers, conditional=True)
+    # However, it is slow. Therefore, we compute the following equivalent:
+    # res = norm.cdf(nsig) - nsig * norm.pdf(nsig) - (norm.cdf(-nsig) - (-nsig) * norm.pdf(-nsig))
+    # normalization = norm.cdf(nsig) - norm.cdf(-nsig)
+    # ndtr is like norm.cdf, but faster
+    # standard_normal_pdf is like norm.pdf, but faster
+    cdf_diff = 2 * ndtr(nsig_outliers) - 1  # this is also the normalization to make conditional=True
+    res = cdf_diff - 2 * nsig_outliers * standard_normal_pdf(nsig_outliers)
+    return res / cdf_diff
 
 
 def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, detr_len=128,
@@ -295,15 +1058,33 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
     :type renormalize: bool
     :return: std of the data
     :rtype: float
+    :param return_var:
+    :type return_var:
+    :param return_mask:
+    :type return_mask:
     """
     if mask is None:
-        mask = ~np.isnan(data)
+        mask = isgood(data)
+    else:
+        mask = np.array(mask, dtype=bool) & isgood(data)
     if detrend:
-        data1 = detrend_mov_ave(np.array(data), length=detr_len, mask=mask, method='median', endmethod='mean',
-                                ends='symmetric', endlen=None, return_trend=False, keep_overall_level=False,
-                                remove_outliers=True, nsig_outliers=nsig)
+        data1 = data - moving_mean(data=np.array(data), nwind=detr_len, ngap=0, mask=mask, nsamples_min=32,
+                                   remove_outliers=True, nsig_outliers=nsig,
+                                   return_mask=False, return_total_mean=False,
+                                   replace_ends=True, endmethod='mean')
+        # data1 = detrend_mov_ave(np.array(data), length=detr_len, mask=mask, method='median', endmethod='mean',
+        #                         ends='symmetric', endlen=None, return_trend=False, keep_overall_level=False,
+        #                         remove_outliers=True, nsig_outliers=nsig)
     else:
         data1 = np.array(data)
+
+    if renormalize:
+        expected_power = get_expected_power_after_outlier_removal(nsig_outliers=nsig)
+    else:
+        expected_power = 1.
+
+    if np.isnan(data1[mask]).any() or (not np.all(np.isfinite(data1[mask]))) or len(data1[mask]) < 3:
+        raise ValueError('Not enough data to calculate the std!')
 
     var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
     for i in range(n_iterations):
@@ -311,7 +1092,6 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
         mask = outlier_mask * mask
         var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
         if renormalize:
-            expected_power = get_expected_power_after_outlier_removal(nsig_outliers=nsig)
             var_calc = var_calc / expected_power
     if not return_mask:
         if not return_var:
@@ -343,7 +1123,7 @@ def get_mean_and_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
     :rtype:
     """
     if mask is None:
-        mask = ~np.isnan(data)
+        mask = isgood(data)
     # if not hasattr(stds, '__len__'):
     #     stds = np.ones(len(data)) * stds
     data = np.array(data)[mask]
@@ -375,6 +1155,24 @@ def get_mean_and_std_of_mean_two_sigmas_model(data, stds=None, mask=None):
     # return np.sqrt(var_of_mean_est)
 
 
+def get_poisson_at_least(rate, min_number=1):
+    """
+    Calculates the poisson probability of having at least `min_number` events with the given `rate`.
+    For example, we need the probability that one or more events will happen, then `min_number`=1,
+    and the result is 1 - poisson(rate).pmf(0)
+    :param rate: rate parameter in the poisson process. Mean number of events per unit time
+    :type rate: float
+    :param min_number: minimal number of events that we want to occur
+    :type min_number: int
+    :return: probability of having at least `min_number` events
+    :rtype: float
+    """
+    p_small = 0
+    for n in range(min_number):
+        p_small += poisson(rate).pmf(n)
+    return 1 - p_small
+
+
 def get_average_dt(times):
     """
     take list of time arrays and get the average time step.
@@ -402,7 +1200,7 @@ def get_average_mean(fluxes):
     len_total = 0
     for q in range(len(fluxes)):
         mean = np.nanmean(fluxes[q])
-        ll = len(fluxes[q][~np.isnan(fluxes[q])])
+        ll = len(fluxes[q][isgood(fluxes[q])])
         mean_total += mean * ll
         len_total += ll
     mean_total = mean_total / len_total
@@ -431,7 +1229,7 @@ def window_data(data, alpha=0.1):
             data[i] = data * tukey(len(data), alpha=alpha, sym=True)
 
 
-def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, return_zero_padding_ends=False):
+def pad_by_zeros_fun(data, support=None, minimal_extension=0, in_the_center=False, return_zero_padding_ends=False):
     """
     Pads data by zeros from the two sides.
     :param data:
@@ -467,7 +1265,128 @@ def pad_by_zeros(data, support=None, minimal_extension=0, in_the_center=False, r
         return data_padded
 
 
-def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, return_freqs=False, dt=1., return_npsds=False):
+def find_mean_with_outlier_removal(samples_list_per_paramerer, distr, outlier_sf=1e-2, n_repetitions=2,
+                                   return_masks=False):
+    """
+    :param samples_list_per_paramerer: Outer index is different parameters (different means), inner index is different samples
+        of the same distribution
+    :type samples_list_per_paramerer:
+    :param distr: str or distribution, function similar to scipy.stats distributions. should have `expect` and `isf` methods
+    :type distr: str or distribution object from scipy.stats or similar
+    :param outlier_sf:
+    :type outlier_sf:
+    :param n_repetitions:
+    :type n_repetitions:
+    :param return_masks:
+    :type return_masks:
+    :return:
+    :rtype:
+    """
+    means = np.mean(samples_list_per_paramerer, axis=-1)
+    masks = None
+    if (not isinstance(distr, str)) or (distr != 'chi2_1'):
+        unitless_boundary = distr.isf(outlier_sf)
+        expected_val_truncated = distr.expect(func=lambda x: x, lb=0, ub=unitless_boundary, conditional=True)
+    else:
+        unitless_boundary = fast_chi2_01_isf(x=outlier_sf, df=1)
+        squ = np.sqrt(unitless_boundary)
+        cumul = ndtr(squ)
+        # took the integral for chi2 distribution with 1 degree of freedom analytically
+        expected_val_truncated = (2 * cumul - 2 * standard_normal_pdf(squ) * squ - 1) / (2 * cumul - 1)
+    for _ in range(n_repetitions):
+        means_temporary = np.array(means)
+        upper_boundaries = means_temporary * unitless_boundary
+        masks = [samples_list_per_paramerer[i] <= upper_boundary for (i, upper_boundary) in enumerate(upper_boundaries)]
+        # we normalized all, so expected_val_full = 1., therefore we do not multiply by it
+        means = [np.mean(samples_list_per_paramerer[i][mask]) / expected_val_truncated for (i, mask) in enumerate(masks)]
+    means = np.array(means)
+    if not return_masks:
+        return means
+    else:
+        return means, masks
+
+
+def psd_mean_with_outlier_removal(power_list, outlier_sf=1e-2, n_repetitions=2,
+                                  rfft_edge_bins=True, return_masks=False):
+    """
+    Calculates the mean of slice powers `power_list` to estimate the psd with rejecting outliers. Assumes that the power
+    should have exponential distribution with the scale parameter equal to the PSD at a given frequency. Measures iteratively
+    `n_repetitions` times the PSD as the mean at a given frequency and removes the outliers set by exceeding a survival
+    function of `outlier_sf` for an exponential distribution. After the iterations, calculates the mean with the final mask,
+    and corrects the estimate for the fact that part of the distribution was truncated.
+    :param power_list: List of power slices, each one being a vector for different frequencies
+    :type power_list: list of numpy.ndarray 1d of float, where the length of the list is the number of slices
+    :param outlier_sf: Survival function value to determine the outlier rejection threshold. Corresponds to exponential distribution
+    :type outlier_sf: float
+    :param n_repetitions: Number of iterations of rejecting outliers and re-estimating the mean
+    :type n_repetitions: int
+    :param rfft_edge_bins: Use the distribution of the power for rfft of a normal vector. For all the rfft frequencies except
+        for the zeroth and the last, it is 'expon', for the zeroth and the last it is 'chi2' which is chi-squared
+        distribution with 1 degree of freedom
+    :type rfft_edge_bins: bool
+    :param return_masks: Whether to return the masks of the non-outliers used in the mean calculation
+    :type return_masks: bool
+    :return: means, masks or only means.
+    :rtype: means: numpy.ndarray 1d of float, masks: list of numpy.ndarray 1d of bool
+    """
+    from scipy.stats import expon, chi2
+    power_list_per_freq = np.array(np.array(power_list).T)
+
+    if return_masks:
+        if rfft_edge_bins:
+            power_list_per_freq_expon = np.array(power_list_per_freq[1:-1])
+            means_expon, masks_expon = find_mean_with_outlier_removal(samples_list_per_paramerer=power_list_per_freq_expon,
+                                                                      distr=expon(loc=0, scale=1),
+                                                                      outlier_sf=outlier_sf, n_repetitions=n_repetitions,
+                                                                      return_masks=True)
+            power_list_per_freq_chi2 = np.array([power_list_per_freq[0], power_list_per_freq[-1]])
+            means_chi2, masks_chi2 = find_mean_with_outlier_removal(samples_list_per_paramerer=power_list_per_freq_chi2,
+                                                                    distr='chi2_1',  # chi2(loc=0, scale=1, df=1),
+                                                                    outlier_sf=outlier_sf, n_repetitions=n_repetitions,
+                                                                    return_masks=True)
+            means_final = np.concatenate(([means_chi2[0]], means_expon, [means_chi2[-1]]))
+            masks_final = [masks_chi2[0]] + masks_expon + [masks_chi2[-1]]
+        else:
+            means_final, masks_final = find_mean_with_outlier_removal(samples_list_per_paramerer=power_list_per_freq,
+                                                                      distr=expon(loc=0, scale=1),
+                                                                      outlier_sf=outlier_sf, n_repetitions=n_repetitions,
+                                                                      return_masks=True)
+        return means_final, masks_final
+    else:
+        if rfft_edge_bins:
+            power_list_per_freq_expon = np.array(power_list_per_freq[1:-1])
+            means_expon = find_mean_with_outlier_removal(samples_list_per_paramerer=power_list_per_freq_expon,
+                                                         distr=expon(loc=0, scale=1),
+                                                         outlier_sf=outlier_sf, n_repetitions=n_repetitions,
+                                                         return_masks=False)
+            power_list_per_freq_chi2 = np.array([power_list_per_freq[0], power_list_per_freq[-1]])
+            means_chi2 = find_mean_with_outlier_removal(samples_list_per_paramerer=power_list_per_freq_chi2,
+                                                        distr=chi2(loc=0, scale=1, df=1),
+                                                        outlier_sf=outlier_sf, n_repetitions=n_repetitions,
+                                                        return_masks=False)
+            means_final = np.concatenate(([means_chi2[0]], means_expon, [means_chi2[-1]]))
+        else:
+            means_final = find_mean_with_outlier_removal(samples_list_per_paramerer=power_list_per_freq,
+                                                         distr=expon(loc=0, scale=1),
+                                                         outlier_sf=outlier_sf, n_repetitions=n_repetitions,
+                                                         return_masks=False)
+        return means_final
+
+    # means = np.mean(power_list, axis=0)
+    # masks = None
+    # unitless_boundary = distr.isf(outlier_sf)
+    # expected_val_truncated = distr.expect(func=lambda x: x, lb=0, ub=unitless_boundary, conditional=True)
+    # for _ in range(n_repetitions):
+    #     means_temporary = np.array(means)
+    #     upper_boundaries = means_temporary * unitless_boundary
+    #     masks = [power_list_per_freq[i] <= upper_boundary for (i, upper_boundary) in enumerate(upper_boundaries)]
+    #     # we normalized all, so expected_val_full = 1., therefore we do not multiply by it
+    #     means = [np.mean(power_list_per_freq[i][mask]) / expected_val_truncated for (i, mask) in enumerate(masks)]
+    # means = np.array(means)
+
+
+def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, use_rfft=True, reject_outliers=False, outlier_sf=1e-2,
+               n_repetitions_outliers=4, return_freqs=False, dt=1., return_npsds=False, return_slices=False):
     """
     Function for measuring psd of the signal with Welch method.
 
@@ -519,8 +1438,8 @@ def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, re
     windowdict = {'boxcar': np.ones(nperseg) / np.linalg.norm(np.ones(nperseg)),
                   'hann': 0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / nperseg)) / np.linalg.norm(
                       0.5 * (1 - np.cos(2 * np.pi * np.arange(nperseg) / nperseg)))}
-    if rfft:
-        fftfun = np.fft.rfft
+    if use_rfft:
+        fftfun = rfft
         freqfun = np.fft.rfftfreq
     else:
         fftfun = np.fft.fft
@@ -532,17 +1451,32 @@ def welch_psds(clean_fluxes, psd_masks, nperseg, noverlap, window, rfft=True, re
                      for ind1 in range(0, len(clean_fluxes[i]) - nperseg, nperseg - noverlap
                                        ) if np.sum((~psd_masks[i])[ind1:ind1 + nperseg]) == 0])
     npsds = np.array([len(p) for p in psds])  # number of psds used to take the average
-    psds = [np.mean(p, axis=0) for p in psds]
-    if not return_freqs:
-        if not return_npsds:
-            return psds
-        else:
-            return psds, npsds
+    returns = []
+    returns_count = 0
+    if return_slices:
+        slices = copy.deepcopy(psds)
+        returns.append(slices)
+        returns_count += 1
+
+    if reject_outliers:
+        psds = [psd_mean_with_outlier_removal(p, outlier_sf=outlier_sf, n_repetitions=n_repetitions_outliers,
+                                              rfft_edge_bins=True, return_masks=False) for p in psds]
     else:
-        if not return_npsds:
-            return psds, [freqfun(nperseg, d=dt) for _ in range(len(psds))]
-        else:
-            return psds, [freqfun(nperseg, d=dt) for _ in range(len(psds))], npsds
+        psds = [np.mean(p, axis=0) for p in psds]
+    returns.append(psds)
+    returns_count += 1
+
+    if return_freqs:
+        returns.append([freqfun(nperseg, d=dt) for _ in range(len(psds))])
+        returns_count += 1
+    if return_npsds:
+        returns.append(npsds)
+        returns_count += 1
+
+    if returns_count == 1:
+        return returns[0]
+    else:
+        return returns
 
 
 def window_wf_td_fun(wf_fd,  extension_coef=2.5, meas_len=256):
@@ -558,7 +1492,7 @@ def window_wf_td_fun(wf_fd,  extension_coef=2.5, meas_len=256):
     :return:
     :rtype:
         """
-    wf_td = np.fft.irfft(wf_fd)
+    wf_td = irfft(wf_fd)
     wind = np.zeros(len(wf_td))
     len_to_save = meas_len  # it is 2 nperseg
     tuk = tukey(int(2 * extension_coef * len_to_save), alpha=1 - 1 / extension_coef, sym=True)
@@ -566,12 +1500,12 @@ def window_wf_td_fun(wf_fd,  extension_coef=2.5, meas_len=256):
     wind[-len(tuk) // 2:] = tuk[:len(tuk) // 2]
     wf_td = wf_td * wind
     wf_td -= np.mean(wf_td) * wind / np.mean(wind)
-    wf_fd = np.abs(np.fft.rfft(wf_td))
-    wf_td = np.fft.irfft(wf_fd)  # we need wf_fd for inpainting
+    wf_fd = np.abs(rfft(wf_td))
+    wf_td = irfft(wf_fd)  # we need wf_fd for inpainting
     return wf_td, wf_fd
 
 
-def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
+def psd2wf(psd, support=None, use_rfft=True, tukey_steps_len=0,
            conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False):
     """
     Generates a whitening filter of the needed length (support) from the PSD.
@@ -580,9 +1514,9 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
     :type psd: ndarray
     :param support: the desired length of the extrapolated filter (time domain). If None, take the length corresponding to the psd
     :type support: int
-    :param rfft: whether to use rfft (or just fft). If true, the signal is treated as real,
+    :param use_rfft: whether to use rfft (or just fft). If true, the signal is treated as real,
                  and all ffts are rffts. The length of the frequency samples are the nperseg//2+1.
-    :type rfft: bool
+    :type use_rfft: bool
     :param tukey_steps_len: length taken for zeroing in the tukey windowing
     :type tukey_steps_len: int or float
     :param conditional_zero_zeroth_freq: whether to put the low frequencies to zero if they deviate too much
@@ -597,8 +1531,9 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
     if not hasattr(wf_fd_meas[0], '__len__'):
         wf_fd_meas = np.array([wf_fd_meas])
         was_vector = True
-    if rfft:
-        ifftfun = np.fft.irfft
+    if use_rfft:
+        ifftfun = irfft
+        fftfun = rfft
         dtype_res = np.float64
         if support is None:
             support = 2 * (len(wf_fd_meas) - 1)
@@ -606,6 +1541,7 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
         if support == 'none':
             support = len(wf_fd_meas)
         ifftfun = np.fft.ifft
+        fftfun = np.fft.fft
         dtype_res = np.complex128
 
     assert support % 2 == 0, 'self.support assumed to be even!'
@@ -621,7 +1557,7 @@ def psd2wf(psd, support=None, rfft=True, tukey_steps_len=0,
         result[-mid_point:] = wf_td[-mid_point:]
 
         wf_td = np.array(result)  # np.fft.fftshift(result)
-        wf_fd = np.abs(np.fft.rfft(result))  # It is complex, which is weird, but what can we do
+        wf_fd = np.abs(fftfun(result))  # It is complex, which is weird, but what can we do
         if ((conditional_zero_zeroth_freq and (
                 np.mean(np.abs(wf_fd[0:len(wf_fd) // 50])) / np.mean(np.abs(wf_fd[5 * len(wf_fd) // 10:7 * len(wf_fd) // 10])) < 0.3))
                 or always_zero_zeroth_freq):
@@ -646,7 +1582,7 @@ def whiten_vector(vector, wf_fd):
     vector = np.roll(vector, -np.argmax(vector))
     vector = np.concatenate((vector[:len(vector) // 2], np.zeros(support - len(vector)),
                              vector[len(vector) // 2:]))
-    vector = np.fft.irfft(np.fft.rfft(vector) * wf_fd)
+    vector = irfft(rfft(vector) * wf_fd)
     return vector
 
 
@@ -681,29 +1617,30 @@ def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
     return cov_matr
 
 
-Inpaint_rand_vec = np.abs(np.random.normal(loc=0, scale=0.001, size=8192).astype(Dtype_r))
-
-
-def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32, rand_vec=Inpaint_rand_vec):
-    length = len(fluxes[0])
-    # I was afraid that wf_tds are fftshifted to the center, but since here we have the inner product, it is not important
-    inpainted_fluxes = np.zeros((len(fluxes), length), dtype=dtype)
-    for q in range(len(fluxes)):
-        # filter2cov_matrix:
-        prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])
-        c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)], dtype=dtype)
-        a_t_c_inv = c_inv[~masks[q]]
-        m = a_t_c_inv[:, ~masks[q]]
-        m += np.identity(len(m), dtype=dtype) * rand_vec[:len(m)] * float32(np.mean(np.diag(m)))
-        m_inv_a_t_c_inv = np.linalg.solve(a=m, b=a_t_c_inv)  # ax = b  solution
-        f = np.zeros(shape=(length, length), dtype=dtype)
-        f[~masks[q]] = m_inv_a_t_c_inv
-        inpainted_fluxes[q] = fluxes[q] - np.dot(f, fluxes[q])
-    return inpainted_fluxes
+# Inpaint_rand_vec = np.abs(np.random.normal(loc=0, scale=0.001, size=8192).astype(Dtype_r))
+#
+#
+# def inpaint_fluxes_fun(fluxes, masks, wf_tds, dtype=np.float32, rand_vec=Inpaint_rand_vec):
+#     length = len(fluxes[0])
+#     # I was afraid that wf_tds are fftshifted to the center, but since here we have the inner product, it is not important
+#     inpainted_fluxes = np.zeros((len(fluxes), length), dtype=dtype)
+#     for q in range(len(fluxes)):
+#         # filter2cov_matrix:
+#         prod = np.array([np.sum(wf_tds[q] * np.roll(wf_tds[q], i)) for i in range(length)])
+#         c_inv = np.array([[prod[k - j] for k in range(length)] for j in range(length)], dtype=dtype)
+#         a_t_c_inv = c_inv[~masks[q]]
+#         m = a_t_c_inv[:, ~masks[q]]
+#         m += np.identity(len(m), dtype=dtype) * rand_vec[:len(m)] * float32(np.mean(np.diag(m)))
+#         m_inv_a_t_c_inv = np.linalg.solve(a=m, b=a_t_c_inv)  # ax = b  solution
+#         f = np.zeros(shape=(length, length), dtype=dtype)
+#         f[~masks[q]] = m_inv_a_t_c_inv
+#         inpainted_fluxes[q] = fluxes[q] - np.dot(f, fluxes[q])
+#     return inpainted_fluxes
 
 
 def nan_average_filt(ar, kernel_size=3, method='mean'):
     """
+    Very slow and bas for the edges. Use miving_mean instead, or detrend_mov_ave in the worst case.
     Return moving average of the data with the kernel_size.
     The average is either mean or median, defined by method.
     :param ar: The input array to filter.
@@ -758,7 +1695,7 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
     ends : str : 'continue' or 'zeros' or 'keep'.
         What to do to the ends of the data in linear method.
         'continue' is to take the first(last) value and fill by it all the rest.
-        'zeros' meens to replace by zeros.
+        'zeros' means to replace by zeros.
         'keep' orig_means to leave what was in the original data (maybe nans)
     mitigate_hole_ends : bool
         If true, for the linear, mean and median interpolation, not the ends of the holes will be taken,
@@ -773,9 +1710,9 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
         Interpolated flux
     """
     if mask is None:
-        mask = ~np.isnan(flux)
+        mask = isgood(flux)
     else:
-        mask = np.array(mask).astype(bool)
+        mask = (np.array(mask).astype(bool)) & isgood(flux)
 
     ind1 = None
     ind2 = None
@@ -789,7 +1726,8 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
         lenholes = endholes - begholes
         kernel_size = np.max(lenholes) + 4
         indholes = np.where(~mask1)[0]
-        flux[indholes] = nan_average_filt(flux, kernel_size=kernel_size, method=interp_method)[indholes]
+        flux[indholes] = moving_mean(data=flux, nwind=kernel_size, ngap=0, mask=mask1, nsamples_min=kernel_size//4,
+                                     remove_outliers=False, nsig_outliers=6, return_mask=False, return_total_mean=False)
     elif interp_method == 'iterative_fourier':
         nrep = 6
         flux1 = np.array(flux)
@@ -815,23 +1753,42 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
                     np.array([flux1[begholes[j]], flux1[endholes[j]]]))[1:-1]
         else:
             if endhole_method == 'median':
-                for j in range(len(begholes)):
-                    i1 = max(begholes[j] - mit_length + 1, 0)
-                    i2 = min(endholes[j] + mit_length, len(flux1))
-                    flux1[begholes[j] + 1:endholes[j]] = np.interp(
-                        np.arange(begholes[j], endholes[j] + 1), np.array([begholes[j], endholes[j]]),
-                        np.array([np.nanmedian((flux1[i1:begholes[j] + 1])[np.where(mask1[i1:begholes[j] + 1])[0]]),
-                                  np.nanmedian((flux1[endholes[j]:i2])[np.where(mask1[endholes[j]:i2])[0]])]))[1:-1]
+                av_fun = np.median
             elif endhole_method == 'mean':
-                for j in range(len(begholes)):
-                    i1 = max(begholes[j] - mit_length + 1, 0)
-                    i2 = min(endholes[j] + mit_length, len(flux1))
-                    flux1[begholes[j] + 1:endholes[j]] = np.interp(
-                        np.arange(begholes[j], endholes[j] + 1), np.array([begholes[j], endholes[j]]),
-                        np.array([np.nanmean((flux1[i1:begholes[j] + 1])[np.where(mask1[i1:begholes[j] + 1])[0]]),
-                                  np.nanmean((flux1[endholes[j]:i2])[np.where(mask1[endholes[j]:i2])[0]])]))[1:-1]
+                av_fun = np.mean
             else:
                 raise AssertionError('Incorrect endhole_method specified!')
+            for j in range(len(begholes)):
+                i1 = max(begholes[j] - mit_length + 1, 0)
+                i2 = min(endholes[j] + mit_length, len(flux1))
+
+                slice1 = (flux1[i1:begholes[j] + 1])[np.where(mask1[i1:begholes[j] + 1])[0]]
+                slice2 = (flux1[endholes[j]:i2])[np.where(mask1[endholes[j]:i2])[0]]
+                if (len(slice1) > 0) and (len(slice2) > 0):
+                    flux1[begholes[j] + 1:endholes[j]] = np.interp(
+                        np.arange(begholes[j], endholes[j] + 1), np.array([begholes[j], endholes[j]]),
+                        np.array([av_fun(slice1), av_fun(slice2)]))[1:-1]
+                else:
+                    raise ValueError('Interpolation failed!')
+            # # Same but without a check, which is redundant but I was trying to fix a bug:
+            # if endhole_method == 'median':
+            #     for j in range(len(begholes)):
+            #         i1 = max(begholes[j] - mit_length + 1, 0)
+            #         i2 = min(endholes[j] + mit_length, len(flux1))
+            #         flux1[begholes[j] + 1:endholes[j]] = np.interp(
+            #             np.arange(begholes[j], endholes[j] + 1), np.array([begholes[j], endholes[j]]),
+            #             np.array([np.nanmedian((flux1[i1:begholes[j] + 1])[np.where(mask1[i1:begholes[j] + 1])[0]]),
+            #                       np.nanmedian((flux1[endholes[j]:i2])[np.where(mask1[endholes[j]:i2])[0]])]))[1:-1]
+            # elif endhole_method == 'mean':
+            #     for j in range(len(begholes)):
+            #         i1 = max(begholes[j] - mit_length + 1, 0)
+            #         i2 = min(endholes[j] + mit_length, len(flux1))
+            #         flux1[begholes[j] + 1:endholes[j]] = np.interp(
+            #             np.arange(begholes[j], endholes[j] + 1), np.array([begholes[j], endholes[j]]),
+            #             np.array([np.nanmean((flux1[i1:begholes[j] + 1])[np.where(mask1[i1:begholes[j] + 1])[0]]),
+            #                       np.nanmean((flux1[endholes[j]:i2])[np.where(mask1[endholes[j]:i2])[0]])]))[1:-1]
+            # else:
+            #     raise AssertionError('Incorrect endhole_method specified!')
         flux[ind1:ind2 + 1] = flux1
     if interp_method == 'linear' or interp_method == 'mean' or interp_method == 'median':
         if ends == 'continue':
@@ -847,7 +1804,7 @@ def interpolate_over_mask(flux, mask=None, interp_method='linear', ends='continu
         elif ends == 'keep':
             pass
         else:
-            raise AssertionError('Unlefined ends parameter specified!')
+            raise AssertionError('Undefined ends parameter specified!')
     return flux
 
 
@@ -857,14 +1814,14 @@ def sinc_interp(f_vec, support, tukey_steps_len=16):
     """
     if tukey_steps_len < 1:
         tukey_steps_len = support * tukey_steps_len
-    t_vec = np.fft.irfft(f_vec)
+    t_vec = irfft(f_vec)
     meas_len = len(t_vec)
     t_vec = np.fft.ifftshift(np.fft.fftshift(t_vec) * tukey(meas_len, alpha=tukey_steps_len / meas_len, sym=True))
     mid_point = len(t_vec) // 2
     result = np.zeros(support, dtype=np.float64)  # f_vec.dtype)
     result[:mid_point] = t_vec[:mid_point]
     result[-mid_point:] = t_vec[-mid_point:]
-    return np.abs(np.fft.rfft(result))
+    return np.abs(rfft(result))
 
 
 def tanhstep(x, center=0., hwhm=1., start_from_zero=False):
@@ -906,7 +1863,7 @@ def trend_fft(data, nperseg, endlen=None, mask=None, data_low=None, fit_order='c
     fit_order : str : 'quadratic' or 'cubic'
     Returns
     -------
-    data_low : numpy.array or list of float
+    data_low : numpy.array or list of float3
         Smooth low-frequency trend of the `data`
 
     """
@@ -914,7 +1871,7 @@ def trend_fft(data, nperseg, endlen=None, mask=None, data_low=None, fit_order='c
 
     data = np.array(data)
     time = np.arange(len(data))
-    nanmask = ~np.isnan(data)
+    nanmask = isgood(data)
     if not nanmask.all():
         data_i = interpolate_over_mask(data, mask=nanmask)
     else:
@@ -959,9 +1916,9 @@ def trend_fft(data, nperseg, endlen=None, mask=None, data_low=None, fit_order='c
         assert endlen < len(data) // 2, '`endlen` is too big!'
 
         if data_low is None:
-            data_rf = np.fft.rfft(np.array(data_i))
+            data_rf = rfft(np.array(data_i))
             data_rf[int(len(data_i) / nperseg):] = 0.
-            data_low = np.real(np.fft.irfft(data_rf, n=len(data_i)))
+            data_low = irfft(data_rf, n=len(data_i))
         else:
             assert len(data_low) == len(data), 'The lengths of `data_low` and `data` must be equal!'
 
@@ -1084,7 +2041,9 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
     threshold_step_size_std = residual_threshold_step_in_sigma  # redefining names
     medlen = slice_for_residual_step
     data = np.array(data)  # copying and going to numpy
-    nanmask = ~np.isnan(data)
+    if np.isnan(data).any():
+        raise ValueError('data has NaNs!')
+    nanmask = isgood(data)
     if not nanmask.all():  # interpolating data if it contains nans
         data_i = interpolate_over_mask(data, mask=nanmask)  # will need for fft
     else:
@@ -1119,7 +2078,13 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
     begpieces = np.where(mask0 * np.roll(~mask0, 1))[0] + ind_i  # beginnings of pieces split by holes
     begpieces = np.concatenate(([ind_i], begpieces))
 
-    fdat = np.abs(np.fft.rfft(data_i))
+    fdat = np.abs(rfft(data_i))
+    subset = fdat[-len(data) // 4:]
+    if np.any(np.isnan(subset)):
+        raise ValueError("Input data is nan!")
+    elif np.any(np.isinf(subset)) or np.max(np.abs(subset)) > 1e38:
+        raise ValueError("Input data too large or invalid!")
+
     std_fast_0 = (np.mean((fdat[-len(data) // 4:]) ** 2) / (len(data))) ** 0.5  # standard deviation of fast modes
     std_fast = std_fast_0 + np.max(fdat) / 20000  # I don't remember why exactly this was made, but it worked
 
@@ -1156,11 +2121,15 @@ def detrend_piecewise(data, big_mask=None, mask=None, nperseg=None, endlen=None,
         begholes = np.where(big_mask_p * np.roll(~big_mask_p, -1))[0] + 1  # define begholes inside the piece
         endholes = np.where(big_mask_p * np.roll(~big_mask_p, 1))[0]
 
+        if not isgood(trend_local).all():
+            raise ValueError('Trend has NaNs!')
         beg_small_pieces = [0]
         end_small_pieces = []
         for j in range(len(begholes)):
-            if ((len(np.where(~np.isnan(piece[begholes[j] - medlen:begholes[j]]))[0]) >= 3)
-                    and (len(np.where(~np.isnan(piece[endholes[j]:endholes[j] + medlen]))[0]) >= 3)
+            # piece_left = piece[begholes[j] - medlen:begholes[j]]
+            # piece_right = piece[endholes[j]:endholes[j] + medlen]
+            if ((len(np.where(isgood(piece[begholes[j] - medlen:begholes[j]]))[0]) >= 3)
+                    and (len(np.where(isgood(piece[endholes[j]:endholes[j] + medlen]))[0]) >= 3)
                     and ((np.abs(np.nanmedian(piece[begholes[j] - medlen:begholes[j]]
                                               - trend_local[begholes[j] - medlen:begholes[j]])
                                  - np.nanmedian(piece[endholes[j]:endholes[j] + medlen]
@@ -1221,7 +2190,6 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
                                     right linearly increases from endlen for point=0 to length/2 at point=length/2
                                2) if point>half-length, take usual half-length from both sides
                                for the second end, the same in opposite direction
-                'cut' : not to calculate the result at this point. The size of the output will be len(data)-length
     :type ends: str
     :param endlen: Minimal length to take from the end for determining the average in the
         first (last) point. If None, will be assigned depending on the method (see description of ends)
@@ -1246,7 +2214,7 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
     data = np.array(data)
 
     if mask is None:
-        mask = ~np.isnan(data)
+        mask = isgood(data)
 
     mask = np.array(mask)
     assert len(data) == len(mask), 'Data and mask must be of the same length!'
@@ -1263,9 +2231,8 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
         outlier_mask = np.abs(data - np.nanmean(data[mask])) < nsig_outliers * np.nanstd(data[mask])
         mask *= outlier_mask
 
+    trend = np.ones(len(data)) * np.nan
     if ends == 'asymmetric':
-        trend = []
-        res = []
         if endlen is None:
             l4 = int(np.ceil(length / 16))
         elif endlen > int(length / 2):
@@ -1278,68 +2245,48 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
                 if (mask[0:i + int(l4 + (l2 - l4) / l2 * i)]).any():
                     m = np.nanmedian((data[0:i + int(l4 + (l2 - l4) / l2 * i)]
                                       )[mask[0:i + int(l4 + (l2 - l4) / l2 * i)]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[0:i + int(l4 + (l2 - l4) / l2 * i)])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         elif endmethod == 'mean':
             for i in np.arange(0, l2):
                 if (mask[0:i + int(l4 + (l2 - l4) / l2 * i)]).any():
                     m = np.nanmean((data[0:i + int(l4 + (l2 - l4) / l2 * i)]
                                     )[mask[0:i + int(l4 + (l2 - l4) / l2 * i)]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[0:i + int(l4 + (l2 - l4) / l2 * i)])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         if method == 'median':
             for i in np.arange(l2, len(data) - l2):
                 if (mask[i - l2:i + l2]).any():
                     m = np.nanmedian((data[i - l2:i + l2])[mask[i - l2:i + l2]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[i - l2:i + l2])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         elif method == 'mean':
             for i in np.arange(l2, len(data) - l2):
                 if (mask[i - l2:i + l2]).any():
                     m = np.nanmean((data[i - l2:i + l2])[mask[i - l2:i + l2]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[i - l2:i + l2])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         if endmethod == 'median':
             for i in np.arange(len(data) - l2, len(data)):
                 if (mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]).any():
                     m = np.nanmedian((data[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]
                                       )[mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         elif endmethod == 'mean':
             for i in np.arange(len(data) - l2, len(data)):
                 if (mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]).any():
                     m = np.nanmean((data[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]
                                     )[mask[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[i - int(l4 + (l2 - l4) / l2 * (len(data) - i)):])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
     elif ends == 'symmetric':
-        trend = []
-        res = []
         if endlen is None:
             l4 = int(np.ceil(length / 4))
         elif endlen > int(length / 2):
@@ -1351,127 +2298,88 @@ def detrend_mov_ave(data, length=128, mask=None, method='median', endmethod='mea
             for i in np.arange(0, l4):
                 if (mask[0:i + l4]).any():
                     m = np.nanmedian((data[0:i + l4])[mask[0:i + l4]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[0:i + l4])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
             for i in np.arange(l4, l2):
                 if (mask[0:2 * i]).any():
                     m = np.nanmedian((data[0:2 * i])[mask[0:2 * i]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[0:2 * i])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         elif endmethod == 'mean':
             for i in np.arange(0, l4):
                 if (mask[0:i + l4]).any():
                     m = np.nanmean((data[0:i + l4])[mask[0:i + l4]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[0:i + l4])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
             for i in np.arange(l4, l2):
                 if (mask[0:2 * i]).any():
                     m = np.nanmean((data[0:2 * i])[mask[0:2 * i]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[0:2 * i])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         if method == 'median':
             for i in np.arange(l2, len(data) - l2):
                 if (mask[i - l2:i + l2]).any():
                     m = np.nanmedian((data[i - l2:i + l2])[mask[i - l2:i + l2]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
-                    # trend.append(np.nan)
-                    # res.append(np.nan)
                     m = np.nanmedian(data[i - l2:i + l2])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         elif method == 'mean':
             for i in np.arange(l2, len(data) - l2):
                 if (mask[i - l2:i + l2]).any():
                     m = np.nanmean((data[i - l2:i + l2])[mask[i - l2:i + l2]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[i - l2:i + l2])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         if endmethod == 'median':
             for i in np.arange(len(data) - l2, len(data) - l4):
                 if (mask[2 * i - len(data):]).any():
                     m = np.nanmedian((data[2 * i - len(data):])[mask[2 * i - len(data):]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[2 * i - len(data):])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
             for i in np.arange(len(data) - l4, len(data)):
                 if (mask[i - l4:]).any():
                     m = np.nanmedian((data[i - l4:])[mask[i - l4:]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmedian(data[i - l4:])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
         elif endmethod == 'mean':
             for i in np.arange(len(data) - l2, len(data) - l4):
                 if (mask[2 * i - len(data):]).any():
                     m = np.nanmean((data[2 * i - len(data):])[mask[2 * i - len(data):]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[2 * i - len(data):])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
             for i in np.arange(len(data) - l4, len(data)):
                 if (mask[i - l4:]).any():
                     m = np.nanmean((data[i - l4:])[mask[i - l4:]])
-                    trend.append(m)
-                    res.append(data[i] - m)
                 else:
                     m = np.nanmean(data[i - l4:])
-                    trend.append(m)
-                    res.append(data[i] - m)
-    elif ends == 'cut':
-        trend = []
-        res = []
-        l2 = int(np.ceil(length / 2))
-        if method == 'median':
-            for i in np.arange(l2, len(data) - l2):
-                if (mask[i - l2:i + l2]).any():
-                    m = np.nanmedian((data[i - l2:i + l2])[mask[i - l2:i + l2]])
-                    trend.append(m)
-                    res.append(data[i] - m)
-                else:
-                    m = np.nanmedian(data[i - l2:i + l2])
-                    trend.append(m)
-                    res.append(data[i] - m)
-        if method == 'mean':
-            for i in np.arange(l2, len(data) - l2):
-                if (mask[i - l2:i + l2]).any():
-                    m = np.nanmean((data[i - l2:i + l2])[mask[i - l2:i + l2]])
-                    trend.append(m)
-                    res.append(data[i] - m)
-                else:
-                    m = np.nanmean(data[i - l2:i + l2])
-                    trend.append(m)
-                    res.append(data[i] - m)
+                trend[i] = m
+    # elif ends == 'cut':
+    #     trend = np.ones(len(data) - 2*l2) * np.nan
+    #     l2 = int(np.ceil(length / 2))
+    #     if method == 'median':
+    #         for i in np.arange(l2, len(data) - l2):
+    #             if (mask[i - l2:i + l2]).any():
+    #                 m = np.nanmedian((data[i - l2:i + l2])[mask[i - l2:i + l2]])
+    #             else:
+    #                 m = np.nanmedian(data[i - l2:i + l2])
+    #             trend[i] = m
+    #     if method == 'mean':
+    #         for i in np.arange(l2, len(data) - l2):
+    #             if (mask[i - l2:i + l2]).any():
+    #                 m = np.nanmean((data[i - l2:i + l2])[mask[i - l2:i + l2]])
+    #             else:
+    #                 m = np.nanmean(data[i - l2:i + l2])
+    #             trend[i] = m
     else:
         raise AssertionError('Incorrect way to treat ends specified!')
-    res = np.array(res)
+    res = data - trend
     if keep_overall_level:
         if method == 'median':
             res = res - np.nanmedian(res) + np.nanmedian(data[mask])
@@ -1565,8 +2473,7 @@ def notch_fun(f0, fs=6.28, df=None, irl=None, htol=1e-4, min_val=0, min_db=None,
 def mask_outliers_fun(data, mask=None, nsig0=Nsig_outliers_0, nsig1=Nsig_outliers_psd,
                       nsig_positive=Nsig_outliers_0_pos, nsig_negative=Nsig_outliers_0_neg,
                       detr_length=Detr_length_outliers, detr_method='median', detr_endmethod='mean',
-                      detr_ends='symmetric',
-                      detr_endlen=None, return_symmetric_mask=False):
+                      return_symmetric_mask=False):
     """
     Masks entries which deviate from the general trend more than nsig standard deviations.
     Detrending is made to find the general trend.
@@ -1601,11 +2508,6 @@ def mask_outliers_fun(data, mask=None, nsig0=Nsig_outliers_0, nsig1=Nsig_outlier
         data. The default is 'mean', because it is less sensitive to small
         amount of data samples available in the ends
     :type detr_endmethod: str, 'mean' or 'median'
-    :param detr_ends: See the desctiption in detrend_mov_ave. The default is 'symmetric'.
-    :type detr_ends: str, 'symmetric' or 'asymmetric' or 'cut'.
-    :param detr_endlen: Minimal length to take from the end for determining the average in the
-        first (last) point. If None, will then be redefined depending on the detr_endmethod
-    :type detr_endlen: int or None
     :param return_symmetric_mask: Whether to make another check with `nsig1` symmetrically for positive and negative
     :type return_symmetric_mask: bool
     :return:
@@ -1613,7 +2515,7 @@ def mask_outliers_fun(data, mask=None, nsig0=Nsig_outliers_0, nsig1=Nsig_outlier
     """
 
     data0 = np.array(data)
-    nanmask = ~np.isnan(data)
+    nanmask = isgood(data)
     data0[~nanmask] = np.nanmean(data0)
 
     if mask is None:
@@ -1641,23 +2543,31 @@ def mask_outliers_fun(data, mask=None, nsig0=Nsig_outliers_0, nsig1=Nsig_outlier
 
     mask1 = copy.deepcopy(mask)
 
-    if detr_method is not None:
-        data1 = detrend_mov_ave(np.array(data0), length=detr_length, mask=mask1, method=detr_method,
-                                endmethod=detr_endmethod,
-                                ends=detr_ends, endlen=detr_endlen, return_trend=False, keep_overall_level=False,
-                                remove_outliers=False)
+    if detr_method is not None:  # For now, we only do mean!
+        mov_mean = moving_mean(data=np.array(data), nwind=detr_length, ngap=0, mask=mask1, nsamples_min=32,
+                               remove_outliers=False, nsig_outliers=6,
+                               return_mask=False, return_total_mean=False,
+                               replace_ends=True, endmethod=detr_endmethod)
+        assert isgood(mov_mean).all(), 'Moving mean has NaNs!'
+        data1 = data - mov_mean
+        # data1 = detrend_mov_ave(np.array(data0), length=detr_length, mask=mask1, method=detr_method,
+        #                         endmethod=detr_endmethod,
+        #                         ends=detr_ends, endlen=detr_endlen, return_trend=False, keep_overall_level=False,
+        #                         remove_outliers=False)
     else:
         data1 = data0
 
     outlier_mask = np.abs(data1 - np.nanmean(data1[mask1])) < nsig0 * np.nanstd(data1[mask1])
     mask1 *= outlier_mask  # first time to remove big outliers that spoil the std
 
-    outlier_mask_p = (data1 - np.nanmean(data1[mask1])) < nsig_positive * np.nanstd(data1[mask1])
-    outlier_mask_n = (data1 - np.nanmean(data1[mask1])) > - nsig_negative * np.nanstd(data1[mask1])
+    data_no_mean = data1 - np.nanmean(data1[mask1])
+    std_data = np.nanstd(data1[mask1])
+    outlier_mask_p = data_no_mean < nsig_positive * std_data
+    outlier_mask_n = data_no_mean > - nsig_negative * std_data
     if not return_symmetric_mask:
         return outlier_mask_p * outlier_mask_n
     else:
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask1])) < nsig1 * np.nanstd(data1[mask1])
+        outlier_mask = np.abs(data_no_mean) < nsig1 * std_data
         return outlier_mask_p * outlier_mask_n, outlier_mask
 
 
@@ -1742,7 +2652,7 @@ def interpolate_time(time, mask=None):
     """
     time2 = copy.copy(time)
     if mask is None:
-        mask = ~np.isnan(time2)
+        mask = isgood(time2)
     dt = np.abs(np.nanmean((time2 - np.roll(time2, 1))[1:]))
     ind1 = (np.where(mask)[0])[0]
     ind2 = (np.where(mask)[0])[-1]
@@ -1763,6 +2673,7 @@ def interpolate_time(time, mask=None):
     return time2
 
 
+#%% Old vetting (run 12)
 def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
                   zero_ends_len_abs=3, zero_ends_len_rel=0.1,
                   return_amplitude=True, return_reason=True, inn_prod_min=0.2,
@@ -1922,6 +2833,42 @@ def veto_combined(data, template, fn=0.01, maxdev_std=4., maxdev_ampl=None,
                 return is_good
 
 
+def get_step_statistic_old(data, mask=None):
+    data = np.array(data)
+    data = data - np.nanmean(data)
+
+    if mask is None:
+        mask = isgood(data)
+    else:
+        mask &= isgood(data)
+
+    data[~mask] = 0
+
+    # subtract trend
+    deg = 3
+    coefs = np.polyfit(np.arange(len(data))[mask], data[mask], deg=deg)
+    x_dat = np.arange(len(data))
+    data = data - np.sum([coefs[i] * x_dat**(deg - i) for i in range(len(coefs))], axis=0)
+
+    mov_mean = moving_mean(data, nwind=(int(len(data) / 8) // 2) * 2, ngap=0, mask=mask, nsamples_min=(int(len(data) / 16) // 2) * 2,
+                           remove_outliers=False, nsig_outliers=6, return_mask=False, return_total_mean=False)
+    data = data - mov_mean
+    data[~mask] = 0
+
+    # slope, intercept = np.polyfit(np.arange(len(data))[mask], data[mask], deg=1)  # Linear fit: degree 1
+    # data = data - intercept - slope * np.arange(len(data))
+    # data[~mask] = 0
+
+    step_model = np.arange(len(data))
+    step_model = step_model / len(step_model)
+    step_model = step_model - np.mean(step_model)
+    step_convolved = irfft(rfft(data) * np.conj(rfft(step_model)), n=len(data))
+    vars_convolved = irfft(rfft(np.ones(len(step_model))) * np.conj(rfft(step_model ** 2)), n=len(data))
+    step_convolved = step_convolved / np.sqrt(vars_convolved)
+    step_convolved = step_convolved / outlier_free_std(step_convolved[mask])
+    return step_convolved
+
+
 def veto_step_linear_fit(data, indices_center_exclude=None):
     if indices_center_exclude is None:
         indices_all = np.arange(len(data))
@@ -1948,43 +2895,164 @@ def veto_step_linear_fit(data, indices_center_exclude=None):
     residuals_right_total = data[indices_right] - fit_total.x[0] - support_right * fit_total.x[1]
     statistic = (- np.sum(residuals_left ** 2) / var_left - np.sum(residuals_right ** 2) / var_right
                  + np.sum(residuals_left_total ** 2) / var_left + np.sum(residuals_right_total ** 2) / var_right)
-    p_value = chi2.sf(statistic, loc=0, scale=1, df=2)
+    # p_value = chi2.sf(statistic, loc=0, scale=1, df=2)
+    # The following is the same but faster
+    p_value = fast_chi2_01_sf(x=statistic, df=2)
     return p_value
 
 
-def veto_step(data, indices_center_exclude=None, mask=None, min_len_to_process=3):
+# def veto_step_sliding(data, mask=None, window_exclude=None, min_len_to_process=3, remove_outliers=True,
+#                       nsig_outliers=6, nwind_sliding=64, nsamples_min_sliding=32, ngap=0):
+#     if mask is None:
+#         mask = ~np.isnan(data)
+#     else:
+#         mask = np.array(mask)
+#         mask[np.isnan(data)] = False
+#
+#     mov_av_left, mov_av_right, mov_var_left, mov_var_right = left_right_moving_mean_and_var(
+#         data=data, nwind=nwind_sliding, ngap=ngap, mask=mask, nsamples_min=nsamples_min_sliding,
+#         remove_outliers=remove_outliers, nsig_outliers=nsig_outliers, return_mask=False, return_total_mean_var=False)
+#
+#     if window_exclude is None:
+#         indices_all = np.arange(len(data))
+#         indices_left = indices_all[:index_split]
+#         indices_right = indices_all[index_split:]
+#     else:
+#         indices_left = np.arange(0, index_split - (window_exclude + 1) // 2)
+#         indices_right = np.arange(index_split + window_exclude // 2, len(data))
+#     data_left = data[indices_left][mask[indices_left]]
+#     data_right = data[indices_right][mask[indices_right]]
+#
+#     var_full = (mov_var_left / nwind_sliding + mov_var_right / nwind_sliding)
+#     statistic = (mov_av_left - mov_av_right) ** 2 / var_full
+#     p_value = chi2(loc=0, scale=1, df=1).sf(statistic)
+#     return p_value
+
+
+def veto_step_local(data, mask=None, index_split=None, window_exclude=None, min_len_to_process=3):
     if mask is None:
-        mask = np.ones(len(data), dtype=bool)
-    if indices_center_exclude is None:
-        indices_all = np.arange(len(data))
-        indices_left = indices_all[:len(data) // 2]
-        indices_right = indices_all[len(data) // 2:]
+        mask = isgood(data)
     else:
-        indices_left = np.arange(0, indices_center_exclude[0])
-        indices_right = np.arange(indices_center_exclude[-1] + 1, len(data))
-    indices_all = np.concatenate((indices_left, indices_right))
+        mask = np.array(mask)
+        mask[~isgood(data)] = False
+    if index_split is None:
+        index_split = len(data) // 2
+    if window_exclude is None:
+        indices_all = np.arange(len(data))
+        indices_left = indices_all[:index_split]
+        indices_right = indices_all[index_split:]
+    else:
+        indices_left = np.arange(0, index_split - (window_exclude + 1) // 2)
+        indices_right = np.arange(index_split + window_exclude // 2, len(data))
     data_left = data[indices_left][mask[indices_left]]
     data_right = data[indices_right][mask[indices_right]]
+
     if len(data_left) >= min_len_to_process and len(data_right) >= min_len_to_process:
-        data_total = data[indices_all][mask[indices_all]]
-        mean_total = np.mean(data_total)  #
-        residuals_left = data_left - np.mean(data_left)
-        residuals_right = data_right - np.mean(data_right)
-        var_left = unb_var(residuals_left)
-        var_right = unb_var(residuals_right)
-        residuals_left_total = data_left - mean_total
-        residuals_right_total = data_right - mean_total
-        statistic = (- np.sum(residuals_left ** 2) / var_left - np.sum(residuals_right ** 2) / var_right
-                     + np.sum(residuals_left_total ** 2) / var_left + np.sum(residuals_right_total ** 2) / var_right)
-        p_value = chi2.sf(statistic, loc=0, scale=1, df=1)
+        mean_left = np.mean(data_left)
+        mean_right = np.mean(data_right)
+        var_left = unb_var(data_left)
+        var_right = unb_var(data_right)
+        var_full = (var_left / len(data_left) + var_right / len(data_right))
+        statistic = (mean_right - mean_left)**2 / var_full
+        p_value = chi2(loc=0, scale=1, df=1).sf(statistic)
         return p_value
     else:
-        return None
+        return np.nan
+
+
+#%% Current vetting
+
+def get_distances_to_holes(big_hole_masks):
+    """Finds distances to the edges of the nearby big holes in the mask.
+       Before the beginning and after the end of the mask are also considered holes"""
+    # big_hole_masks should be non-zero-padded
+    if not hasattr(big_hole_masks[0], '__len__'):
+        # if it is a list of masks
+        big_hole_masks = [big_hole_masks]
+        had_len = False
+    else:
+        had_len = True
+
+    dists_to_edges = []
+    for big_mask in big_hole_masks:
+        begpieces, endpieces = get_big_hole_edges_indices(big_mask)
+        dists = [find_closest_edge_dist(ind=ind, begpieces=begpieces, endpieces=endpieces) for ind in range(len(big_mask))]
+        dists_to_edges.append(np.array(dists))
+
+    if not had_len:
+        dists_to_edges = dists_to_edges[0]
+    return dists_to_edges
+
+
+def get_big_hole_edges_indices(big_mask):
+    """Finds the indices of the beginnings and ends of the pieces separated by big holes"""
+    ind_i = (np.where(big_mask)[0])[0]  # start where there is the first valid point
+    ind_f = (np.where(big_mask)[0])[-1] + 1  # end with the last valid point
+    mask0 = np.array(big_mask[ind_i:ind_f])  # mask of the working region
+    endpieces = np.where((~mask0) * np.roll(mask0, 1))[0] + ind_i  # ends of pieces split by holes
+    endpieces = np.concatenate((endpieces, [ind_f]))
+    begpieces = np.where(mask0 * np.roll(~mask0, 1))[0] + ind_i  # beginnings of pieces split by holes
+    begpieces = np.concatenate(([ind_i], begpieces))
+    return begpieces, endpieces
+
+
+def find_closest_edge_dist(ind, begpieces, endpieces):
+    """Finds the distance to the closest edge of the non-hole piece."""
+    dists = np.concatenate((np.abs(begpieces - ind), np.abs(endpieces - ind)))
+    return np.min(dists)
+
+
+def get_step_statistic(data, mask=None, mask_fit=None, wf_td=None, step_width=768,
+                       interpolate=False, interp_smoothing_length=10):
+    data = np.array(data)
+    data = data - np.nanmean(data)
+
+    if mask is None:
+        mask = isgood(data)
+    else:
+        mask = np.array(mask, dtype=bool)
+        mask &= isgood(data)
+
+    if mask_fit is None:
+        mask_fit = mask
+
+    data[~mask] = 0
+    # subtract linear trend
+    slope, intercept = np.polyfit(np.arange(len(data))[mask_fit], data[mask_fit], deg=1)  # Linear fit: degree 1
+    data = data - intercept - slope * np.arange(len(data))
+
+    if interpolate:
+        data = interpolate_over_mask(flux=data, mask=mask, interp_method='linear',
+                                     ends='continue', mitigate_hole_ends=True if ((interp_smoothing_length is not None) or (
+                                                                                   interp_smoothing_length == 0)) else False,
+                                     endhole_method='median', mit_length=interp_smoothing_length)
+    else:
+        data[~mask] = 0
+
+    # Making step model
+    if step_width is None:
+        step_model = np.arange(len(data))
+        step_model = step_model / len(step_model)
+        step_model = step_model - np.mean(step_model)
+    else:
+        step_model_piece = np.arange(step_width)
+        step_model_piece = step_model_piece / len(step_model_piece)
+        step_model_piece = step_model_piece - np.mean(step_model_piece)
+        step_model = np.concatenate((step_model_piece[:len(step_model_piece) // 2], np.zeros(len(data) - len(step_model_piece)),
+                                     step_model_piece[len(step_model_piece) // 2:]))
+
+    if wf_td is None:
+        step_convolved = irfft(rfft(data) * np.conj(rfft(step_model)), n=len(data))
+    else:
+        step_convolved = irfft(rfft(data) * rfft(wf_td) ** 2 * np.conj(rfft(step_model)), n=len(data))
+
+    step_convolved = step_convolved / outlier_free_std(step_convolved[mask])
+    return step_convolved
 
 
 def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
                tlen=None, fn=0.01, n_parts=4, min_bins_part=4, nperseg_psd=Nperseg_psd,
-               splitting='snr', lobe_hlen=4):
+               splitting='snr', lobe_hlen=4, return_p_values=False):
     """
     Splits the template into parts and tests between two cases: all parts are of the same amplitude
     or every part has a different amplitude.
@@ -2016,12 +3084,15 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
     :type splitting: str: 'snr' or 'lobe'
     :param lobe_hlen: half-length of the lobe if `splitting`=='lobe' or if the number of parts is only one.
     :type lobe_hlen: int
+    :param return_p_values: If `True`, will return p-values of the vetoes.
+    :type return_p_values: bool
     :return: is_goods, `True` where the trigger passed the veto, and `False` otherwise.
         Same size as the input `indices_padded`
     :rtype: numpy.ndarray of bool. Same size as the input `indices_padded`
     """
     # Indices are assumed to be given in the padded coordinates!
     template_wh_full = np.array(template_wh_full)  # this is template in Time domain
+    p_values = None
     if mask_padded is None:
         mask_padded = ~np.ones(len(template_wh_full)).astype(bool)  # data is given in Fourier, do there will be no nans in time
     if splitting == 'snr':
@@ -2049,12 +3120,23 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
         # FOR TOO SHORT TEMPLATES:
         # if the template is so short that there is only one part, we will just make one vetting on it and not parts.
         if n_parts <= 1:
-            is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
-                                      mask_padded=mask_padded, indices_padded=indices_padded, fn=fn, lobe_hlen=lobe_hlen)
+            if not return_p_values:
+                is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
+                                          mask_padded=mask_padded, indices_padded=indices_padded, fn=fn, lobe_hlen=lobe_hlen)
+            else:
+                p_values, is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
+                                                    mask_padded=mask_padded, indices_padded=indices_padded, fn=fn,
+                                                    lobe_hlen=lobe_hlen, return_p_values=return_p_values)
         # FOR LONG ENOUGH TEMPLATES:
         else:
-            is_good = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
-                                                       template_wh_full=template_wh_full, chi2_temp_indices=chi2_temp_indices, fn=fn)
+            if not return_p_values:
+                is_good = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
+                                                           template_wh_full=template_wh_full, chi2_temp_indices=chi2_temp_indices, fn=fn)
+            else:
+                p_values, is_good = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
+                                                                     template_wh_full=template_wh_full,
+                                                                     chi2_temp_indices=chi2_temp_indices, fn=fn,
+                                                                     return_p_values=return_p_values)
             if n_parts >= 3:  # at least 3 parts so that there can be less
                 if n_parts % 2 == 1:
                     n_parts_additional = 2
@@ -2062,16 +3144,30 @@ def veto_parts(data_wh_fd, template_wh_full, indices_padded, mask_padded=None,
                     n_parts_additional = 3
                 chi2_temp_indices_additional = _split_template_by_snr(template_wh_full=template_wh_full, n_parts=n_parts_additional,
                                                                       min_bins_part=min_bins_part)
-                is_good_additional = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
-                                                                      template_wh_full=template_wh_full,
-                                                                      chi2_temp_indices=chi2_temp_indices_additional, fn=fn)
+                if not return_p_values:
+                    is_good_additional = _split_and_match_veto_parts_time(data_wh_fd=data_wh_fd, indices_padded=indices_padded,
+                                                                          template_wh_full=template_wh_full,
+                                                                          chi2_temp_indices=chi2_temp_indices_additional, fn=fn)
+                else:
+                    p_values_additional, is_good_additional = _split_and_match_veto_parts_time(
+                        data_wh_fd=data_wh_fd, indices_padded=indices_padded, template_wh_full=template_wh_full,
+                        chi2_temp_indices=chi2_temp_indices_additional, fn=fn, return_p_values=return_p_values)
+                    p_values = np.nanmin(np.array([p_values, p_values_additional]), axis=0)
                 is_good = is_good & is_good_additional
     elif splitting == 'lobe':
-        is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
-                                  mask_padded=mask_padded, indices_padded=indices_padded, fn=fn, lobe_hlen=lobe_hlen)
+        if not return_p_values:
+            is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
+                                      mask_padded=mask_padded, indices_padded=indices_padded, fn=fn, lobe_hlen=lobe_hlen)
+        else:
+            p_values, is_good = _veto_lobe_time(data_wh_fd=data_wh_fd, template_wh_full=template_wh_full,
+                                                mask_padded=mask_padded, indices_padded=indices_padded, fn=fn,
+                                                lobe_hlen=lobe_hlen, return_p_values=return_p_values)
     else:
         raise ValueError("`splitting` must be 'snr' or 'lobe'!")
-    return is_good
+    if not return_p_values:
+        return is_good
+    else:
+        return p_values, is_good
 
 
 def _split_template_by_snr(template_wh_full, n_parts, min_bins_part=4):
@@ -2104,23 +3200,24 @@ def get_template_by_parts_snr(template_wh_td, n_parts, min_bins_part=4):
     return templates_parts
 
 
-def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_full, chi2_temp_indices, fn):
+def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_full, chi2_temp_indices, fn,
+                                     return_p_values=False):
     n_parts = len(chi2_temp_indices) - 1
     templates_parts = np.zeros((n_parts, len(template_wh_full)))
     for i in range(n_parts):
         templates_parts[i][chi2_temp_indices[i]: chi2_temp_indices[i + 1]] = template_wh_full[chi2_temp_indices[i]:
                                                                                               chi2_temp_indices[i + 1]]
     norms_templates_parts = np.array([np.linalg.norm(templates_parts[i]) for i in range(len(templates_parts))])
-    templates_parts = np.fft.rfft(templates_parts, axis=1)
+    templates_parts = rfft(templates_parts, axis=1)
     scores = []
     for i in range(n_parts):
-        stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
+        stat = irfft(np.conjugate(templates_parts[i]) * data_wh_fd)
         stat = stat / norms_templates_parts[i]  # outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
         # -> this is supposed to ensure the templ normalization, although formally this biases amplitude
         # stat = stat[zero_padding_ends[0]: len(stat) - zero_padding_ends[1]]  # indices are provided in padded coordinates now!
         # this will give a biased amplitude, but since we only look at the amplitudes differences, maybe it is not so bad?
         scores.append(stat)
-    stat_full = np.real(np.fft.irfft(np.conjugate(np.fft.rfft(template_wh_full)) * data_wh_fd))
+    stat_full = irfft(np.conjugate(rfft(template_wh_full)) * data_wh_fd)
     # -> norm is one, templ and data were norm
     stat_full = stat_full[indices_padded]
     scores = np.array(scores)[:, indices_padded]
@@ -2134,25 +3231,30 @@ def _split_and_match_veto_parts_time(data_wh_fd, indices_padded, template_wh_ful
     is_good_parts = np.sum((p_values_parts >= fn / n_parts).astype(float), axis=0) >= n_parts // 2
 
     scores = np.sum(scores ** 2, axis=0) - stat_full ** 2
-    p_values = chi2.sf(scores, loc=0, scale=1, df=n_parts - 1)
+    # p_values = chi2.sf(scores, loc=0, scale=1, df=n_parts - 1)
+    # The following line is the same just faster:
+    p_values = fast_chi2_01_sf(x=scores, df=n_parts - 1)
     is_good = np.array(p_values) >= fn
     is_good = is_good & is_good_parts
     # See in the veto_parts_fourier regarding the scale. The following empirical scale can be thought of:
     # measured_scale = (np.var(scores[mask_padded]) / (2 * (n_parts - 1))) ** 0.5
     # But as mentioned in veto_parts_fourier, the norm is already one. I am not completely sure,
     # but I think I checked it, and it was indeed fine.
-    return is_good
+    if not return_p_values:
+        return is_good
+    else:
+        return p_values, is_good
 
 
-def _veto_lobe_time(data_wh_fd, template_wh_full, mask_padded, indices_padded, fn, lobe_hlen):
+def _veto_lobe_time(data_wh_fd, template_wh_full, mask_padded, indices_padded, fn, lobe_hlen, return_p_values=False):
     hlen = lobe_hlen
-    data_wh_full = np.fft.irfft(data_wh_fd)
+    data_wh_full = irfft(data_wh_fd)
     template_for_fit = np.array(template_wh_full)
     template_for_fit[hlen: len(template_for_fit) - hlen] = 0
     template_for_fit = template_for_fit / np.linalg.norm(template_for_fit)
     template_cut_td = np.concatenate((template_for_fit[-hlen:], template_for_fit[: hlen]))
-    template_for_fit = np.fft.rfft(template_for_fit)
-    stat = np.real(np.fft.irfft(np.conjugate(template_for_fit) * data_wh_fd))
+    template_for_fit = rfft(template_for_fit)
+    stat = irfft(np.conjugate(template_for_fit) * data_wh_fd)
     stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3)
     # -> this is supposed to ensure the template normalization, although formally this biases amplitude
     p_values = []
@@ -2162,15 +3264,21 @@ def _veto_lobe_time(data_wh_fd, template_wh_full, mask_padded, indices_padded, f
         score = np.sum(residuals ** 2)
         df = len(residuals) - 1
         if df > 1:
-            p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
+            # p_values.append(chi2.sf(score, loc=0, scale=1, df=df))
+            # The following line is the same just faster:
+            p_values.append(fast_chi2_01_sf(x=score, df=df))
         else:
             p_values.append(0.)
     is_good = np.array(p_values) >= fn
-    return is_good
+    if not return_p_values:
+        return is_good
+    else:
+        return p_values, is_good
 
 
-def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=None, n_parts=3, fn=0.1,
-                       wind_len_overlap=64, nperseg_psd=Nperseg_psd):
+def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=None, n_parts=3, fn=0.01,
+                       wind_len_overlap=64, nperseg_psd=Nperseg_psd, return_p_values=False,
+                       high_pass=False):
     """
 
     The template in the Fourier domain is cut into several parts which undergo windowing in order not to be too long in the time
@@ -2194,20 +3302,34 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
     :param fn: False negative rate that is needed to ve achieved in the veto. Calculated from chi2 distribution
     :type fn: float
     :param wind_len_overlap: Must be even! Window length of the overlapping parts into which the template will be split.
-        Hann window will be used. All this is to make parts have finite support in the time domain.
+           Hann window will be used. All this is to make parts have finite support in the time domain.
     :type wind_len_overlap: int
     :param nperseg_psd: size of the slice that was used for PSD measurement in the pipeline
     :type nperseg_psd: int
+    :param return_p_values: If True, the p-values of the veto will be returned together with veto results (is_good).
+    :type return_p_values: bool
+    :param high_pass:
+    :type high_pass:
     :return: is_good, `True` where the trigger passed the veto, and `False` otherwise.
         Same size as the input `indices_padded`
     :rtype: numpy.ndarray of bool. Same size as the input `indices_padded`
+
     """
     data_wh_fd = np.array(data_wh_fd)
     template_wh_fd_full = np.array(template_wh_fd)
     # when the detrending was performed, the low freqs were removed, so we should not reject a trigger is something is wrong with them:
     template_wh_fd_full[:int(len(template_wh_fd_full) / nperseg_psd * 3 / 2)] = 0.
-    template_wh_fd_full = template_wh_fd_full / np.linalg.norm(np.fft.irfft(template_wh_fd_full))
+    template_wh_fd_full = template_wh_fd_full / np.linalg.norm(irfft(template_wh_fd_full))
     # -> must have been normalized initially, but we detrended it
+
+    if high_pass:
+        from auxiliary_functions import filter_data_high_pass
+        data_wh_fd = filter_data_high_pass(data=None, data_fd=np.array(data_wh_fd), dt=1.,
+                                           dt_pass=nperseg_psd * 1.,
+                                           in_fourier=True, return_cutoff_index=False, renormalize_to_tail=False)
+        template_wh_fd_full = filter_data_high_pass(data=None, data_fd=np.array(template_wh_fd_full), dt=1.,
+                                                    dt_pass=nperseg_psd * 1.,
+                                                    in_fourier=True, return_cutoff_index=False, renormalize_to_tail=False)
 
     wind_len = wind_len_overlap  # must be even!
     half_wind_len = wind_len // 2
@@ -2223,7 +3345,11 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
     n_parts = len(chi2_temp_indices) - 1
 
     if n_parts <= 1:
-        return np.ones(len(indices_padded)).astype(bool)
+        is_goods = np.ones(len(indices_padded)).astype(bool)
+        if not return_p_values:
+            return is_goods
+        else:  # p-values are set to be unity if all is good
+            return np.ones(len(indices_padded)).astype(bool), is_goods
 
     ##########################################################################################
     templates_parts = np.zeros((n_parts, len(template_wh_fd_full)), dtype=np.complex64)  # here it is all in the fourier domain
@@ -2242,7 +3368,7 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
                        ] = template_wh_fd_full[chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i + 1]]
     templates_parts[i][chi2_temp_indices[i] - half_wind_len: chi2_temp_indices[i] + half_wind_len] *= (1 - window)
     ##########################################################################################
-    templates_parts_td = np.fft.irfft(templates_parts, axis=1)
+    templates_parts_td = irfft(templates_parts, axis=1)
     templ_prod_matrix = np.zeros((n_parts, n_parts))
     for i in range(n_parts):
         for j in range(n_parts):
@@ -2254,26 +3380,64 @@ def veto_parts_fourier(data_wh_fd, template_wh_fd, indices_padded, mask_padded=N
     ##########################################################################################
     scores = np.zeros_like(templates_parts_td)
     for i in range(n_parts):
-        stat = np.real(np.fft.irfft(np.conjugate(templates_parts[i]) * data_wh_fd))
+        stat = irfft(np.conjugate(templates_parts[i]) * data_wh_fd)
         # since the noise may be too blue, the distribution may not be with unit variance.
         # -> so we force it to have the same variance as it should be according to the norm
-        stat = stat / np.std(stat[mask_padded]) * (templ_prod_matrix[i, i])**0.5
+        stat = stat / outlier_free_std(stat[mask_padded], n_iterations=2, nsig=3, renormalize=True) * (templ_prod_matrix[i, i])**0.5
         scores[i] = stat
 
-    stat_full = np.real(np.fft.irfft(np.conjugate(template_wh_fd_full) * data_wh_fd))
-    stat_full = stat_full / np.std(stat_full[mask_padded])
+    stat_full = irfft(np.conjugate(template_wh_fd_full) * data_wh_fd)
+    stat_full = stat_full / outlier_free_std(stat_full[mask_padded], n_iterations=2, nsig=3, renormalize=True)
     # -> the template norm was 1, so no need to multiply by it
-    scores = np.array([scores[:, j] @ templ_prod_matrix_inv @ scores[:, j] for j in range(len(scores[0]))])
+    # scores = np.array([scores[:, j] @ templ_prod_matrix_inv @ scores[:, j] for j in range(len(scores[0]))])
+    # -> this one was too slow, the following one is faster
+    scores = np.einsum('ij,jk,ik->i', scores.T, templ_prod_matrix_inv, scores.T)
     # -> this has distr chi2(n_parts), and it has var of trace of unity matrix, which is n_parts
     scores = scores[indices_padded]
     stat_full = stat_full[indices_padded]
     scores = scores - stat_full ** 2
     # they all have the same names to save some memory (if it works like that...)
     # We already renormalized the stuff, so the scale should be 1 here:
-    p_values = chi2.sf(scores, loc=0, scale=1., df=n_parts - 1)
+    # p_values = chi2.sf(scores, loc=0, scale=1., df=n_parts - 1)
+    # -> the following is same but faster:
+    p_values = fast_chi2_01_sf(x=scores, df=n_parts - 1)
     is_good = np.array(p_values) >= fn
-    return is_good
+    if not return_p_values:
+        return is_good
+    else:
+        return p_values, is_good
 
+
+def veto_threshold_snr_fun(snr):
+    """An empirical function that introduces variable snr-dependent threshold for
+       veto-parts p-value. Models it as a linear step focused on the snr values of interest.
+       Assumes that all the snrs considered are negative, because the empirical investigation was only done for those."""
+    min_threshold = 10. ** (-2.)
+    lower_snr_bound = 4
+    max_threshold = 10. ** (-1.5)
+    upper_snr_bound = 5
+    if not hasattr(snr, '__len__'):
+        abs_snr = np.abs(float(snr))
+        if abs_snr < lower_snr_bound:
+            return min_threshold
+        elif abs_snr < upper_snr_bound:
+            return ((max_threshold - min_threshold) / (upper_snr_bound - lower_snr_bound)
+                    * (abs_snr - lower_snr_bound) + min_threshold)
+        else:
+            return max_threshold
+    else:
+        abs_snr = np.abs(np.array(snr, dtype=float))
+        thresholds = np.ones_like(abs_snr)
+        thresholds[abs_snr < lower_snr_bound] = min_threshold
+        thresholds[(abs_snr >= lower_snr_bound) & (abs_snr < upper_snr_bound)] = (
+                (max_threshold - min_threshold) / (upper_snr_bound - lower_snr_bound)
+                * (abs_snr[(abs_snr >= lower_snr_bound) & (abs_snr < upper_snr_bound)]
+                   - lower_snr_bound) + min_threshold)
+        thresholds[abs_snr >= upper_snr_bound] = max_threshold
+        return thresholds
+
+
+#%%
 
 def score_correction(scores_i, return_function=False, two_sided_distr=True):
     scores_i = np.array(scores_i)
@@ -2349,7 +3513,7 @@ def unequal_amplitude_veto(stats_raw, stat_vars=None, negative=True):
     else:
         stat_vars = np.array(stat_vars)
 
-    mask = (stat_vars != 0) & (~np.isnan(stats_raw))
+    mask = (stat_vars != 0) & isgood(stats_raw)
     stats_raw = stats_raw[mask]
     stat_vars = stat_vars[mask]
 
@@ -2380,7 +3544,7 @@ def unequal_amplitude_veto(stats_raw, stat_vars=None, negative=True):
     return p_val
 
 
-def fstr(f, nzdig=2, maxdec=5):  # , flexible_length=True):  # nicely formatted string from numbers
+def fstr(f, nzdig=2, maxdec=5):  # nicely formatted string from numbers
     """
     Takes float and returns string which is more convenient for printing, not having 16 digits or so.
     nzdig : number of non-zero digits to leave
@@ -2406,22 +3570,6 @@ def fstr(f, nzdig=2, maxdec=5):  # , flexible_length=True):  # nicely formatted 
     else:
         str_to_format = "{:." + str(nzdig) + "e}"
         return str_to_format.format(f)
-
-
-def get_p_value_gaussian(x, mean, std):
-    """
-    Calculates the integral from x to infinity of the
-    Gaussian with `mean` and `std`
-    :param x:
-    :type x: float
-    :param mean:
-    :type mean: float
-    :param std:
-    :type std: float
-    :return:
-    :rtype: float
-    """
-    return 0.5 * erfc((x - mean) / (2 ** 0.5 * std))
 
 
 #######################################################################################################################
@@ -2565,13 +3713,13 @@ def rearrange_pieces(data, inds_pieces, hole_lens, fill_hole_with=0, inds_target
 # ################################################################################################
 
 
-def replace_if_deviating(vector, replacement, tester=None, mindev=1, minwid=1):
+def replace_if_deviating(vector, replacement, tester=None, mindev=1, minwid=1, i_min=0):
     sign = np.sign(mindev)
     mindev = np.abs(mindev)
     new_vector = np.array(vector)
     if tester is None:
         tester = replacement - vector
-    i = 0
+    i = i_min
     while i < len(vector):
         if sign * tester[i] - mindev > 0.:
             i_1 = i
@@ -2595,7 +3743,7 @@ def replace_if_deviating(vector, replacement, tester=None, mindev=1, minwid=1):
     return new_vector
 
 
-def replace_beginning(vector, replacement, min_repl_size):
+def replace_beginning(vector, replacement, min_repl_size, return_repl_size=False):
     ind_temp = min_repl_size  # 2 * fmb_int * int(nperseg / npersegs_lim[i])
     sign_0 = np.sign(vector[ind_temp] - replacement[ind_temp])
     ind_temp += 1
@@ -2604,7 +3752,10 @@ def replace_beginning(vector, replacement, min_repl_size):
         ind_temp += 1
         sign = np.sign(vector[ind_temp] - replacement[ind_temp])
     vector[: ind_temp] = replacement[: ind_temp]
-    return vector
+    if not return_repl_size:
+        return vector
+    else:
+        return vector, ind_temp
 
 
 def pbin_fun(x=None, dx=None, x2=None, x1=None, loc=0, scale=1, distr='norm'):
@@ -2930,7 +4081,7 @@ def get_indices_of_influence(vals, ind_center_0, ind_center_1,
     return inds_sum
 
 
-def make_periods_array(p_min=Pmin, p_max=Pmax, dp=None, duty_cycle=Duty_cycle, t_mission=1300):
+def make_periods_array(p_min, p_max, dp=None, duty_cycle=Duty_cycle, t_mission=1300):
     """
     Creates the period grid that will be used for folding. The grid is built according to the duty cycle to cover
     the periodicities smoothly.

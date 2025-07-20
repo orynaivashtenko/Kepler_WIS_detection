@@ -10,15 +10,17 @@ import numpy as np
 import batman
 import copy
 import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from file_operations import read_quarters_from_file  # , write_quarters_to_txt
 from pipeline_parameters import get_occurrence_table
 import auxiliary_functions as af
 from utils import whiten_vector
-from pipeline_parameters import Default_template_bank_folder, Default_templates_filename, \
-    Default_templates_shifts_filename, Default_shifts_filename, Default_durations_filename, Default_indices_of_templates_filename, \
-    Default_templates_of_indices_filename, Default_template_params_filename, Precomputed_tables_location, \
-    Log_occurrences_templates_periods_m13r_per_edges_filename, Log_second_derivs_cos2_shifts_templates_filename, \
-    Log_cos2_derivs_templates_filename, Log_template_prior_m13r_per_edges_filename, Limb_darkening_array_file, \
+from pipeline_parameters import Template_bank_folder, Templates_filename, \
+    Templates_shifts_filename, Shifts_filename, Durations_filename, Indices_of_templates_filename, \
+    Templates_of_indices_filename, Template_params_filename, Precomputed_tables_location, \
+    Log_template_prior_m13r_per_edges_filename, Limb_darkening_array_file, \
     Default_limb_darkening_coefs, Transit_probabilities_m13r_periods_filename
 
 # dt_lc = 1765.5 / (60 * 60 * 24)  # days long cadence interval
@@ -27,11 +29,10 @@ L_ban = 105  # Length of the templates  # based on the maximal considered durati
 T_ban = L_ban * dt_lc
 Min_edge_zeros = 7  # Minimal number of zeros in the edge of the templates
 
-Durations = np.load(os.path.join(Default_template_bank_folder, Default_durations_filename), allow_pickle=True)  # days
-Indices_of_templates = np.load(os.path.join(Default_template_bank_folder, Default_indices_of_templates_filename), allow_pickle=True)
-Templates_of_indices = np.load(os.path.join(Default_template_bank_folder, Default_templates_of_indices_filename), allow_pickle=True)
+Durations = np.load(os.path.join(Template_bank_folder, Durations_filename), allow_pickle=True)  # days
+Indices_of_templates = np.load(os.path.join(Template_bank_folder, Indices_of_templates_filename), allow_pickle=True)
+Templates_of_indices = np.load(os.path.join(Template_bank_folder, Templates_of_indices_filename), allow_pickle=True)
 N_templates = len(Indices_of_templates)
-Max_cos = 0.97  # was used in the bank generation. If cos was smaller, it was added to the bank
 
 Interleaved_numbers = np.array([i for i in range(len(Indices_of_templates))
                                 if ((Indices_of_templates[i][1] - Indices_of_templates[i][0]) >= 2)])
@@ -39,7 +40,7 @@ Not_interleaved_numbers = np.array([i for i in range(len(Indices_of_templates))
                                     if ((Indices_of_templates[i][1] - Indices_of_templates[i][0]) == 1)])
 
 
-def get_default_templates_params(folder=Default_template_bank_folder, filename=Default_template_params_filename):
+def get_default_templates_params(folder=Template_bank_folder, filename=Template_params_filename):
     # m_1_3_r_s, period, a, inc, ecc, w, u1, u2
     params_temps = np.load(os.path.join(folder, filename),  allow_pickle=True)
     return params_temps
@@ -50,14 +51,14 @@ class TemplateBank(object):
     def __init__(self, templates=None,
                  # from_parameters=False,
                  parameters=None,
-                 template_bank_folder=Default_template_bank_folder,
-                 templates_filename=Default_templates_filename,
-                 templates_shifts_filename=Default_templates_shifts_filename,
-                 shifts_filename=Default_shifts_filename,
-                 durations_filename=Default_durations_filename,
-                 indices_of_templates_filename=Default_indices_of_templates_filename,
-                 templates_of_indices_filename=Default_templates_of_indices_filename,
-                 # parameters_file_dir=Default_template_params_filename,
+                 template_bank_folder=Template_bank_folder,
+                 templates_filename=Templates_filename,
+                 templates_shifts_filename=Templates_shifts_filename,
+                 shifts_filename=Shifts_filename,
+                 durations_filename=Durations_filename,
+                 indices_of_templates_filename=Indices_of_templates_filename,
+                 templates_of_indices_filename=Templates_of_indices_filename,
+                 parameters_file_dir=Template_params_filename,
                  template_index='all', shifts=None, dt=dt_lc, support=None,
                  enforce_centering=False,
                  enforce_same_length=False,
@@ -97,7 +98,7 @@ class TemplateBank(object):
         self.durations_file_dir = os.path.join(template_bank_folder, durations_filename)
         self.indices_of_templates_file_dir = os.path.join(template_bank_folder, indices_of_templates_filename)
         self.templates_of_indices_file_dir = os.path.join(template_bank_folder, templates_of_indices_filename)
-        # self.parameters_file_dir = os.path.join(template_bank_folder, parameters_file_dir)
+        self.parameters_file_dir = os.path.join(template_bank_folder, parameters_file_dir)
 
         self.initial_templates = None
         self.shifts = None
@@ -183,13 +184,12 @@ class TemplateBank(object):
                         self.durations = np.load(self.durations_file_dir, allow_pickle=True)
                     elif self.durations_file_dir[-4:] == '.txt':
                         self.durations = af.get_values_from_txt(file_dir=self.durations_file_dir, filename=None)
-                        # TODO: make sure the units work (hours/days)!
                     else:
                         raise TypeError('Unrecognized durations file type!')
                 else:
                     self.durations = [templ_dur_fun(tt[0]) * self.dt for tt in self.initial_templates]
 
-            if template_index != 'all':
+            if (template_index != 'all') and (template_index != -1) and (not isinstance(template_index, str)):
                 if hasattr(template_index, '__len__'):
                     self.initial_templates = self.initial_templates[template_index]
                     self.shifts = self.shifts[template_index]
@@ -386,12 +386,12 @@ class TemplateBank(object):
         self.calculate_len_and_number()
 
 
-def load_npy_bank(templates_file_dir=os.path.join(Default_template_bank_folder, Default_templates_filename),
-                  templates_shifts_file_dir=os.path.join(Default_template_bank_folder, Default_templates_shifts_filename),
-                  shifts_file_dir=os.path.join(Default_template_bank_folder, Default_shifts_filename),
-                  durations_file_dir=os.path.join(Default_template_bank_folder, Default_durations_filename),
-                  indices_of_templates_file_dir=os.path.join(Default_template_bank_folder, Default_indices_of_templates_filename),
-                  templates_of_indices_file_dir=os.path.join(Default_template_bank_folder, Default_templates_of_indices_filename),
+def load_npy_bank(templates_file_dir=os.path.join(Template_bank_folder, Templates_filename),
+                  templates_shifts_file_dir=os.path.join(Template_bank_folder, Templates_shifts_filename),
+                  shifts_file_dir=os.path.join(Template_bank_folder, Shifts_filename),
+                  durations_file_dir=os.path.join(Template_bank_folder, Durations_filename),
+                  indices_of_templates_file_dir=os.path.join(Template_bank_folder, Indices_of_templates_filename),
+                  templates_of_indices_file_dir=os.path.join(Template_bank_folder, Templates_of_indices_filename),
                   only_essentials=False):
     initial_templates_shifts = list(np.load(templates_shifts_file_dir, allow_pickle=True))
     durations = list(np.load(durations_file_dir, allow_pickle=True))
@@ -601,38 +601,38 @@ def templ_dur_fun(templ, quadratic_threshold=0.9, abs_threshold=0.9, cumulative=
     # return dur
 
 
-def trim_templates(templates, leave_spare_bins=2):
-    """
-    The template is assumed to be centered in the center, and not in the beginning of the vector.
-    :param templates:
-    :type templates:
-    :param leave_spare_bins:
-    :type leave_spare_bins:
-    :return:
-    :rtype:
-    """
-    templates_trimmed = []
-    if hasattr(templates[0][0], '__len__'):
-        zer_len = len(templates[0][0]) // 2
-        for template in templates:
-            for templ_sh in template:
-                non_zer = np.where(~np.isclose(templ_sh, 0))[0]
-                zer_len = min(zer_len, non_zer[0], len(templ_sh) - 1 - non_zer[-1])
-        zer_len = max(0, zer_len - leave_spare_bins)
-        for template in templates:
-            template_trimmed = []
-            for templ_sh in template:
-                template_trimmed.append(templ_sh[zer_len: len(templ_sh) - zer_len])
-            templates_trimmed.append(template_trimmed)
-    else:
-        zer_len = len(templates[0]) // 2
-        for template in templates:
-            non_zer = np.where(~np.isclose(template, 0))[0]
-            zer_len = min(zer_len, non_zer[0], len(template) - 1 - non_zer[-1])
-        zer_len = max(0, zer_len - leave_spare_bins)
-        for template in templates:
-            templates_trimmed.append(template[zer_len: len(template) - zer_len])
-    return templates_trimmed
+# def trim_templates(templates, leave_spare_bins=2):
+#     """
+#     The template is assumed to be centered in the center, and not in the beginning of the vector.
+#     :param templates:
+#     :type templates:
+#     :param leave_spare_bins:
+#     :type leave_spare_bins:
+#     :return:
+#     :rtype:
+#     """
+#     templates_trimmed = []
+#     if hasattr(templates[0][0], '__len__'):
+#         zer_len = len(templates[0][0]) // 2
+#         for template in templates:
+#             for templ_sh in template:
+#                 non_zer = np.where(~np.isclose(templ_sh, 0))[0]
+#                 zer_len = min(zer_len, non_zer[0], len(templ_sh) - 1 - non_zer[-1])
+#         zer_len = max(0, zer_len - leave_spare_bins)
+#         for template in templates:
+#             template_trimmed = []
+#             for templ_sh in template:
+#                 template_trimmed.append(templ_sh[zer_len: len(templ_sh) - zer_len])
+#             templates_trimmed.append(template_trimmed)
+#     else:
+#         zer_len = len(templates[0]) // 2
+#         for template in templates:
+#             non_zer = np.where(~np.isclose(template, 0))[0]
+#             zer_len = min(zer_len, non_zer[0], len(template) - 1 - non_zer[-1])
+#         zer_len = max(0, zer_len - leave_spare_bins)
+#         for template in templates:
+#             templates_trimmed.append(template[zer_len: len(template) - zer_len])
+#     return templates_trimmed
 
 
 # ATTENTION, HERE WE GENERATE THE TIME WITH ODD NUMBER OF POINTS!!
@@ -880,17 +880,6 @@ def make_template_from_pars(L, per, a, inc, ecc, w,
     return return_temp, return_wh
 
 
-def prepare_fd_for_cos(vec_fd):
-    vec_fd = vec_fd / np.linalg.norm(np.fft.irfft(vec_fd))
-    support = 2 * (len(vec_fd) - 1)
-    # cosine_coeffs = np.ones(support // 2 + 1) * 2
-    cosine_coeffs = np.ones(len(vec_fd)) * 2
-    cosine_coeffs[0] = 1.
-    cosine_coeffs[-1] = 1.
-    cosine_coeffs = cosine_coeffs / support
-    return np.conj(vec_fd) * cosine_coeffs
-
-
 def get_transit_probability(m_1_3_r_s, period, precomputed_tables_location=Precomputed_tables_location,
                             transit_probabilities_m13r_periods_filename=Transit_probabilities_m13r_periods_filename):
     """
@@ -911,6 +900,9 @@ def get_transit_probability(m_1_3_r_s, period, precomputed_tables_location=Preco
     """
     m13rs, periods, transit_probabilities = np.load(os.path.join(precomputed_tables_location,
                                                                  transit_probabilities_m13r_periods_filename), allow_pickle=True)
+    m13rs = np.array(m13rs, dtype=float)
+    periods = np.array(periods, dtype=float)
+    transit_probabilities = np.array([np.array(transit_probabilities[i], dtype=float) for i in range(len(transit_probabilities))])
     trans_prob_m13r_interp = []
     for i in range(len(transit_probabilities)):
         trans_prob_m13r_interp.append(np.interp(x=period, xp=periods, fp=transit_probabilities[i]))
@@ -992,40 +984,6 @@ def get_number_of_transiting_planets_per_chunk(period_min, period_max, m_1_3_r_s
     planets_in_per_range_one_star = np.sum(planets_of_radii_in_per_range_one_star)
     transit_probability = get_transit_probability(m_1_3_r_s=m_1_3_r_s, period=(period_min + period_max) / 2)
     return planets_in_per_range_one_star * transit_probability
-
-
-def load_volume_prior_precomputed_terms(
-        precomputed_tables_location=Precomputed_tables_location,
-        log_occurrences_templates_periods_m13r_per_edges_filename=Log_occurrences_templates_periods_m13r_per_edges_filename,
-        log_second_derivs_cos2_shifts_templates_filename=Log_second_derivs_cos2_shifts_templates_filename,
-        log_cos2_derivs_templates_filename=Log_cos2_derivs_templates_filename):
-    """
-    log_cos2_derivs_templates : time derivative of template shifting wrt itself,
-    log_second_derivs_cos2_shifts_templates : cos squared derivative wrt the template number and
-    log_occurrences_templates_periods_m13r_per_edges : the binned occurrence rates with bins.
-    log_occurrences_templates_periods is normalized by the m_1_3_r to have the full astrophysical occurrence rate
-    in every m_1_3_r bin. units are rate! no probability normalization!
-    :param precomputed_tables_location: in which directory all that resides
-    :type precomputed_tables_location:
-    :param log_occurrences_templates_periods_m13r_per_edges_filename:
-    :type log_occurrences_templates_periods_m13r_per_edges_filename:
-    :param log_second_derivs_cos2_shifts_templates_filename:
-    :type log_second_derivs_cos2_shifts_templates_filename:
-    :param log_cos2_derivs_templates_filename:
-    :type log_cos2_derivs_templates_filename:
-    :return:
-    :rtype:
-    """
-    log_second_derivs_cos2_shifts_templates = np.load(
-        os.path.join(precomputed_tables_location, log_second_derivs_cos2_shifts_templates_filename), allow_pickle=True)
-    # -> time derivative of template shifting wrt itself
-    log_cos2_derivs_templates = np.load(os.path.join(precomputed_tables_location, log_cos2_derivs_templates_filename),
-                                        allow_pickle=True)
-    log_occurrences_templates_periods, m13r_bin_edges, period_edges = np.load(
-        os.path.join(precomputed_tables_location, log_occurrences_templates_periods_m13r_per_edges_filename), allow_pickle=True)
-    # log_occurrences_templates_periods is normalized by the m_1_3_r!
-    return log_second_derivs_cos2_shifts_templates, log_cos2_derivs_templates, \
-        log_occurrences_templates_periods, m13r_bin_edges, period_edges
 
 
 def load_template_prior(
@@ -1159,7 +1117,6 @@ def get_limb_darkening_coefs(teff, logg, metallicity, limb_darkening_array_file=
     index = np.where((teff_s == teff_table) & (logg_s == logg_table) & (meh_s == metallicity_table))[0]
     index = index[0]
     return a_s[index], b_s[index]
-
 
 
 """

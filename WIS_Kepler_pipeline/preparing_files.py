@@ -25,7 +25,7 @@ from locations import (Earth_pointing_times_file, Quarter_start_times_file, Quar
 from catalog_functions import (Column, Kic_retrieval_fields, Villanova_table_fields, query_kic,
                                write_trigger_table)
 
-Default_files_folder = '/Users/orynaivashtenko/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
+Default_files_folder = '/Users/orynai/Work/Kepler_Project/Kepler_Earths/KeplerFiles'
 Default_koi_catalog_filename = 'KOI_table_2024.csv'  # 'cumulative_2022.10.18_03.41.17.csv'  # TODO replace by the new one
 # TODO make the quality mask thing
 # TODO include here the earth pointing times etc
@@ -281,9 +281,9 @@ def make_limb_darkening_coefficients_array(limb_darkening_table_file, save_file=
     Opens the Table: J/A+A/510/A21/table2.dat.gz (http://cdsarc.cds.unistra.fr)
     and returns the array of [Teff,logg,M/H,a,b], where a, b are the u1, u2 quadratic limb darkening coeffs.
     #Limb_darkening_full_table_file = '/Collaboration-Kepler/KeplerFiles/limb_darkening_kepler_table.txt'
-    :param limb_darkening_table_file: The full path to the txt table with coefficietns
+    :param limb_darkening_table_file: The full path to the txt table with coefficients
     :type limb_darkening_table_file: str
-    :return: The array of relevant parameters and the limb darlening quadratic coefficients.
+    :return: The array of relevant parameters and the limb darkening quadratic coefficients.
     :rtype: numpy.ndarray
     :param save_file: Whether to save the file. Default is yes
     :type save_file: bool
@@ -360,7 +360,8 @@ def get_flares_data_for_target(target_id, file_flares_table=Flares_file):
     return flare_data_target
 
 
-def prepare_simulated_star(reference_target_id='009833034', input_folder=pipeline_parameters.Data_location, output_folder=pipeline_parameters.Output_location,):
+def prepare_simulated_star(reference_target_id='009833034', input_folder=pipeline_parameters.Data_location,
+                           output_folder=pipeline_parameters.Output_location,):
     from search_pipeline import KeplerLightCurve
     from utils import interpolate_time
     klc = KeplerLightCurve(target_id=reference_target_id, data_location=input_folder,

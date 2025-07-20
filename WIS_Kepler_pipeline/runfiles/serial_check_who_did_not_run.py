@@ -58,18 +58,18 @@ def write_the_job(target_id):
     write_job_file(code_file=None,
                    code_filename=search_runfile_filename,
                    code_file_dir=Run_files_folder,
-                   jobname=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
+                   jobname=Main_search_job_prefix + '_' + target_id + '.bsub',
                    job_file=None,
-                   job_filename=Main_search_job_filename_prefix + '_' + target_id + '.bsub',
+                   job_filename=Main_search_job_prefix + '_' + target_id + '.bsub',
                    job_file_dir=Job_files_folder,
                    queue=Queue_submit,
                    mem_per_job_gb=Mem_per_job_gb,
                    array_indices=None,
                    output_file=None,
-                   output_filename=Main_search_output_filename_prefix + '_' + target_id + '.out',
+                   output_filename=Main_search_job_prefix + '_' + target_id + '.out',
                    output_file_dir=Output_files_folder,
                    error_file=None,
-                   error_filename=Main_search_error_filename_prefix + '_' + target_id + '.out',
+                   error_filename=Main_search_job_prefix + '_' + target_id + '.out',
                    error_file_dir=Error_files_folder,
                    output_error_overwrite=False,
                    arg_jobind=False,
@@ -134,6 +134,6 @@ with open(not_run_tids_file, 'w') as fil:
     for tid in not_run_tids:
         print(tid, file=fil)
 
-# bsub -q short -R "rusage[mem=2GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py
-# bsub -q short -R "rusage[mem=2GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --tids_list_file /home/labs/barakz/orynai/run_11/selected_tids_run_11_rerun_main_search.txt --not_run_tids_file /home/labs/barakz/orynai/run_11/not_run_tids.txt --output_folder /home/labs/barakz/Collaboration-Kepler/orynai/output_run_11_alternative
-# bsub -q short -R "rusage[mem=2GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --not_run_tids_file /home/labs/barakz/orynai/run_11/not_run_tids_scrambled_run.txt --output_folder /home/labs/barakz/Collaboration-Kepler/orynai/output_run_11 --keyword_output _best_scrambled_periodic_scores_all_p
+# bsub -q short -R "rusage[mem=2GB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py
+# bsub -q short -R "rusage[mem=2GB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --tids_list_file /home/projects/barakz/orynai/run_11/selected_tids_run_11_rerun_main_search.txt --not_run_tids_file /home/projects/barakz/orynai/run_11/not_run_tids.txt --output_folder /home/projects/barakz/Collaboration-Kepler/orynai/output_run_11_alternative
+# bsub -q short -R "rusage[mem=2GB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --not_run_tids_file /home/projects/barakz/orynai/run_11/not_run_tids_scrambled_run.txt --output_folder /home/projects/barakz/Collaboration-Kepler/orynai/output_run_11 --keyword_output _best_scrambled_periodic_scores_all_p

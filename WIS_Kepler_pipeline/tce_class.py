@@ -479,6 +479,7 @@ class WisTCE(object):
                                 return_lists=False, set_attributes=True,
                                 delta_stat_close=Delta_stat_close,
                                 delta_integral_close=Delta_integral_close):
+        # WARNING: there is a method with the sma name in target_class, and it is doing something somewhat different!
         return_array = af.get_periodicity_results(target_id=self.target_id, output_location=self.output_location,
                                                   short_periodicity=short_periodicity,
                                                   best_periodic_scores_filename_postfix=best_periodic_scores_filename_postfix,
@@ -516,11 +517,15 @@ class WisTCE(object):
             self.get_periodicity_results(short_periodicity=False,
                                          best_periodic_scores_filename_postfix=best_periodic_scores_filename_postfix,
                                          return_lists=False, set_attributes=True)
-        if self.best_short_int_score > self.best_int_score:
-            self.is_period_short = True
-        else:
-            self.is_period_short = False
-        if self.best_per < minimal_period:
+        # if self.best_short_int_score > self.best_int_score:
+        #     self.is_period_short = True
+        # else:
+        #     self.is_period_short = False
+        # if self.best_per < minimal_period:
+        #     self.is_period_short = True
+        # else:  # TODO! THIS IS A BUG!!!! IT CHANGES ALL THEM TO TRUE EVEN IF THE SHORT PER SEARCH VETTED THEMMMMMMMMM
+        #     self.is_period_short = False
+        if (self.best_short_int_score > self.best_int_score) or (self.best_per < minimal_period):
             self.is_period_short = True
         else:
             self.is_period_short = False
@@ -930,9 +935,10 @@ class WisTCE(object):
         # times, _, _, kepler_quality_masks, _ = af.get_target_pixel_sky_coords_fun(
         #     target_id=self.target_id, data_location=self.target_pixels_location,
         #     remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
-        times, kepler_quality_masks = af.get_kepler_quality_masks(
-            target_id=self.target_id, data_location=self.target_pixels_location,
-            remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
+        times, kepler_quality_masks = af.get_kepler_quality_masks_from_tpf(target_id=self.target_id,
+                                                                           data_location=self.target_pixels_location,
+                                                                           remove_zeroth_quarter=True, remove_quarter_17=True,
+                                                                           cut_edge_nans=True)
         # times = res[0]
         # kepler_quality_masks = res[3]
 
@@ -1372,7 +1378,7 @@ class WisTCE(object):
         klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                     output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
                                     cut_edge_nans=True, remove_zeroth_quarter=True, remove_quarter_17=True,
-                                    simulated_star=False)
+                                    simulated_red_star=False, simulated_white_star=False)
         self.n_quarters = len(klc.quarters)
         klc.load_conditioned_data()
         indices_of_templates = tm.Indices_of_templates
@@ -1760,7 +1766,7 @@ class WisTCE(object):
         klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                     output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
                                     cut_edge_nans=True, remove_zeroth_quarter=True, remove_quarter_17=True,
-                                    simulated_star=False)
+                                    simulated_red_star=False, simulated_white_star=False)
         self.n_quarters = len(klc.quarters)
         klc.load_conditioned_data()
         indices_of_templates = tm.Indices_of_templates
@@ -1872,7 +1878,7 @@ class WisTCE(object):
                                  pre_filtering_history_targets_file=locs.Pre_filtering_history_targets_file,
                                  save_byproducts_to_file=True, produce_plots=False, save_plots=False,
                                  plots_output_location=locs.Triggers_plots_location, no_show=False,
-                                 update_pickling=True, enforce_all_checks=False):
+                                 update_pickling=True, enforce_all_checks=False, include_veto_short_periodicity=True):
         folding_residuals_test_done = False
         bg_star_pixels_test_done = False
         centroid_test_done = False
@@ -1881,7 +1887,10 @@ class WisTCE(object):
         transit_info_done = False
         enf_all = enforce_all_checks
         self.get_transit_times_info()
-        self.veto_short_periodicity()
+        if include_veto_short_periodicity:
+            self.veto_short_periodicity()
+        else:
+            self.is_period_short = False  # TODO change to none; why is it false?
         self.check_transit_times_quality_flags()
         self.check_periodicity_contaminants()
         self.check_other_transits_overlap()
@@ -1909,6 +1918,7 @@ class WisTCE(object):
                             transit_info_done = True
         self.is_good_pre_filtering = False
         if ((not transits_were_bad)
+                and (not self.is_period_short)  # Warning: this was added on Nov 24 2024, after search run 12
                 and (not self.is_bad_fold_residuals)
                 and (not self.is_bad_bg_pixels)
                 and (not self.is_bad_fold_residuals_parts)
@@ -1942,6 +1952,8 @@ class WisTCE(object):
                 message += 'too_few_valid_transits '
             elif self.is_bad_periodicity:
                 message += 'is_bad_periodicity '
+            elif self.is_period_short:  # Warning: this was added on Nov 24 2024, after search run 12
+                message += 'is_period_short '
             elif self.is_bad_seasons:
                 message += 'is_bad_seasons '
             elif self.is_bad_fold_residuals:

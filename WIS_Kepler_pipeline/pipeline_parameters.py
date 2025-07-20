@@ -144,6 +144,7 @@ Per_wing_injection_and_slides_absolute = 2 / 50  # Range to the left and to the 
 Per_wing_injection_detection = 0.5  # days. Range to the left and to the right of the injected period used in the injection recovery
 # Max_phase_mismatch_rel = 0.001  # Maximal relative phase difference for defining successful injections
 Max_phase_mismatch_to_dur = 1.5  # Maximal phase difference in units of template duration for defining successful injections
+Extrapolation_start_score = 30
 Default_min_plot_stat = 10
 Default_max_plot_stat = 140
 

@@ -23,49 +23,27 @@ trig_ids = [tid.split()[Index_tid] for tid in trig_ids]
 
 for tid in trig_ids:
     # noinspection DuplicatedCode
+    job_name = fop.compose_job_name(job_type_prefix=Plotting_job_filename_prefix,
+                                    target_id=tid, additional_params=())
     fop.write_job_file(code_file=None,
                        code_filename=Plotting_runfile_filename,
                        code_file_dir=Run_files_folder,
-                       jobname=Plotting_job_filename_prefix+'_'+tid+'.bsub',
+                       jobname=job_name,
                        job_file=None,
-                       job_filename=Plotting_job_filename_prefix+'_'+tid+'.bsub',
+                       job_filename=job_name+'.bsub',
                        job_file_dir=Job_files_folder,
                        queue=Queue_submit,
                        mem_per_job_gb=Mem_per_job_gb,
                        array_indices=None,
                        output_file=None,
-                       output_filename=Plotting_output_filename_prefix+'_'+tid+'.out',
+                       output_filename=job_name+'.out',
                        output_file_dir=Output_files_folder,
                        error_file=None,
-                       error_filename=Plotting_error_filename_prefix+'_'+tid+'.out',
+                       error_filename=job_name+'.err',
                        error_file_dir=Error_files_folder,
                        output_error_overwrite=False,
                        arg_jobind=False,
-                       other_args=[['target_id', tid]])
-#
-#     # if len([ff for ff in os.listdir(os.path.join(Output_location_wexac, tid[:4], tid)) if Injections_filename_postfix in ff]) > 0:
-#     #     # noinspection DuplicatedCode
-#     #     fop.write_job_file(code_file=None,
-#     #                        code_filename=Pre_slides_tce_veto_code_filename,
-#     #                        code_file_dir=Run_files_folder,
-#     #                        jobname=Target_pixels_veto_job_filename_prefix+'_'+tid+'.bsub',
-#     #                        job_file=None,
-#     #                        job_filename=Target_pixels_veto_job_filename_prefix+'_'+tid+'.bsub',
-#     #                        job_file_dir=Job_files_folder,
-#     #                        queue=Queue_submit,
-#     #                        mem_per_job_gb=Mem_per_job_gb,
-#     #                        array_indices=None,
-#     #                        output_file=None,
-#     #                        output_filename=Target_pixels_veto_output_filename_prefix+'_'+tid+'.out',
-#     #                        output_file_dir=Output_files_folder,
-#     #                        error_file=None,
-#     #                        error_filename=Target_pixels_veto_error_filename_prefix+'_'+tid+'.out',
-#     #                        error_file_dir=Error_files_folder,
-#     #                        output_error_overwrite=False,
-#     #                        arg_jobind=False,
-#     #                        other_args=[['target_id', tid]])
-#
-#
-#
-# # bsub -q physics-short -sp 100 /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_plotting.py
-# # bsub -q physics-short /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_plotting.py
+                       other_args=[['target_id', tid], ['job_name', job_name]])
+
+# # bsub -q physics-short -sp 100 source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_plotting.py
+# # bsub -q physics-short source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/create_jobs_plotting.py

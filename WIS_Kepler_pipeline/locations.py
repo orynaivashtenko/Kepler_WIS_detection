@@ -3,9 +3,8 @@
 import os
 
 Pipeline_folder = os.path.dirname(__file__)
-force_data_output_locations_creation = False
 # --------------------------------------------------------------------------------------------
-Run_name = 'run_12'
+Run_name = 'run_13'
 # --------------------------------------------------------------------------------------------
 Working_place = None  # On which machine it is running: my office Mac ('Home'), Marvin or WEXAC
 # Working_place = 'Home' # 'Marvin'  # 'WEXAC'
@@ -14,13 +13,13 @@ if Working_place is None:
         Working_place = 'Home'
     elif '/SMALLDATA' in Pipeline_folder or '/home/orynai/' in Pipeline_folder:
         Working_place = 'Marvin'
-    elif '/home/labs/barakz' in Pipeline_folder:
+    elif '/home/projects/barakz' in Pipeline_folder or '/home/labs/barakz' in Pipeline_folder:
         Working_place = 'WEXAC'
 
 # Definitions for Home:
 Data_location = '/Users/orynai/Work/Kepler_Project/KeplerDataLocal'  # in this directory, a file named after target_id will be created
 Target_pixels_location = '/Users/orynai/Work/Kepler_Project/KeplerTargetPixelsLocal'
-Run_outputs_folder = '/Users/orynai/Work/Kepler_Project/run_12_local'
+Run_outputs_folder = '/Users/orynai/Work/Kepler_Project/' + Run_name + '_local'
 Output_location = os.path.join(Run_outputs_folder, 'output_' + str(Run_name))
 Triggers_plots_location = os.path.join(os.getcwd(), 'triggers_outputs')
 Run_technical_folder = Run_outputs_folder
@@ -35,10 +34,10 @@ if Working_place == 'Marvin':
     Run_technical_folder = '/SMALLDATA/orynai/' + str(Run_name)
 
 if Working_place == 'WEXAC':
-    Data_location = '/home/labs/barakz/Collaboration-Kepler/KeplerData'
-    Target_pixels_location = '/home/labs/barakz/Collaboration-Kepler/KeplerTargetPixels'
-    Run_outputs_folder = '/home/labs/barakz/Collaboration-Kepler/orynai/' + str(Run_name)
-    Run_technical_folder = '/home/labs/barakz/orynai/' + str(Run_name)
+    Data_location = '/home/projects/barakz/Collaboration-Kepler/KeplerData'
+    Target_pixels_location = '/home/projects/barakz/Collaboration-Kepler/KeplerTargetPixels'
+    Run_outputs_folder = '/home/projects/barakz/Collaboration-Kepler/orynai/' + str(Run_name)
+    Run_technical_folder = '/home/projects/barakz/orynai/' + str(Run_name)
 
 Output_location = os.path.join(Run_outputs_folder, 'output_' + str(Run_name))
 Triggers_plots_location = os.path.join(Run_outputs_folder, 'triggers_plots_' + str(Run_name))
@@ -46,16 +45,8 @@ Trigger_lists_folder = os.path.join(Run_outputs_folder, 'triggers_' + str(Run_na
 Problems_folder = os.path.join(Run_outputs_folder, 'problems_stars')
 Problems_folder_scrambled = os.path.join(Run_outputs_folder, 'problems_stars_scrambled')
 Kepler_files_folder = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'KeplerFiles')
+Pre_search_filtering_folder = os.path.join(Run_outputs_folder, 'pre_search_filtering')
 
-if force_data_output_locations_creation:
-    if not os.path.isdir(Data_location):
-        os.mkdir(Data_location)
-    if not os.path.isdir(Target_pixels_location):
-        os.mkdir(Target_pixels_location)
-    if not os.path.isdir(Run_outputs_folder):
-        os.mkdir(Run_outputs_folder)
-    if not os.path.isdir(Output_location):
-        os.mkdir(Output_location)
 
 # ############################################################################################################
 # Kepler, Gaia and other files
@@ -89,6 +80,9 @@ Table_koi_file = os.path.join(Kepler_files_folder, 'KOI_table_2024.csv')
 # ############################################################################################################
 # Run results, triggers
 # ############################################################################################################
+Good_tids_search_postfix = 'good_tids_search.txt'
+Good_tids_candidates_postfix = 'good_tids_candidates.txt'
+
 Search_history_targets_filename = 'search_history_targets.txt'
 Pre_filtering_history_targets_filename = 'pre_filtering_history_targets.txt'
 
@@ -207,19 +201,17 @@ Periodic_stats_filename_postfix = 'stats_periodic'
 # Template Bank
 #########################################################################################################################
 Template_bank_folder_name = 'template_bank'
-Default_template_bank_folder = os.path.join(os.path.dirname(__file__), Template_bank_folder_name)
-Default_templates_filename = 'templates.npy'
-Default_templates_shifts_filename = 'templates_shifts.npy'
-Default_shifts_filename = 'shifts.npy'
-Default_durations_filename = 'durations.npy'  # days
-Default_indices_of_templates_filename = 'indices_of_templates.npy'
-Default_templates_of_indices_filename = 'templates_of_indices.npy'
-Default_templates_fd_for_injections_filename = 'templates_whitened_normalized_fd_for_injections.npy'
-Default_template_params_filename = 'params_templates.npy'
-Precomputed_tables_location = Default_template_bank_folder
+Template_bank_folder = os.path.join(os.path.dirname(__file__), Template_bank_folder_name)
+Templates_filename = 'templates.npy'
+Templates_shifts_filename = 'templates_shifts.npy'
+Shifts_filename = 'shifts.npy'
+Durations_filename = 'durations.npy'  # days
+Indices_of_templates_filename = 'indices_of_templates.npy'
+Templates_of_indices_filename = 'templates_of_indices.npy'
+Templates_fd_for_injections_filename = 'templates_whitened_normalized_fd_for_injections.npy'
+Template_params_filename = 'params_templates.npy'
+Precomputed_tables_location = Template_bank_folder
 Log_occurrences_templates_periods_m13r_per_edges_filename = 'log_occurrences_templates_periods_m13r_per_edges.npy'
-Log_second_derivs_cos2_shifts_templates_filename = 'log_second_derivs_cos2_shifts_templates.npy'
-Log_cos2_derivs_templates_filename = 'log_cos2_derivs_templates.npy'
 Log_template_prior_m13r_per_edges_filename = 'log_template_prior_m13r_per_edges.npy'
 Transit_probabilities_m13r_periods_filename = 'm13r_period_transit_probabilities.npy'
 

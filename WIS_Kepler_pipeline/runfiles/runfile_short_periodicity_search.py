@@ -16,6 +16,8 @@ sys.path.append(os.path.dirname(SCRIPT_DIR))
 import target_class
 import search_pipeline as spip
 import pipeline_parameters as pp
+from file_operations import report_job_done
+from runfiles_parameters import Jobs_monitor_folder
 from trigger_functions import print_trigger_line  # , get_trigger_from_target_id, Indices_dict, copy_trigger_between_files
 from auxiliary_functions import get_saving_file_path
 import traceback
@@ -25,8 +27,10 @@ import datetime
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--target_id", type=str, nargs=1, help="KIC number", default="003097222")
+parser.add_argument("--job_name", type=str, nargs=1, help="name of the job to report", default="003097222")
 args = parser.parse_args()
 Target_id = args.target_id[0]
+job_name = args.job_name[0]
 
 Saving_maximal_scores_file = pp.Maximal_short_periodicity_triggers_file
 Saving_maximal_g_scores_file = pp.Maximal_short_periodicity_g_triggers_file
@@ -112,4 +116,4 @@ except Exception as exc:
             print(str_exc.strip(), file=err_list_fil)
         print('', file=err_list_fil)
 
-# bsub -q physics-short -R "rusage[mem=3.9GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_short_periodicity_search.py --target_id
+report_job_done(job_name=job_name, jobs_monitor_folder=Jobs_monitor_folder)

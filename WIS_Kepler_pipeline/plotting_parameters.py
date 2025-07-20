@@ -80,7 +80,7 @@ Linewidth_very_thin = 0.5
 Linewidth_zero_level = 0.5
 Linewidth_vlines = 0.5
 Linewidth_grid = 0.5
-Linewidth_p_planet_hist = 2
+Linewidth_p_planet_hist = 1.5
 Color_grid = (0.7, 0.7, 0.7)
 
 Markersize_folds_small = 0.6

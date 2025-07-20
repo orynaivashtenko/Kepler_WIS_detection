@@ -43,4 +43,4 @@ for prefixes_folder in [Output_stars_folder]:
         if not os.path.exists(os.path.join(prefixes_folder, prefix)):
             os.makedirs(os.path.join(prefixes_folder, prefix))
 
-# bsub -q risk -R "rusage[mem=1GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/prepare_run_jobs_folder.py
+# bsub -q risk -R "rusage[mem=1GB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/prepare_run_jobs_folder.py

@@ -47,4 +47,4 @@ for big_folder in [Output_location, Problems_folder]:
         if not os.path.exists(os.path.join(big_folder, prefix)):
             os.makedirs(os.path.join(big_folder, prefix))
 
-# bsub -q risk -R "rusage[mem=1GB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/prepare_run_outputs_folder.py
+# bsub -q risk -R "rusage[mem=1GB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/prepare_run_outputs_folder.py

@@ -23,13 +23,13 @@ if isinstance(Target_id, list):
     Target_id = Target_id[0]
 
 targ = target_class.KeplerTarget(target_id=Target_id,
-                                 simulated_star=True,
+                                 simulated_red_star=True,  # Warning: in run_12, it was a white star!
                                  load_pickled_attributes=False,
                                  data_location=None,
-                                 output_location='/home/labs/barakz/Collaboration-Kepler/orynai/simulated_star')
+                                 output_location='/home/projects/barakz/Collaboration-Kepler/orynai/simulated_star_' + Run_name)
 
 targ.run_main_search(save_to_threshold_crossing_list=False,
                      clean_dir_if_not_threshold_crossing=False,
                      save_multiple_triggers=False)
 
-# bsub -q short -R "rusage[mem=3.9G]" -sp 100 -J sim /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_main_search.py
+# bsub -q short -R "rusage[mem=3.9G]" -sp 100 -J sim -oo /home/projects/barakz/Collaboration-Kepler/orynai/simulated_star_run_12/output_main_search.out -eo /home/projects/barakz/Collaboration-Kepler/orynai/simulated_star_run_12/error_main_search.out /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_main_search.py

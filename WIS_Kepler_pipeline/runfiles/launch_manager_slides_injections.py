@@ -29,11 +29,13 @@ Max_jobs_submitted = 9500  # Maximal number of jobs that we can have in bjobs at
 
 queues = Queues_check
 # Take job files from the running list randomly to avoid two timeslides file running simultaneously
+job_files_folder = Job_files_folder
+submitted_jobs_folder = Submitted_jobs_folder
 
 minutes_between_checks = 5.
 timeout_start = time.time()
 time_last = timeout_start - (minutes_between_checks + 0.01) * 60  # I want it to start immediately
-while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_files_folder)) > 0):
+while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(job_files_folder)) > 0):
     if time.time() - time_last > minutes_between_checks * 60:  # check every 10 min
         time_last = time.time()
         # wc = check_number_of_submitted_jobs(output_dir=Run_technical_folder)
@@ -43,17 +45,17 @@ while (time.time() < timeout_start + Max_work_time) and (len(os.listdir(Job_file
         else:
             wc = wcs
         if wc < Max_jobs_submitted:
-            for ff in os.listdir(Job_files_folder)[:Max_jobs_submitted - wc]:
-                os.system('bsub < ' + os.path.join(Job_files_folder, ff))
+            for ff in os.listdir(job_files_folder)[:Max_jobs_submitted - wc]:
+                os.system('bsub < ' + os.path.join(job_files_folder, ff))
                 time.sleep(0.005)
-                os.replace(os.path.join(Job_files_folder, ff), os.path.join(Submitted_jobs_folder, ff))
+                os.replace(os.path.join(job_files_folder, ff), os.path.join(submitted_jobs_folder, ff))
                 # os.remove(os.path.join(Job_files_folder, ff))
                 # -> In slides and injections, just remove the submitted job; there are too many of them
     else:
         time.sleep(10)  # sleep 30 seconds if the time to check did not yet come
 
-# bsub -q physics-short -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
-# bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
-# bsub -q physics-medium -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
-# bsub -q risk -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
-# bsub -q long -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q physics-short -sp 100 -R "rusage[mem=500MB]"  source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q physics-long -R "rusage[mem=500MB]"  source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q physics-medium -sp 100 -R "rusage[mem=500MB]"  source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q risk -sp 100 -R "rusage[mem=500MB]"  source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py
+# bsub -q long -sp 100 -R "rusage[mem=500MB]"  source ~/.bashrc; conda activate planets_env_amd_epyc; /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/launch_manager_slides_injections.py

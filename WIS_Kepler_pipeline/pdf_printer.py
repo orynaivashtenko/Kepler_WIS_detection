@@ -44,7 +44,7 @@ tce.unpickle_small_attributes(load_target_attributes=True, overwrite_existing_by
 targ = get_target_for_tce(tce)
 targ.unpickle_small_attributes()
 tce.get_neighbors_info(neighbors_folder=Neighbors_folder)
-# tce.get_target_gaia_table(file_path='home/labs/barakz/Collaboration-Kepler/orynai/run_11_results/tids_table_gaia.ecsv')
+# tce.get_target_gaia_table(file_path='home/projects/barakz/Collaboration-Kepler/orynai/run_11_results/tids_table_gaia.ecsv')
 
 pdf_location = os.path.join(Triggers_plots_location, tce.target_id)
 pdf_path = get_saving_file_path(output_location=str(pdf_location),

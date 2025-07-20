@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 import os
 core_num = "1"
-os.environ["OMP_NUM_THREADS"] = core_num # export OMP_NUM_THREADS=4
-os.environ["OPENBLAS_NUM_THREADS"] = core_num # export OPENBLAS_NUM_THREADS=4
-os.environ["MKL_NUM_THREADS"] = core_num # export MKL_NUM_THREADS=6
-os.environ["VECLIB_MAXIMUM_THREADS"] = core_num # export VECLIB_MAXIMUM_THREADS=4
-os.environ["NUMEXPR_NUM_THREADS"] = core_num # export NUMEXPR_NUM_THREADS=6
+os.environ["OMP_NUM_THREADS"] = core_num  # export OMP_NUM_THREADS=4
+os.environ["OPENBLAS_NUM_THREADS"] = core_num  # export OPENBLAS_NUM_THREADS=4
+os.environ["MKL_NUM_THREADS"] = core_num  # export MKL_NUM_THREADS=6
+os.environ["VECLIB_MAXIMUM_THREADS"] = core_num  # export VECLIB_MAXIMUM_THREADS=4
+os.environ["NUMEXPR_NUM_THREADS"] = core_num  # export NUMEXPR_NUM_THREADS=6
 
 import numpy as np
 import sys
@@ -44,7 +44,8 @@ def get_a_fixed_duration(duration, period):
     return a
 
 
-def simulated_star_run(snr_true=10., per_true=100., duration=None, tmin=131., m_1_3_r_s=1., inc=90., ecc=0., w=90.,
+def simulated_star_run(snr_true=10., per_true=100., duration=None, tmin=sim.T_min_simulation, n_quarters=sim.N_quarters_simulation,
+                       m_1_3_r_s=1., inc=90., ecc=0., w=90.,
                        u1=pp.Default_limb_darkening_coefs[0], u2=pp.Default_limb_darkening_coefs[1]):
     if duration is None:
         a = pp.get_a_from_p(period=per_true, m_1_3_r_s=m_1_3_r_s)
@@ -52,7 +53,8 @@ def simulated_star_run(snr_true=10., per_true=100., duration=None, tmin=131., m_
         a = get_a_fixed_duration(duration=duration, period=per_true)
     np.random.seed(seed=None)
     ftt_true = np.random.uniform(tmin, tmin+per_true)
-    t, d, snr = sim.get_simulated_star(n_quarters=16, mean_flux=1e5, sigma_high_rel=1e-4, tmin=tmin, t_between=1.,
+    t, d, snr = sim.get_simulated_star(n_quarters=n_quarters, mean_flux=1e5, sigma_high_rel=1e-4,
+                                       tmin=tmin, t_between=1.,
                                        inject_planet=True, period=per_true, first_transit_center=ftt_true, rp=0.02, a=a, inc=inc,
                                        ecc=ecc, w=w, u1=u1, u2=u2, snr_required=snr_true)
 
@@ -98,9 +100,9 @@ Pers_inj = np.linspace(30, 500, 6)
 Pars = dict(inc=90., ecc=0, w=0, u1=pp.Default_limb_darkening_coefs[0], u2=pp.Default_limb_darkening_coefs[1])
 
 # Saving_dir = os.path.join(os.getcwd(), 'snr_recovery_results')
-Saving_dir = '/home/orynai/Kepler_Notebooks/Run_12/Snr_recovery'
+Saving_dir = '/home/orynai/Kepler_Notebooks/' + pp.Run_name + '/Snr_recovery'
 if not os.path.isdir(Saving_dir):
-    os.mkdir(Saving_dir)
+    os.mkdir(Saving_dir, mode=0o777)
 Counter_file = os.path.join(Saving_dir, 'counter.txt')
 
 

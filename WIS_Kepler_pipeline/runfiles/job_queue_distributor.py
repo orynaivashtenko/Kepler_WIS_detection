@@ -99,6 +99,6 @@ done
     else:
         time.sleep(30)  # sleep 30 seconds if the time to check did not yet come
 
-# bsub -q long -sp 100 -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/job_queue_distributor.py
-# bsub -q physics-long -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/job_queue_distributor.py
-# bsub -q risk -R "rusage[mem=500MB]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/job_queue_distributor.py
+# bsub -q long -sp 100 -R "rusage[mem=500MB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/job_queue_distributor.py
+# bsub -q physics-long -R "rusage[mem=500MB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/job_queue_distributor.py
+# bsub -q risk -R "rusage[mem=500MB]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/job_queue_distributor.py

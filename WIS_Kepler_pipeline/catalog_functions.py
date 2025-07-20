@@ -9,6 +9,7 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = core_num
 os.environ["NUMEXPR_NUM_THREADS"] = core_num
 import numpy as np
 import locations as locs
+from utils import check_transit_overlap
 # from tce_parameters import (Neighbors_search_radius_pix, Pixel_scale, Gaia_fields)
 
 from astropy.table import Table, Column, vstack
@@ -157,6 +158,42 @@ def read_gaia_table_for_target_id(tid_list, file_path=locs.Gaia_trigger_table_fi
     tid_list = ensure_list_str(tid_list)
     gaia_trigger_table = read_gaia_trigger_table(file_path=file_path)
     return retrieve_line_for_target_id(tid_list, gaia_trigger_table)
+
+
+def match_koi(target_id, period, ftt, n_transits, min_overlap_fraction=0.5, match_periods=True, period_tolerance=0.1,
+              koi_dict_file=locs.Koi_dict_file, ttv_dict_file=locs.Ttv_dict_file, overlap_timing_error=0.08):
+    """
+    Gets matching KOI of this star to the trigger that is specified by `period`, `ftt`
+    min_overlap_fraction is not important because we already require period match, and the transit time wll match somehow. it can
+    be small sometimes because we cut the first and the last semi-quarters
+    """
+    period = float(period)
+    ftt = float(ftt)
+    res_dict = None
+    is_koi, koi_dict, ttv_dict = get_koi_ttv_dicts(kepler_id=target_id, koi_dict_file=koi_dict_file, ttv_dict_file=ttv_dict_file)
+    if is_koi:
+        transit_overlap_mask = np.zeros(n_transits).astype(bool)
+        if len(koi_dict) > 0:
+            res_dict = {key: [] for key in koi_dict.keys()}
+            for ind in range(len(koi_dict['koi_disposition'])):
+                per_str = koi_dict['koi_period'][ind]
+                if per_str == '':
+                    per_str = 'nan'
+                    per_float = np.nan
+                    ftt_float = np.nan
+                else:
+                    per_float = float(per_str)
+                    per_str = str(np.round(per_float, 1))
+                    ftt_float = float(koi_dict['koi_time0bk'][ind])
+
+                if not match_periods or np.abs(per_float - period) < period_tolerance:
+                    transit_overlap_mask = check_transit_overlap(period=period, ftt=ftt,
+                                                                 period_ref=per_float, ftt_ref=ftt_float,
+                                                                 n_transits=n_transits, timing_error=overlap_timing_error)
+                    if np.sum(transit_overlap_mask) > min_overlap_fraction * len(transit_overlap_mask):
+                        for key in res_dict.keys():
+                            res_dict[key].append(koi_dict[key][ind])
+    return res_dict
 
 
 def get_koi_ttv_dicts(kepler_id, koi_dict_file=locs.Koi_dict_file, ttv_dict_file=locs.Ttv_dict_file):

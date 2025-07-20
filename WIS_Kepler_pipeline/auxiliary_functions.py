@@ -8,10 +8,10 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import warnings
 from scipy.optimize import minimize
+from scipy.special import erfc
 import gzip
 import shutil
 import requests
-import wget
 from astropy.io import fits
 
 import utils
@@ -46,6 +46,7 @@ def get_data_fun(target_id, location=Default_data_location):
     folder = get_correct_tid_folder(target_id, location, allow_creation=True)
 
     if len([ff for ff in os.listdir(folder) if '.fits' in ff]) < 1:
+        import wget
         webdir = 'https://archive.stsci.edu/pub/kepler/lightcurves/'
         # webdir = 'https://archive.stsci.edu/missions/kepler/lightcurves/'
         webfolder = webdir + target_id[:4] + '/' + target_id + '/'
@@ -62,8 +63,8 @@ def get_data_fun(target_id, location=Default_data_location):
     #        warnings.warn('Number of files is not equal to the total number quarters. Available '+str(len(files)) + ' files')
     for f in files:
         filc = fits.open(os.path.join(folder, f))
-        times.append(filc[1].data['TIME'])  # unit = 'BJD - 2454833'
-        fluxes.append(filc[1].data['PDCSAP_FLUX'])
+        times.append((filc[1].data['TIME']).astype(float))  # unit = 'BJD - 2454833'
+        fluxes.append((filc[1].data['PDCSAP_FLUX']).astype(float))
         filc.close()
 
     firstindices = []
@@ -251,7 +252,8 @@ def get_correct_tid_folder(target_id, location, allow_creation=False, with_prefi
         return location
 
 
-def get_saving_file_path(output_location, target_id, filename_postfix, file_format, insert_after_postfix=None):
+def get_saving_file_path(output_location, target_id, filename_postfix, file_format, insert_after_postfix=None,
+                         insert_integer_periods=None):
     """
 
     :param output_location: The directory in which the output of this target is saved
@@ -264,6 +266,8 @@ def get_saving_file_path(output_location, target_id, filename_postfix, file_form
     :type file_format: str
     :param insert_after_postfix:
     :type insert_after_postfix: str or None
+    :param insert_integer_periods: If not None, will be inserted after the filename_postfix
+    :type insert_integer_periods: numpy.ndarray, list, tuple, float, str, or None
     :return:
     :rtype:
     """
@@ -273,14 +277,87 @@ def get_saving_file_path(output_location, target_id, filename_postfix, file_form
     if filename_postfix[-len(file_format):] != file_format:
         filename_postfix = filename_postfix + file_format
 
-    if insert_after_postfix is not None:
-        filename_postfix = filename_postfix[:-len(file_format)] + insert_after_postfix + filename_postfix[-len(file_format):]
+    if (insert_integer_periods is not None) and (insert_integer_periods != ''):
+        if not isinstance(insert_integer_periods, str):
+            if hasattr(insert_integer_periods, "__len__"):
+                insert_integer_periods = [str(int(np.round(p))) for p in insert_integer_periods]
+                insert_integer_periods = '_p_' + '_'.join(insert_integer_periods)
+            else:
+                insert_integer_periods = '_p_' + str(int(np.round(insert_integer_periods)))
+        else:
+            if insert_integer_periods[:len('_p_')] != '_p_':
+                insert_integer_periods = '_p_' + insert_integer_periods.strip('_')
+    else:
+        insert_integer_periods = ''
+
+    if (insert_after_postfix is not None) and (insert_after_postfix != ''):
+        if insert_after_postfix[0] != '_':
+            insert_after_postfix = '_' + insert_after_postfix
+    else:
+        insert_after_postfix = ''
+
+    filename_postfix = (filename_postfix[:-len(file_format)] + insert_after_postfix
+                        + insert_integer_periods + filename_postfix[-len(file_format):])
 
     if target_id is not None:
         file_dir = os.path.join(output_location, str(target_id) + '_' + filename_postfix)
     else:
         file_dir = os.path.join(output_location, filename_postfix)
     return file_dir
+
+
+def split_saving_file_path(saving_file_path, filename_postfix=None, target_id=None, file_format=None):
+    """
+    """
+    folder, filename = os.path.split(saving_file_path)
+    if file_format is None:
+        file_extension_index = filename.rfind('.')
+        file_extension = filename[file_extension_index + 1:]
+        saving_file_path_no_ext = filename[:file_extension_index]
+    else:
+        if file_format[0] == '.':
+            file_format = file_format[1:]
+        if filename[-len(file_format):] != file_format:
+            raise ValueError('Inconsistent file_format requested!')
+        saving_file_path_no_ext = filename[: -len(file_format) - 1]
+        file_extension = file_format
+
+    if '_p_' in filename:
+        res = saving_file_path_no_ext.split('_p_')
+        beginning = res[0]
+        periods_str = res[1].split('_')
+    else:
+        beginning = saving_file_path_no_ext
+        periods_str = None
+
+    if target_id is not None:
+        if beginning[:len(target_id)] != target_id:
+            raise ValueError('Inconsistent target_id requested!')
+        beginning = beginning[len(target_id):]
+        beginning = beginning.strip('_')
+
+    if filename_postfix is not None:
+        res = beginning.split(filename_postfix)
+        if (res[0] != '') and (target_id is None):
+            target_id = res.strip('_')
+        else:
+            filename_postfix = res[0] + '_' + filename_postfix
+        if res[-1] != '':
+            addition = res[-1]
+        else:
+            addition = None
+    else:
+        if target_id is None:
+            target_id = None
+        addition = None
+        filename_postfix = beginning
+    return folder, target_id, filename_postfix, addition, periods_str, file_extension
+
+
+# def find_file_by_postfix(output_location, target_id=None, filename_postfix=None, file_format=None):
+#     filenames = [f for f in os.listdir(output_location) if os.path.isfile(os.path.join(output_location, f))]
+#     filenames = [f for f in filenames if filename_postfix in f]
+#     TODO
 
 
 def check_dict_keyword(target_id, output_folder, keyword='is_good_for_processing', dict_postfix=pp.Dict_target_txt_filename_postfix):
@@ -480,7 +557,7 @@ def get_average_whitened_template(whitened_templates_td, temp_number, n_time_tem
         temps = [np.array(t) for t in temps]
     for q in range(len(temps)):
         if len(temps[q]) < n_time_templ:
-            temps[q] = ut.pad_by_zeros(temps[q], n_time_templ, in_the_center=True)
+            temps[q] = ut.pad_by_zeros_fun(temps[q], n_time_templ, in_the_center=True)
         elif len(temps[q]) > n_time_templ:
             temps[q] = np.concatenate((temps[q][:n_time_templ // 2], temps[q][- (n_time_templ + 1) // 2:]))
     temp_best_1 = np.array(np.mean([temps[q][:n_time_templ // 2] for q in range(n_quarters)], axis=0))
@@ -502,6 +579,7 @@ def get_average_stat_template(whitened_templates_td, temp_number, n_time_templ,
                                                              indices_of_templates=indices_of_templates)
     temp_best = temp_best / np.linalg.norm(temp_best)
     temp_best = np.roll(temp_best, -np.argmax(temp_best))  # the maximum is supposed to be at zero
+    # TODO: can maximum be not at the centre?
     temp_best = np.fft.irfft(np.abs(np.fft.rfft(temp_best)) ** 2)  # for statistic, template is convolution
     tem_center = n_time_templ // 2
     temp_best = np.roll(temp_best, tem_center)  # the maximum is supposed to be at zero before
@@ -585,6 +663,45 @@ def mask_ephemeris(times, quarters, masks, big_hole_masks, dt_days,
                     masks[q][max(0, ind1 - half_dur_bins): min(len(times[q]), ind1 + half_dur_bins + 1)] = False
                     big_hole_masks[q][max(0, ind1 - half_dur_bins): min(len(times[q]), ind1 + half_dur_bins + 1)] = False
     return masks, big_hole_masks
+
+
+def get_extrapolation_chi2_1_limited(stats2, stat2_limit=0):
+    from scipy.optimize import root_scalar
+
+    stats2 = np.array(stats2)
+    len_initial = len(stats2)
+    stats2 = stats2[stats2 > stat2_limit]
+    len_final = len(stats2)
+    stat2_limit = stat2_limit
+    stat2_mean = np.nanmean(stats2)
+
+    def equation(x):
+        return 1 + 2 * x ** 0.5 * stat2_limit ** 0.5 / (np.pi ** 0.5 * erfc(x ** 0.5 * stat2_limit ** 0.5)) * np.exp(
+            -stat2_limit * x) - 2 * x * stat2_mean
+
+    # def chi2_1_from_limited(x2, coef, stat2_limit=0):
+    #     return (coef / np.pi / x2) ** 0.5 / erfc(coef ** 0.5 * stat2_limit ** 0.5) * np.exp(-coef * x2)
+
+    coef = root_scalar(equation, bracket=[0, 5], method='brentq').root
+    ampl = 1 / erfc(coef ** 0.5 * stat2_limit ** 0.5) * len_final / len_initial
+    return coef, ampl
+    #  lambda x: chi2_1_from_limited(x2=x, coef=coef, stat2_limit=stat2_limit)
+
+
+def chi2_1(x2, coef):
+    return (coef / np.pi / x2) ** 0.5 * np.exp(-coef * x2)
+
+
+def sf_asymptotic_chi2_1(stat2, coef):
+    return erfc(coef ** 0.5 * stat2 ** 0.5)
+
+
+def chi2_1_from_limited(x2, coef, stat2_limit=0):
+    return (coef / np.pi / x2) ** 0.5 / erfc(coef ** 0.5 * stat2_limit ** 0.5) * np.exp(-coef * x2)
+
+
+def sf_asymptotic_chi2_1_from_limited(stat2, coef, stat2_limit=0):
+    return erfc(coef ** 0.5 * stat2 ** 0.5) / erfc(coef ** 0.5 * stat2_limit ** 0.5)
 
 
 def get_histogram_extrapolation_coefs_in_log(counts, bins, min_counts_to_include=3, right_from_max_to_left=1.5, counts_are_log=False):
@@ -676,6 +793,95 @@ def is_bad_fft(fftdat, amp_max=300, dif_max=10, rfft=True):
         return flag
     else:
         raise AssertionError('Please finish the code for rfft=False !')
+
+
+def get_detectable_radius_flux(flux_model, period, depth_factor=1., snr_min=4.5, snr_max_1=8, snr_max_full=40,
+                               max_n_lost_transits=None, min_survived_transits=3,
+                               min_relative_survived_transits=Min_required_nonzero_transits_fraction,
+                               stellar_radius=None, units='star', wf_fd=None, include_detrending=True,
+                               nperseg_psd=Nperseg_psd, n_quarters=16):
+    """
+    Takes the mean flux model and the period, uploads the noise properties of the star. Checks what would be the signal-to-noise
+    for different planetary radii and selects the minimal and maximal radii accounting for the detection threshold and
+    the punishment of too strong signals in the pipeline. Other radii are supposed to be not interesting for the search
+    because they will never populate the range of the histogram which surrounds the potential triggers that we are aiming for.
+    :type nperseg_psd: int
+    :param flux_model: Model of the transit, mean flux as function of time.
+    :type flux_model: numpy.ndarray 1d of float
+    :param period: Period of the supposed planet, days. Defines the number of transits.
+    :type period: float
+    :param depth_factor: Ratio of the maximal dimming anf the (planet_radius / stellar_radius)**2. Shows how important is the
+        limb darkening and the inclination in the minimal attainable dimming. Often this can be significant.
+    :type depth_factor: float
+    :param snr_min: Minimal SNR for the full many-transit data assumed to be detectable. We take extra safety assuming there
+        can be dispersion and error, and take this lower.
+    :type snr_min: float
+    :param snr_max_1: Maximal SNR which can be allocated to one transit. Higher will be cut as outlier or obtain a too big
+        punishment from the non-gaussianity.
+    :type snr_max_1: float
+    :param snr_max_full: Maximal SNR which can be allocated to one transit. Higher is assumed to be outside our pipeline
+        operation range, so that it will never influence any density in the range of our possible triggers.
+    :type snr_max_full: float
+    :param stellar_radius: Radius of the star in units of solar radii.
+    :type stellar_radius: float
+    :param units: 'star' or 'earth'. Whether to report the result in units of stellar radii or earth radii.
+    :type units: str
+    :param max_n_lost_transits: Maximal number of transits which is allowed to be lost in holes
+    :type max_n_lost_transits: int or None
+    :param min_survived_transits: Minimal transits that need to survive, not falling on the holes
+    :type min_survived_transits: int or None
+    :param min_relative_survived_transits: Minimal fraction of transits that need to survive, not falling on the holes
+    :type min_relative_survived_transits: float or None
+    :param wf_fd: Average whitening filter in Fourier domain
+    :type wf_fd: numpy.ndarray 1d
+    :param n_quarters:  Number of 90-days quarters expected in the data. Is important for the number of transits that can happen
+    :type n_quarters: int
+    :param include_detrending: Whether to include the fact that in the detection pipeline, the lowest frequencies
+        will be detrended, and all the SNR there will be lost.
+    :type include_detrending: bool
+    :param nperseg_psd: Slice size of the PSD measurement which defines the lowest frequency which will be resolved by
+        the PSD, whereas lower frequencies will be detrended.
+
+    :return: rps_res, the resulting minimal and maximal considered radii in the specified units
+    :rtype: tuple(float, float)
+    """
+    support = 2 * (len(wf_fd) - 1)
+    if include_detrending:
+        freqs_wf_fd = np.fft.rfftfreq(support, d=1)  # Replace dt by 1 because units cancel out in the next line
+        freq_psd_resolution = 1 / (nperseg_psd * 1)
+        wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
+
+    n_transits_max = np.ceil(n_quarters * 90. / period)
+    n_transits_min = np.floor(n_quarters * 90. / period)
+    n_transits_min_initial = n_transits_min
+    # Some number of transits can be lost due to holes, so this is how many are left in the worst case.
+    if min_relative_survived_transits is not None:
+        min_survived_transits_from_relative = int(np.round(min_relative_survived_transits * n_transits_min_initial))
+        n_transits_min = max(n_transits_min, min_survived_transits_from_relative)
+    if max_n_lost_transits is not None:
+        n_transits_min = max(n_transits_min, n_transits_min_initial - max_n_lost_transits)
+    if min_survived_transits is not None:
+        n_transits_min = max(n_transits_min, min_survived_transits)
+
+    flux_model = flux_model / np.nanmax(flux_model) * depth_factor
+    flux_model = ut.whiten_vector(flux_model, wf_fd=wf_fd)
+
+    # snr_max = np.linalg.norm(flux) * n_transits_max ** 0.5 * (rp_rs ** 2)
+    rp_rs_min = (snr_min / (np.linalg.norm(flux_model) * n_transits_max ** 0.5)) ** 0.5
+    if snr_max_full is not None:
+        rp_rs_max = (snr_max_full / (np.linalg.norm(flux_model) * n_transits_min ** 0.5)) ** 0.5
+        if snr_max_1 is not None:
+            rp_rs_max = min((snr_max_1 / np.linalg.norm(flux_model)) ** 0.5, rp_rs_max)
+    else:
+        rp_rs_max = (snr_max_1 / np.linalg.norm(flux_model)) ** 0.5
+    rps_res = rp_rs_min, rp_rs_max
+    if units == 'earth':
+        units_of_re_to_units_of_r_star_factor = 1 / (stellar_radius * pp.R_sun_R_e)
+        # rp_rs = units_of_re_to_units_of_r_star_factor * rp_re
+        rp_re_min = rp_rs_min / units_of_re_to_units_of_r_star_factor
+        rp_re_max = rp_rs_max / units_of_re_to_units_of_r_star_factor
+        rps_res = rp_re_min, rp_re_max
+    return rps_res
 
 
 def get_best_int_score_and_stat_index(int_scores, stats,
@@ -944,21 +1150,27 @@ def renorm_noise_by_high_freq_tail(data, dt, dt_pass, high_pass=False):
         return data * filter_val**0.5
 
 
-def filter_data_high_pass(data, dt, dt_pass, in_fourier=False, return_cutoff_index=False, renormalize_to_tail=True):
-    data = np.array(data)
-    f_data = np.fft.rfft(data, axis=-1)
-    freqs = np.fft.rfftfreq(data.shape[-1], d=dt)
+def filter_data_high_pass(data, dt, dt_pass, in_fourier=False, return_cutoff_index=False, renormalize_to_tail=True,
+                          data_fd=None):
+    if data is not None:
+        data = np.array(data)
+        f_data = np.fft.rfft(data, axis=-1)
+        support = data.shape[-1]
+    else:
+        f_data = np.array(data_fd)
+        support = 2 * (f_data.shape[-1] - 1)
+    freqs = np.fft.rfftfreq(support, d=dt)
     inds_pass = freqs > 1 / dt_pass
     wf2_effective = np.zeros(freqs.shape[-1])
     if renormalize_to_tail:
-        wf2_effective[inds_pass] = data.shape[-1] / np.mean((np.abs(f_data) ** 2)[inds_pass])
+        wf2_effective[inds_pass] = support / np.mean((np.abs(f_data) ** 2)[inds_pass])
     else:
         wf2_effective[inds_pass] = np.ones(len(wf2_effective))[inds_pass]
     f_data_hp = f_data * wf2_effective ** 0.5
     if in_fourier:
         res = f_data_hp
     else:
-        res = np.fft.irfft(f_data_hp, n=data.shape[-1], axis=-1)
+        res = np.fft.irfft(f_data_hp, n=support, axis=-1)
     if return_cutoff_index:
         return res, np.argmax(inds_pass)  # argmax will select the first non-zero here
     else:
@@ -1324,7 +1536,57 @@ def get_seasons(tce=None, transit_times=None):
     return seasons
 
 
-def get_kepler_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
+def get_kepler_sap_quality_masks(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
+    target_id = target_id.rjust(9, "0")
+    folder = get_correct_tid_folder(target_id, data_location, allow_creation=True)
+
+    times = []
+    fluxes = []
+    sap_quality_masks = []
+    files = [f for f in os.listdir(folder)[:] if 'llc.fits' in f]
+    # if len(files)<17:
+    #        warnings.warn('Number of files is not equal to the total number quarters. Available '+str(len(files)) + ' files')
+    for f in files:
+        filc = fits.open(os.path.join(folder, f))
+        times.append(filc[1].data['TIME'])  # unit = 'BJD - 2454833'
+        sap_quality_masks.append(filc[1].data['SAP_QUALITY'])
+        fluxes.append(filc[1].data['PDCSAP_FLUX'])
+        filc.close()
+
+    # noinspection DuplicatedCode
+    reference_times = np.array([(times[q][~np.isnan(times[q])])[0] for q in range(len(times))])
+    argsort = np.argsort(reference_times)
+    times = [times[ind] for ind in argsort]
+    sap_quality_masks = [sap_quality_masks[ind] for ind in argsort]
+    fluxes = [fluxes[ind] for ind in argsort]
+
+    if remove_zeroth_quarter:
+        if len(times[0]) < 800:  # Make sure that the zeroth quarter is indeed the short zeroth quarter
+            times = times[1:]
+            sap_quality_masks = sap_quality_masks[1:]
+            fluxes = fluxes[1:]
+
+    if len(times) < 1:
+        raise AssertionError('There is no data to process!')
+
+    if remove_quarter_17:  # This quarter is small, there is a hola, and there might be glitch. we remove it
+        if ((1570 >= np.nanmin(times[-1])) & (
+                1570 <= np.nanmax(times[-1]))):  # Check that Q17 is here.
+            times = times[:-1]
+            sap_quality_masks = sap_quality_masks[:-1]
+            fluxes = fluxes[:-1]
+
+    if cut_edge_nans:
+        for q in range(len(times)):
+            non_nans = np.where(~np.isnan(fluxes[q]))[0]
+            times[q] = times[q][non_nans[0]: non_nans[-1] + 1]
+            sap_quality_masks[q] = sap_quality_masks[q][non_nans[0]: non_nans[-1] + 1]
+            fluxes[q] = fluxes[q][non_nans[0]: non_nans[-1] + 1]
+
+    return sap_quality_masks, times, fluxes
+
+
+def get_kepler_quality_masks_from_tpf(target_id, data_location, remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True):
     """
 
     ra and dec are in decimal degrees
@@ -1662,6 +1924,7 @@ def download_target_pixel_files(target_id, saving_folder):
     :return:
     :rtype:
     """
+    import wget
     target_id = str(target_id).rjust(9, "0")
     saving_folder = get_correct_tid_folder(target_id=target_id, location=saving_folder, allow_creation=True)
 

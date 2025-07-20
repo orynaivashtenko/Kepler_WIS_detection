@@ -20,6 +20,8 @@ from pipeline_parameters import Pipeline_folder, Simulations_folder_name, \
 dt_lc = tm.dt_lc
 Default_stored_asd_file_dir = os.path.join(Pipeline_folder, Simulations_folder_name, Default_stored_asd_file_filename)
 Default_stored_wf_fd_file_dir = os.path.join(Pipeline_folder, Simulations_folder_name, Default_effective_wf_fd_filename)
+N_quarters_simulation = 16
+T_min_simulation = 131.
 
 
 def get_saved_psd(freqs=None, dt=tm.dt_lc, file_dir=Default_stored_asd_file_dir):
@@ -92,15 +94,22 @@ def get_red_noise(support, n_vectors=0, dt=tm.dt_lc, psd='saved', return_psd=Fal
         return noise, psd
 
 
-def get_simulated_star(n_quarters=14, mean_flux=1e4, sigma_high_rel=1e-4, tmin=131, t_between=1.,
+def get_simulated_star(n_quarters=N_quarters_simulation, mean_flux=1e4, sigma_high_rel=1e-4, tmin=T_min_simulation, t_between=1.,
                        inject_planet=False, period=100, first_transit_center=141, rp=0.02, a=215., inc=90., ecc=0., w=90., u1=0.47,
-                       u2=0.23, snr_required=None):
+                       u2=0.23, snr_required=None, red=True, random_seed=None):
+    np.random.seed(random_seed)
     lenquart = int(91 / tm.dt_lc)
     noises = []
-    noise, psd = get_red_noise(support=lenquart, n_vectors=0, return_psd=True)
-    for i in range(n_quarters):
+    if red:
         noise, psd = get_red_noise(support=lenquart, n_vectors=0, return_psd=True)
-        noises.append(noise - np.nanmean(noise))
+        for i in range(n_quarters):
+            noise, psd = get_red_noise(support=lenquart, n_vectors=0, return_psd=True)
+            noises.append(noise - np.nanmean(noise))
+    else:
+        psd = np.ones(lenquart//2 + 1)
+        for i in range(n_quarters):
+            noise = np.random.normal(0, 1, lenquart)
+            noises.append(noise - np.nanmean(noise))
     sigma_there = np.mean(np.abs(np.fft.rfft(noises[0], norm='ortho')[-len(noises[0]) // 4:]) ** 2) ** 0.5
     factor = sigma_high_rel * mean_flux / sigma_there
     noises = [noises[i] * factor + mean_flux for i in range(len(noises))]
@@ -558,7 +567,7 @@ def inject_planet_to_data(times=None, fluxes=None,
 #             masks.append(mask)
 #             fluxes_detr.append(flux_interp - mov_median)
 #         psds, wf_fds, wf_tds = ut.measure_psds_func(fluxes, masks=masks, nperseg=nperseg, noverlap=nperseg//2, window='hann',
-#                                                     support=support, subtract_mean=True, rfft=True, smoothen_psds=True,
+#                                                     support=support, subtract_mean=True, rfft=True, multi_resolution_psds=True,
 #                                                     tukey_steps_len=16, conditional_zero_zeroth_freq=True, always_zero_zeroth_freq=False,
 #                                                     zero_to_high_freq_thresh_wf_ratio=0.6, dt=dt)
 #

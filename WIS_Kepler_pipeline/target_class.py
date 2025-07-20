@@ -48,6 +48,7 @@ from astropy.io import fits
 import pickle
 import search_pipeline as spip
 import template_bank.template_module as tm
+from template_bank.template_bank_generation_parameters import E_crit
 from simulations import lightcurve_simulation as sim
 import auxiliary_functions as af
 import utils as ut
@@ -71,6 +72,7 @@ class KeplerTarget(object):
                  koi_dict_file=Koi_dict_file,
                  ttv_dict_file=Ttv_dict_file,
                  villanova_dict_file=Villanova_dict_file,
+                 kill_villanova_binary=True,
                  limb_darkening_array_file=Limb_darkening_array_file,
                  overwrite_location_parameters_by_unpickle=False,
                  allow_output_folder_creation=True,
@@ -78,7 +80,7 @@ class KeplerTarget(object):
                  problems_folder=Problems_folder,
                  add_prefix_to_problems_folder=True,
                  clean_problems_file=False,
-                 simulated_star=False,
+                 simulated_white_star=False, simulated_red_star=False,
                  plots_location=None,
                  allow_plots_folder_creation=True):
         """
@@ -90,22 +92,22 @@ class KeplerTarget(object):
         :param data_location: Local path to the folder where data files are stored. The target_id will
             be searched in there. If light curves are not found in the folder, they will be downloaded.
             If folder is not found, it will be created.
-        :type data_location: str or None
+        :type data_location: str or LiteralString or bytes or None
         :param output_location: Directory where the output is to be saved. The target ID named folder will be created.
-        :type output_location: str
+        :type output_location: str or LiteralString or bytes or None
         :param load_pickled_attributes: Whether to load the class attributes which were saved in the `output_location`
         :type load_pickled_attributes: bool
         :param get_transit_and_binary_info: Whether to get the target info about existing planets and binary
             companions from the Kepler catalogs.
         :type get_transit_and_binary_info: bool
         :param gaia_kepler_file_path: The local path to the Gaia-Kepler catalog file
-        :type gaia_kepler_file_path: str
+        :type gaia_kepler_file_path: str or LiteralString or bytes or None
         :param koi_dict_file: The local path to the KOI info dictionary file
-        :type koi_dict_file: str
+        :type koi_dict_file: str or LiteralString or bytes or None
         :param ttv_dict_file: The local path to the TTV info file
-        :type ttv_dict_file: str
+        :type ttv_dict_file: str or LiteralString or bytes or None
         :param villanova_dict_file: The local path to the Villanova Kepler eclipsing binary info file
-        :type villanova_dict_file: str
+        :type villanova_dict_file: str or LiteralString or bytes or None
         :param overwrite_location_parameters_by_unpickle: Whether to use the locations parameters saved in the
             output directory from the previous runs
         :type overwrite_location_parameters_by_unpickle: bool
@@ -115,16 +117,18 @@ class KeplerTarget(object):
         :param allow_data_folder_creation: Whether to allow creation of the new data target-ID-named folder if
             the existing one was not found
         :type allow_data_folder_creation: bool
-        :param simulated_star: Whether to take the simulated star data and not a real Kepler one
-        :type simulated_star: bool
+        :param simulated_white_star: Whether to take the simulated white star data and not a real Kepler one
+        :type simulated_white_star: bool
+        :param simulated_red_star: Whether to generate the simulated red star data and not a real Kepler one
+        :type simulated_red_star: bool
         :param plots_location:
-        :type plots_location: str
+        :type plots_location: str or LiteralString or bytes or None
         :param allow_plots_folder_creation:
         :type allow_plots_folder_creation: bool
         """
         self.target_id = target_id.rjust(9, '0')
         """Kepler target ID. Formatted to be a 9-digit string"""
-        self.simulated_star = simulated_star
+        self.simulated_star = 'white' if simulated_white_star else 'red' if simulated_red_star else False
         """Whether the star is simulated and not taken from the real Kepler data"""
 
         # ############################################################################################################
@@ -132,8 +136,9 @@ class KeplerTarget(object):
         if data_location is not None:
             data_location = af.get_correct_tid_folder(target_id, data_location,
                                                       allow_creation=allow_data_folder_creation)
-        output_location = af.get_correct_tid_folder(target_id, output_location,
-                                                    allow_creation=allow_output_folder_creation)
+        if output_location is not None:
+            output_location = af.get_correct_tid_folder(target_id, output_location,
+                                                        allow_creation=allow_output_folder_creation)
         self.data_location = data_location
         """Where Kepler data is saved. If not there, it will be downloaded"""
         self.output_location = output_location
@@ -152,7 +157,8 @@ class KeplerTarget(object):
                     and os.path.basename(problems_folder) != self.target_id):
                 if self.target_id[:4] in os.listdir(problems_folder):
                     problems_folder = os.path.join(problems_folder, target_id[:4])
-        self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_target_txt_filename_postfix)
+        if problems_folder is not None:
+            self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_target_txt_filename_postfix)
         if clean_problems_file:
             self.clean_problems_file()
         """File where issues in the processing will be written"""
@@ -212,8 +218,6 @@ class KeplerTarget(object):
 
         # ############################################################################################################
         # Data-processing-related facts:
-        self.number_of_quarters = None
-        """Number of quarters in the Kepler data"""
         self.is_too_short = None
         """The data is too short to search even for thr shortest period."""
         self.is_bad_fft = None
@@ -356,11 +360,21 @@ class KeplerTarget(object):
         """Number of planets in the injection period range per one star"""
         self.transiting_planets_of_radii_in_per_range_one_star = None
         """Number of planets in the injection period range per one star that exist and transit"""
+        self.transiting_planets_of_radii_in_per_range_one_star_poisson = None
+        """Poisson probability to have al least one planet in the dataset if the poisson rate is
+           `self.transiting_planets_of_radii_in_per_range_one_star`. It is needed because we are looking for one maximal trigger
+           per star, therefore if there happens to be more than one planet, it does not change the detection.
+           Technically, however, the rate is so small that this number and the rate itself are equal."""
         self.transit_and_range_probability = None
         """Probability to transit and to have a radius in the relevant range given that there is a planet of this period"""
         self.transiting_planets_in_relevant_range = None
         """Number of planets in the injection period range in the radii range relevant (snr-wise) for the trigger 
             per one star that exist and transit"""
+        self.transiting_planets_in_relevant_range_poisson = None
+        """Poisson probability to have al least one planet in the dataset if the poisson rate is
+           `self.transiting_planets_in_relevant_range`. It is needed because we are looking for one maximal trigger
+           per star, therefore if there happens to be more than one planet, it does not change the detection.
+           Technically, however, the rate is so small that this number and the rate itself are equal."""
         self.injection_par_list = None
         """List of parameters that will be injected. List of [period, a, inc, ecc, w, u[0], u[1], rp, dur]"""
         self.prior_radii_distribution = None
@@ -483,6 +497,7 @@ class KeplerTarget(object):
         """Total number of time-scramblings made"""
         self.n_injections = None
         """Total number of injections made"""
+        self.n_success_injections = None
 
         # Time-scrambling clean attributes
         self.stats_slides_clean = None
@@ -561,13 +576,24 @@ class KeplerTarget(object):
         """Histogram of distribution of the statistics of the injections (successful and missed together)"""
         self.distr_stat_inj_success = None
         """Histogram of distribution of the statistics of the successful injections"""
+        self.background_normalization_coef = None
+        """What the integral of the background distribution is equal to. Takes care of scores too low to be included
+           abd the prior background probability"""
         self.extrapolation_coefs_stat_h0_hist = None
         """Pair of coefficients describing the linear extrapolation of the background distribution of the statistic
            up to the location of the trigger"""
         self.extrapolation_coefs_stat_h0_hist_clean = None
         """Pair of coefficients describing the linear extrapolation of the background distribution with the removed trigger
            of the statistic up to the location of the trigger"""
-
+        self.extrapolation_coef_int_score_h0_hist = None
+        """Coefficient describing the chi2(1) distribution of the extrapolation of the background distribution of the integral score"""
+        self.extrapolation_limit_int_score_h0_hist = None
+        """Minimal score used in the extrapolation of the background distribution of the integral score"""
+        self.extrapolation_amplitude_int_score_h0_hist = None
+        """Normalization which should multiply the scaled chi2(1) distribution of the extrapolation of the background"""
+        self.extrapolation_amplitude_int_score_clean_h0_hist = None
+        self.extrapolation_coef_int_score_clean_h0_hist = None
+        self.extrapolation_limit_int_score_clean_h0_hist = None
         # Gaussianized statistic (still for the location of the best non-gaussianized score):
         self.bins_gauss_stat_histogram = None
         """Bins of the gaussianized statistic used to build the distribution of the statistics of the time-scrambling and injections"""
@@ -596,7 +622,7 @@ class KeplerTarget(object):
         if load_pickled_attributes:
             self.unpickle_small_attributes(overwrite_location_parameters=overwrite_location_parameters_by_unpickle)
         else:
-            if not self.simulated_star:
+            if self.simulated_star is False:
                 if self.gaia_kepler_file is not None:
                     self.get_fields_from_gaia(gaia_file_path=self.gaia_kepler_file)
                 if get_transit_and_binary_info:
@@ -612,9 +638,10 @@ class KeplerTarget(object):
                 self.is_koi = False
                 self.is_villanova_binary = False
 
-        if self.is_villanova_binary:
-            self.is_good_for_processing = False
-            self.failures += 'villanova; '
+        if kill_villanova_binary:
+            if self.is_villanova_binary:
+                self.is_good_for_processing = False
+                self.failures += 'villanova; '
 
     def clean_problems_file(self):
         if os.path.exists(self.problems_file_location):
@@ -883,6 +910,7 @@ class KeplerTarget(object):
             for key in dict_to_print:
                 print(key, ":", dict_to_print[key], file=fil)
 
+    # noinspection PyTypeChecker
     def print_summary(self, to_file=True, file=None, summary_txt_filename_postfix=Summary_target_txt_filename_postfix):
         """
         Prints the summary file of the search summarizing what are the best trigger parameters
@@ -980,8 +1008,9 @@ class KeplerTarget(object):
                                          output_location=output_location, m_1_3_r_s=self.m_1_3_r_s,
                                          cut_edge_nans=cut_edge_nans,
                                          remove_zeroth_quarter=remove_zeroth_quarter, remove_quarter_17=remove_quarter_17,
-                                         simulated_star=self.simulated_star)
-        self.number_of_quarters = len(self.klc.quarters)
+                                         simulated_red_star=(self.simulated_star == 'red'),
+                                         simulated_white_star=(self.simulated_star == 'white'))
+        self.n_quarters = len(self.klc.quarters)
 
     def bad_fft_check(self, amp_max_bad_fft=Amp_max_bad_fft, dif_max_bad_fft=Dif_max_bad_fft):
         """
@@ -1007,7 +1036,7 @@ class KeplerTarget(object):
             self.is_good_for_processing = False
 
     def check_detectable_radius(self, stellar_radius=None, snr_thresh=Score_candidate_search ** 0.5 - 1,
-                                rp_re_max=Rp_re_max, rp_rs_max=Rp_rs_max):
+                                rp_re_max=Rp_re_max, rp_rs_max=Rp_rs_max, per_min_candidate=Per_min_candidate):
         """
         Finds (very approximately) whether there can be detectable planets in a target with
         the average noise properties of this target, assuming that the threshold SNR is `snr_thresh`.
@@ -1016,6 +1045,8 @@ class KeplerTarget(object):
         The function takes the average noise properties of the star, checks what is the radius
         corresponding to the threshold SNR and sees whether this radius is too large or not.
         Writes the results in the attributes of the class.
+        :param per_min_candidate:
+        :type per_min_candidate:
         :param stellar_radius: Radius of the star in units of solar radii.
         :type stellar_radius: float
         :param snr_thresh: Threshold of snr
@@ -1031,7 +1062,7 @@ class KeplerTarget(object):
         rp_rs = units_of_re_to_units_of_r_star_factor * rp_re_max
         rp_rs = min(rp_rs, rp_rs_max)
 
-        n_transits_max = len(self.klc.quarters) * 2
+        n_transits_max = int(np.ceil(len(self.klc.quarters) * 90 / per_min_candidate))
         snr_max = (np.nanmax([np.mean([np.linalg.norm(self.klc.whitened_templates_td[kk][q])
                                        for q in self.klc.quarters], axis=0) / np.nanmax(self.klc.tb.templates_shifts[kk])
                               for kk in range(len(self.klc.whitened_templates_td))])
@@ -1173,50 +1204,116 @@ class KeplerTarget(object):
             # -> relative wf_fd, mean flux already taken into account
             n_quarters = len(wf_fds)
             wf_fd = np.mean(np.array(wf_fds) ** 2, axis=0) ** 0.5
-        support = 2 * (len(wf_fd) - 1)
-        if include_detrending:
-            freqs_wf_fd = np.fft.rfftfreq(support, d=tm.dt_lc)
-            freq_psd_resolution = 1 / (nperseg_psd * tm.dt_lc)
-            wf_fd[:np.searchsorted(freqs_wf_fd, freq_psd_resolution)] = 0.
 
-        n_transits_max = np.ceil(n_quarters * 90. / period)
-        n_transits_min = np.floor(n_quarters * 90. / period)
-        n_transits_min_initial = n_transits_min
-        # Some number of transits can be lost due to holes, so this is how many are left in the worst case.
-        if min_relative_survived_transits is not None:
-            min_survived_transits_from_relative = int(np.round(min_relative_survived_transits * n_transits_min_initial))
-            n_transits_min = max(n_transits_min, min_survived_transits_from_relative)
-        if max_n_lost_transits is not None:
-            n_transits_min = max(n_transits_min, n_transits_min_initial - max_n_lost_transits)
-        if min_survived_transits is not None:
-            n_transits_min = max(n_transits_min, min_survived_transits)
-
-        flux_model = flux_model / np.nanmax(flux_model) * depth_factor
-        flux_model = ut.whiten_vector(flux_model, wf_fd=wf_fd)
-
-        # snr_max = np.linalg.norm(flux) * n_transits_max ** 0.5 * (rp_rs ** 2)
-        rp_rs_min = (snr_min / (np.linalg.norm(flux_model) * n_transits_max ** 0.5)) ** 0.5
-        if snr_max_full is not None:
-            rp_rs_max = (snr_max_full / (np.linalg.norm(flux_model) * n_transits_min ** 0.5)) ** 0.5
-            if snr_max_1 is not None:
-                rp_rs_max = min((snr_max_1 / np.linalg.norm(flux_model)) ** 0.5, rp_rs_max)
-        else:
-            rp_rs_max = (snr_max_1 / np.linalg.norm(flux_model)) ** 0.5
-        rps_res = rp_rs_min, rp_rs_max
-        if units == 'earth':
-            units_of_re_to_units_of_r_star_factor = 1 / (stellar_radius * R_sun_R_e)
-            # rp_rs = units_of_re_to_units_of_r_star_factor * rp_re
-            rp_re_min = rp_rs_min / units_of_re_to_units_of_r_star_factor
-            rp_re_max = rp_rs_max / units_of_re_to_units_of_r_star_factor
-            rps_res = rp_re_min, rp_re_max
+        rps_res = af.get_detectable_radius_flux(flux_model=flux_model, period=period,
+                                                depth_factor=depth_factor, snr_min=snr_min,
+                                                snr_max_1=snr_max_1, snr_max_full=snr_max_full,
+                                                max_n_lost_transits=max_n_lost_transits,
+                                                min_survived_transits=min_survived_transits,
+                                                min_relative_survived_transits=min_relative_survived_transits,
+                                                stellar_radius=stellar_radius, units=units,
+                                                wf_fd=wf_fd, include_detrending=include_detrending, nperseg_psd=nperseg_psd,
+                                                n_quarters=n_quarters)
         return rps_res
+
+    def get_rp_min_max(self, snr_max_full_injected, snr_min_full_injected,
+                       snr_max_1_injected=spip.Max_abs_stat_veto,
+                       period_inj=365.25, a_inj=None, u_inj=None,
+                       data_location=None, output_location=None,
+                       nsig_outliers_0=spip.Nsig_outliers_0,
+                       nsig_outliers_0_pos=spip.Nsig_outliers_0_pos,
+                       nsig_outliers_0_neg=spip.Nsig_outliers_0_neg,
+                       nsig_outliers_psd=spip.Nsig_outliers_psd,
+                       nperseg_psd=spip.Nperseg_psd,
+                       npsdsmin=spip.Npsdsmin,
+                       max_small_hole=spip.Max_small_hole,
+                       detr_length_outliers=spip.Detr_length_outliers,
+                       reject_outliers_psd=spip.Reject_outliers_psd,
+                       tukey_steps_len=spip.Tukey_steps_len_psd,
+                       save_low_trends=False):
+        # --------------------------------------------------------------------------------------------
+        # GETTING THE PSD
+        target_id = self.target_id
+        if (data_location is not None) and (os.path.basename(data_location) != target_id):
+            data_location = af.get_correct_tid_folder(target_id, data_location, allow_creation=False)
+        else:
+            data_location = self.data_location
+        if (output_location is not None) and (os.path.basename(output_location) != target_id):
+            output_location = af.get_correct_tid_folder(target_id, output_location, allow_creation=False)
+        else:
+            output_location = self.output_location
+
+        klc = spip.KeplerLightCurve(target_id=target_id,
+                                    data_location=data_location,
+                                    output_location=output_location,
+                                    allow_data_folder_creation=False, allow_output_folder_creation=False)
+
+        klc.nperseg_psd = nperseg_psd
+        klc.subtract_means(save_means=True, masks=None)
+        klc.mask_flux_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
+                               nsig_negative=nsig_outliers_0_neg,
+                               nsig_clean=nsig_outliers_psd, detr_length_outliers=detr_length_outliers,
+                               in_whitened_fluxes=False, modify_clean_masks=True)
+        klc.subtract_means(save_means=True, masks=klc.masks)
+        klc.normalize_by_means()
+        klc.make_big_hole_masks(max_small_hole=max_small_hole, exclude_individual_points=True)
+        klc.interpolate_fluxes(interpolate_clean_fluxes=True)
+        klc.subtract_low_trends(nperseg=klc.nperseg_psd, save_low_trends=save_low_trends)
+        klc.fill_additional_outliers(nsig=nsig_outliers_0, nsig_positive=nsig_outliers_0_pos,
+                                     nsig_negative=nsig_outliers_0_neg,
+                                     nsig_clean=nsig_outliers_psd, detr_length_outliers=detr_length_outliers,
+                                     in_whitened_fluxes=False, modify_clean_masks=True,
+                                     interpolate_clean_fluxes=True)  # again after piecewise detrending
+        klc.prepare_for_psd(nperseg=klc.nperseg_psd, npsdsmin=npsdsmin, max_small_hole=max_small_hole)
+        klc.pad_by_zeros()  # Needed to avoid crosstalk in whitening filter. And we want the end zeros to be actual zeros
+        klc.measure_psds(nperseg=klc.nperseg_psd, tukey_steps_len=tukey_steps_len, reject_outliers=reject_outliers_psd)
+
+        # Getting parameters needed for estimation:
+        n_quarters = len(klc.quarters)
+        wf_fds = np.array(klc.wf_fds) * klc.mean_total  # -> relative wf_fd, take mean flux into account
+        wf_fd = np.mean(np.array(np.abs(wf_fds)) ** 2, axis=0) ** 0.5
+
+        # --------------------------------------------------------------------------------------------
+        # Getting flux
+        inc_inj = 90.
+        ecc_inj = 0.
+        rp_generation = 0.02
+        w_inj = 90.
+        if u_inj is None:
+            u = self.limb_darkening_coefs
+            if u is None:
+                u = Default_limb_darkening_coefs
+        else:
+            u = u_inj
+
+        if a_inj is None:
+            a = get_a_from_p(period=period_inj, m_1_3_r_s=self.m_1_3_r_s)
+        else:
+            a = a_inj
+
+        t = tm.time(t_tot=(256 + 1) * tm.dt_lc, parity='odd')[1:]  # Making an even points number but odd parity
+        flux_obs = 1. - tm.flux_par(t=t, params=None, per=period_inj, rp=rp_generation, a=a, inc=inc_inj, ecc=ecc_inj, w=w_inj, u1=u[0],
+                                    u2=u[1], t0=0, supersample_factor=20, exp_time=tm.dt_lc)
+
+        # dur = tm.templ_dur_fun(flux_obs) * tm.dt_lc
+        depth_factor = np.nanmax(flux_obs) / rp_generation ** 2
+        rp_rs_min, rp_rs_max = self.get_detectable_radius_flux(flux_model=flux_obs, period=period_inj,
+                                                               depth_factor=depth_factor, snr_min=snr_min_full_injected,
+                                                               n_quarters=n_quarters, wf_fd=wf_fd,
+                                                               snr_max_1=snr_max_1_injected,
+                                                               snr_max_full=snr_max_full_injected,
+                                                               stellar_radius=self.stellar_radius, units='star',
+                                                               include_detrending=True, nperseg_psd=spip.Nperseg_psd)
+        del klc
+        return rp_rs_min, rp_rs_max
 
     def mask_koi_planet(self, modify_self_klc=True, return_durations_transit_times=False,
                         mask_candidates=Mask_kepler_candidates,
                         mask_false_positives=Mask_kepler_false_positives,
                         mask_bright_candidates=Mask_kepler_bright_candidates,
                         bright_candidate_mes=Kepler_bright_candidate_mes,
-                        bright_candidate_ses=Kepler_bright_candidate_ses):
+                        bright_candidate_ses=Kepler_bright_candidate_ses,
+                        avoid_period=None, avoid_time_first=None, dp_avoid=0.002, dt_avoid=0.04):
         """
         Take the information of the KIO of this target that are saved in the class instance fields. Find the times and the
         durations of transits of these planets. If `modify_self_klc` is True, then in the KeplerLightCurve attribute
@@ -1237,8 +1334,21 @@ class KeplerTarget(object):
         :type bright_candidate_mes:
         :param bright_candidate_ses:
         :type bright_candidate_ses:
+        :param avoid_period: If a signal that should be masked coincides with `avoid_period` within `dp_avoid`,
+            and `avoid_time_first` within `dt_avoid`, it will not be masked.
+        :type avoid_period: float, days
+        :param avoid_time_first: If a signal that should be masked coincides with `avoid_period` within `dp_avoid`,
+            and `avoid_time_first` within `dt_avoid`, it will not be masked.
+        :type avoid_time_first: float, days
+        :param dp_avoid: If a signal that should be masked coincides with `avoid_period` within `dp_avoid`,
+            and `avoid_time_first` within `dt_avoid`, it will not be masked.
+        :type dp_avoid: float, days
+        :param dt_avoid: If a signal that should be masked coincides with `avoid_period` within `dp_avoid`,
+            and `avoid_time_first` within `dt_avoid`, it will not be masked.
+        :type dt_avoid: float, days
         :return: durations_and_times, durations and the transit times of KOI planets of this target
         :rtype: list of list(numpy.ndarray 1d, numpy.ndarray 1d)
+
         """
         assert self.is_koi, 'The target is not KOI, so the KOI planet cannot be masked!'
         # Take all the transit times with TTV, take transit duration, take fractional TDV and mask.
@@ -1270,6 +1380,25 @@ class KeplerTarget(object):
 
                     if max_mul >= bright_candidate_mes or max_sin >= bright_candidate_ses:
                         to_mask = True
+            if avoid_period is not None:
+                avoid_period = float(avoid_period)
+                try:
+                    per_koi = float(self.koi_dict['koi_period'][i])
+                except ValueError:
+                    per_koi = None
+                try:
+                    ftt_koi = float(self.koi_dict['koi_time0bk'][i])
+                except ValueError:
+                    ftt_koi = None
+                if per_koi is not None and ftt_koi is not None:
+                    if avoid_time_first is not None:
+                        avoid_time_first = float(avoid_time_first)
+                        if ((abs(per_koi - avoid_period) <= dp_avoid) and
+                                ((abs(ftt_koi - avoid_time_first) % per_koi) <= dt_avoid)):
+                            to_mask = False
+                    else:
+                        if abs(per_koi - avoid_period) <= dp_avoid:
+                            to_mask = False
             # If decided that we need to mask:
             if to_mask:
                 transit_durations = None  # just initialization, no meaning
@@ -1280,7 +1409,8 @@ class KeplerTarget(object):
                         if self.ttv_dict['KOI'][j][0] == str(float(koi_name[1:])):
                             transit_times = np.array(self.ttv_dict['T'][j], dtype=float)  # this is including TTVs
                             transit_durations = np.ones(len(transit_times)) * float(
-                                self.koi_dict['koi_duration'][i]) / 24  # we need it in days, and it was in hours
+                                self.koi_dict['koi_duration'][i]) / 24. * 1.2  # we need it in days, and it was in hours
+                            # -> multiplied by some safety factor because sometimes it does not cover all the transit
                             tdv_array = np.array(self.ttv_dict['TDV'][j], dtype=float)
                             tdv_array[np.isnan(tdv_array)] = 0.
                             transit_durations = transit_durations * (1. + tdv_array)  # add TDVs
@@ -1289,17 +1419,19 @@ class KeplerTarget(object):
                 if not was_in_ttv:
                     time_first = float(self.koi_dict['koi_time0bk'][i])
                     period = float(self.koi_dict['koi_period'][i])
-                    if self.koi_dict['koi_num_transits'][i] == '':
-                        if hasattr(self, 'klc') and hasattr(self.klc, 'times'):
-                            time_last = np.nanmax(self.klc.times[-1])
-                        else:
-                            time_last = spip.Default_end_time
-                        n_transits = int(np.ceil((time_last - time_first) / period))
+                    # if self.koi_dict['koi_num_transits'][i] == '':
+                    if hasattr(self, 'klc') and hasattr(self.klc, 'times'):
+                        time_last = np.nanmax(self.klc.times[-1])
                     else:
-                        n_transits = int(self.koi_dict['koi_num_transits'][i])
+                        time_last = spip.Default_end_time
+                    n_transits = int(np.floor((time_last - time_first) / period)) + 1
+                    # WE DO NOT USE N_TRANSITS BECAUSE IT IS ONLY VALID TRANSITS! (RUN_13)
+                    # else:
+                    #     n_transits = int(self.koi_dict['koi_num_transits'][i])
                     transit_times = np.array([time_first + period * nn for nn in range(n_transits)])
                     transit_durations = np.ones(len(transit_times)) * float(
-                        self.koi_dict['koi_duration'][i]) / 24  # we need it in days, and it was in hours
+                        self.koi_dict['koi_duration'][i]) / 24. * 1.2  # we need it in days, and it was in hours
+                    # -> multiplied by some safety factor because sometimes it does not cover all the transit
                 if self.klc is not None and modify_self_klc:
                     self.klc.mask_ephemeris(durations=transit_durations, transit_times=transit_times)
                     self.is_koi_planet_masked = True
@@ -1312,7 +1444,8 @@ class KeplerTarget(object):
                        conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
                        mask_koi_planet=True, save_conditioned_data=False, save_connected_stats=True,
                        connected_stats_filename_postfix=Connected_statistic_data_filename_postfix,
-                       save_no_veto_no_score_cor_stats=True, stop_if_bad=True,
+                       file_path_connected_stats=None,
+                       save_no_veto_no_score_cor_stats=False, stop_if_bad=True,
                        no_veto_no_score_cor_filename_postfix=No_veto_no_score_cor_stats_filename_postfix,
                        delete_full_stats=True):
         """
@@ -1327,6 +1460,8 @@ class KeplerTarget(object):
         - Saving the processed data for future use
         The next stage after this would be to run the periodicity search.
 
+        :param file_path_connected_stats:
+        :type file_path_connected_stats:
         :param min_quarters_to_process: Minimal number of quarters that is required to process the data. If
             there are fewer quarters, the search will stop.
         :type min_quarters_to_process: int
@@ -1357,7 +1492,8 @@ class KeplerTarget(object):
         t1 = time.time()
         self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                          output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
-                                         simulated_star=self.simulated_star)
+                                         simulated_red_star=(self.simulated_star == 'red'),
+                                         simulated_white_star=(self.simulated_star == 'white'))
         self.n_quarters = len(self.klc.quarters)
         if len(self.klc.quarters) < 6:
             self.print_problem('has only ' + str(len(self.klc.quarters)) + ' quarters')
@@ -1395,31 +1531,45 @@ class KeplerTarget(object):
                         self.klc.save_no_veto_no_score_cor_stats(filename_postfix=no_veto_no_score_cor_filename_postfix)
                     self.klc.connect_quarters()
                     if save_connected_stats:
-                        self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix)
+                        self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix,
+                                                      file_path=file_path_connected_stats)
                     self.klc.interleave_shifts(delete_fulls=delete_full_stats)
 
                     t2 = time.time()
                     self.conditioning_ses_time = t2 - t1
 
-    def get_connected_klc(self, reinitialize=True, conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
-                          connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
-                          mask_koi_planet=True, save_connected_stats=True, save_conditioned_data=True,
-                          connected_stats_filename_postfix=Connected_statistic_data_filename_postfix):
+    def get_connected_klc(self, reinitialize=True, allow_loading=True,
+                          conditioned_data_filename_postfix=Conditioned_data_filename_postfix,
+                          file_path_connected_data=None,
+                          connected_stats_filename_postfix=Connected_statistic_data_filename_postfix,
+                          file_path_conditioned_data=None,
+                          mask_koi_planet=True, period_avoid_masking=None, ftt_avoid_masking=None,
+                          save_connected_stats=True, save_conditioned_data=True,
+                          use_locker=True):
         """
         In the KeplerLightCurve instance attribute (`self.klc`) of this class, load the precomputed statistics
         (or compute if there are no precomputed) with connected quarters which can be used in the periodicity
         search. See more details about the statistics in `search_pipeline.py`. If this method is executed, you
         will get `self.klc` with ready single-transit statistics at which the periodicity search can be run.
         These statistics also can be time-scrambled.
+        :param use_locker:
+        :type use_locker:
+        :param allow_loading:
+        :type allow_loading:
+        :param file_path_connected_data:
+        :type file_path_connected_data:
+        :param file_path_conditioned_data:
+        :type file_path_conditioned_data:
+        :param period_avoid_masking:
+        :type period_avoid_masking:
+        :param ftt_avoid_masking:
+        :type ftt_avoid_masking:
         :param reinitialize: Whether to re-instantiate `self.klc` even if it already existed before.
         :type reinitialize: bool
         :param conditioned_data_filename_postfix: Text added to the target ID in the name of the file saving conditioned data.
             See naming notations. This is needed in the case that the connected statistics file does not exist. Then
             the conditioned data can be loaded and processed to make it all faster.
         :type conditioned_data_filename_postfix: str
-        :param connected_statistic_data_filename_postfix: Text added to the target ID in the name of the file saving
-            conditioned data. See naming notations.
-        :type connected_statistic_data_filename_postfix: str
         :param mask_koi_planet: Whether to mask Kepler planets in the case `self.klc` is created or re-instantiated.
         :type mask_koi_planet: bool or None
         :param save_connected_stats: Whether to save connected statistics in the case they were calculated now.
@@ -1433,7 +1583,8 @@ class KeplerTarget(object):
         if (self.klc is None) or reinitialize:
             self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                              output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
-                                             simulated_star=self.simulated_star)  # Q17 is removed
+                                             simulated_red_star=(self.simulated_star == 'red'),
+                                             simulated_white_star=(self.simulated_star == 'white'))  # Q17 is removed
             self.bad_fft_check()  # Made on orig_fluxes
             if self.is_koi and (mask_koi_planet or (self.is_koi_planet_masked and mask_koi_planet is None)):
                 # the latter is from the pickled attributes, meaning
@@ -1443,17 +1594,34 @@ class KeplerTarget(object):
                                      mask_false_positives=Mask_kepler_false_positives,
                                      mask_bright_candidates=Mask_kepler_bright_candidates,
                                      bright_candidate_mes=Kepler_bright_candidate_mes,
-                                     bright_candidate_ses=Kepler_bright_candidate_ses)
+                                     bright_candidate_ses=Kepler_bright_candidate_ses,
+                                     avoid_period=period_avoid_masking, avoid_time_first=ftt_avoid_masking)
                 # # if there are only candidates, it will not mask
-        file_path_connected_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                           filename_postfix=connected_statistic_data_filename_postfix, file_format='npy')
-        file_path_conditioned_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                             filename_postfix=conditioned_data_filename_postfix, file_format='npy')
+        if period_avoid_masking is not None:
+            insert_after_postfix_period = str(int(np.round(period_avoid_masking)))
+        else:
+            insert_after_postfix_period = None
+        if file_path_connected_data is None:
+            file_path_connected_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                               filename_postfix=connected_stats_filename_postfix,
+                                                               insert_after_postfix=None,
+                                                               insert_integer_periods=insert_after_postfix_period,
+                                                               file_format='npy')
+        if file_path_conditioned_data is None:
+            file_path_conditioned_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                                 filename_postfix=conditioned_data_filename_postfix,
+                                                                 insert_after_postfix=None,
+                                                                 insert_integer_periods=insert_after_postfix_period,
+                                                                 file_format='npy')
         if self.klc.statistics_full is None or not hasattr(self.klc, 'statistics_full'):
             success = False
-            if os.path.exists(file_path_connected_data) and os.path.getsize(file_path_connected_data) > 0:
+            if allow_loading and os.path.exists(file_path_connected_data) and os.path.getsize(file_path_connected_data) > 0:
                 try:
-                    with Locker(file_path_connected_data):
+                    if use_locker:
+                        with Locker(file_path_connected_data):
+                            self.klc.load_connected_stats(file_path=file_path_connected_data)
+                            success = True
+                    else:
                         self.klc.load_connected_stats(file_path=file_path_connected_data)
                         success = True
                 except Exception as exc:
@@ -1463,21 +1631,24 @@ class KeplerTarget(object):
             if not success:
                 if self.klc.statistics_raw is None:
                     # Try to load conditioned data if the file exists and is not empty:
-                    if os.path.exists(file_path_conditioned_data) and os.path.getsize(file_path_conditioned_data) > 0:
+                    if allow_loading and os.path.exists(file_path_conditioned_data) and os.path.getsize(file_path_conditioned_data) > 0:
                         try:
                             self.klc.load_conditioned_data(file=file_path_conditioned_data)
                             self.klc.initialize_templates()
-                            self.klc.detect_single_transits(apply_veto=True, gaussianize=True)
-                            self.klc.connect_quarters()
-                            if save_connected_stats:
-                                self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix)
                             success = True
                         except (EOFError, pickle.UnpicklingError):
                             success = False
                     if not success:
-                        self.run_ses_search(save_no_veto_no_score_cor_stats=False, save_connected_stats=save_connected_stats,
-                                            save_conditioned_data=save_conditioned_data, mask_koi_planet=mask_koi_planet,
-                                            delete_full_stats=False)
+                        self.klc.condition_data()
+                        self.was_notched = self.klc.was_notched
+                        self.klc.condition_templates()
+                        if save_conditioned_data:
+                            self.klc.save_conditioned_data(filename_postfix=conditioned_data_filename_postfix)
+                    self.klc.detect_single_transits(apply_veto=True, gaussianize=True)
+                    self.klc.connect_quarters()
+                    if save_connected_stats:
+                        self.klc.save_connected_stats(filename_postfix=connected_stats_filename_postfix,
+                                                      file_path=file_path_connected_data)
 
     def set_periodicity_search_parameters(self, p_min=P_min_search, p_max=P_max_search, per_phases_per_chunk=Per_phases_per_chunk,
                                           duty_cycle=spip.Duty_cycle, force_overwrite=False):
@@ -1546,7 +1717,8 @@ class KeplerTarget(object):
                                min_required_nonzero_transits_number=spip.Min_required_nonzero_transits_number,
                                min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction,
                                baseline_rate_period=Baseline_rate_period,
-                               allow_getting_connected_klc=False):
+                               allow_getting_connected_klc=False,
+                               print_no_trigger_found=True):
 
         """
         Runs the search for periodically repeating transits basing on the single-event statistic search done earlier
@@ -1618,7 +1790,8 @@ class KeplerTarget(object):
             min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
             overlap_period_bins=overlap_period_bins,
             report_exceptions=True, problem_description='',
-            return_failures=True, save_search_time=True, save_veto_masks=True, delete_full_stats=True)
+            return_failures=True, save_search_time=True, save_veto_masks=True, delete_full_stats=True,
+            print_no_trigger_found=print_no_trigger_found)
         self.best_candidates_concat = best_candidates_concat
         self.failures += failures
         if best_periodic_scores_file_dir is not None:
@@ -1633,10 +1806,15 @@ class KeplerTarget(object):
                                        min_required_nonzero_transits_number=spip.Min_required_nonzero_transits_number,
                                        min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction,
                                        overlap_period_bins=spip.P_bins_overlap,
-                                       report_exceptions=False, problem_description='', exception_info='',
                                        return_failures=False, save_search_time=False,
                                        save_veto_masks=False,
-                                       delete_full_stats=False):
+                                       delete_full_stats=False,
+                                       delete_periodic_interleaved=True,
+                                       save_uncorrected_periodic=False,
+                                       delete_non_marginalized=False,
+                                       delete_mes=True,
+                                       report_exceptions=False, problem_description='', exception_info='',
+                                       print_no_trigger_found=True):
         if period_chunks is None:
             period_chunks = self.periods_in_chunks
 
@@ -1653,8 +1831,9 @@ class KeplerTarget(object):
                 try:
                     self.klc.periodicity_search(p_min=None, p_max=None, periods=pers,
                                                 delete_full_stats=delete_full_stats, force_interleave_shifts=force_interleave_shifts,
-                                                delete_periodic_interleaved=True,
-                                                save_uncorrected_periodic=False, delete_non_marginalized=False,
+                                                delete_periodic_interleaved=delete_periodic_interleaved,
+                                                save_uncorrected_periodic=save_uncorrected_periodic,
+                                                delete_non_marginalized=delete_non_marginalized,
                                                 overlap_period_bins=overlap_period_bins)
                     self.klc.get_best_trigger(apply_veto_mes=True, in_gaussianized=False, save_veto_masks=save_veto_masks,
                                               min_required_nonzero_transits_number=min_required_nonzero_transits_number,
@@ -1665,7 +1844,7 @@ class KeplerTarget(object):
                                               min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
                                               log_baseline_integral_score_rate=self.log_baseline_int_score_rate)
                     self.klc.make_best_periodic_scores()
-                    if np.isnan(self.klc.best_period):
+                    if print_no_trigger_found and np.isnan(self.klc.best_period):
                         self.print_problem(text=problem_description + 'No trigger found after veto MES for pers='
                                            + str(pers[0]) + '-' + str(pers[-1]),
                                            file=self.problems_file_location)
@@ -1674,7 +1853,8 @@ class KeplerTarget(object):
                     if report_exceptions:
                         report_exception(exception=exc, file_to_append=self.problems_file_location,
                                          title=problem_description + 'pers=' + str(pers[0]) + '-' + str(pers[-1]), info=exception_info)
-                self.klc.delete_mes()
+                if delete_mes:
+                    self.klc.delete_mes()
             else:
                 failures += 'pers=[' + str(pers[0]) + '-' + str(pers[0]) + '] : Too small possible non-zero transits fraction;\n'
         t2 = time.time()
@@ -1964,7 +2144,7 @@ class KeplerTarget(object):
         # Separately for gaussianized:
         if ((self.best_g_int_score is not None) and (self.best_g_gauss_stat is not None)
                 and (not np.isnan(self.best_g_int_score)) and (not np.isnan(self.best_g_gauss_stat))
-                and (self.best_g_per is None) and (not np.isnan(self.best_g_per))
+                and (self.best_g_per is not None) and (not np.isnan(self.best_g_per))
                 and ((period_threshold is None) or (self.best_g_per >= period_threshold))
                 and self.best_g_int_score >= candidate_threshold):
             self.is_threshold_g_crossing = True
@@ -2002,7 +2182,7 @@ class KeplerTarget(object):
                         clean_dir_if_not_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap,
                         clean_problems_file=True, stop_if_bad=True,
                         seeds_scrambling_run_file=Seeds_scrambling_run_file,
-                        scramble=False, allow_load_connected_klc=False,
+                        scramble=False, seed_scramble=None, get_new_seed=True, allow_load_connected_klc=False,
                         connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
                         print_message_to_history=True,
                         search_history_targets_file=Search_history_targets_file):
@@ -2087,6 +2267,10 @@ class KeplerTarget(object):
         :type stop_if_bad: bool
         :param scramble:  Whether to time-slide the connected data before the periodicity search
         :type scramble: bool
+        :param seed_scramble:
+        :type seed_scramble: int or None
+        :param get_new_seed: Whether to get a new random seed for scrambling the data.
+        :type get_new_seed: bool
         :param allow_load_connected_klc: Whether to allow loading the connected klc from the file and not calculating it
         :type allow_load_connected_klc: bool
         :param seeds_scrambling_run_file: Where to save the random seed if scrambling was performed
@@ -2097,6 +2281,10 @@ class KeplerTarget(object):
         :type print_message_to_history:
         :param search_history_targets_file:
         :type search_history_targets_file:
+
+        Parameters
+        ----------
+        seed_scramble :
         """
         if clean_problems_file:
             self.clean_problems_file()
@@ -2135,13 +2323,16 @@ class KeplerTarget(object):
         # If there is enough data, and if the data is good enough, then we run the periodicity search:
         if ((not self.is_too_short) and (not self.is_bad_fft or not stop_if_bad)) and not self.ses_search_failed:
             if scramble:
-                np.random.seed(None)
-                new_seed = np.random.randint(int(2 ** 30))
+                np.random.seed(seed_scramble)
+                if get_new_seed:
+                    seed_scramble = np.random.randint(int(2 ** 28))
+                    if self.target_id is not None:
+                        seed_scramble = seed_scramble + int(self.target_id)
                 if seeds_scrambling_run_file is not None:
                     with open(seeds_scrambling_run_file, 'a') as fil:
-                        print(self.target_id, new_seed, time.strftime("%Y-%m-%d %H:%M:%S"), file=fil)
+                        print(self.target_id, seed_scramble, time.strftime("%Y-%m-%d %H:%M:%S"), file=fil)
                 self.klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
-                                             min_piece=spip.Min_piece_scrambling, random_seed=new_seed,
+                                             min_piece=spip.Min_piece_scrambling, random_seed=seed_scramble,
                                              regenerate_pieces=False)  # we run many jobs, they will have different pieces
                 self.klc.interleave_shifts(delete_fulls=False)  # do not delete fulls to then make re-scrambling
 
@@ -2192,15 +2383,237 @@ class KeplerTarget(object):
                 with open(search_history_targets_file, 'a') as fil:
                     print(self.target_id, message, file=fil)
 
+    def run_one_chunk_search(self, period, overlap_period_bins=spip.P_bins_overlap,
+                             min_required_nonzero_transits_number=spip.Min_required_nonzero_transits_number,
+                             min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction,
+                             baseline_rate_period=Baseline_rate_period,
+                             saving_folder=None, allow_saving_folder_creation=True, add_saving_folder_prefix=False,
+                             candidate_threshold=Score_candidate_search,
+                             mask_koi_planet=True, avoid_masking_central_period=True,
+                             mask_kepler_candidates=Mask_kepler_candidates,
+                             mask_kepler_false_positives=Mask_kepler_false_positives,
+                             mask_kepler_bright_candidates=Mask_kepler_bright_candidates,
+                             save_connected_stats=True,
+                             connected_statistic_data_filename_postfix=Connected_statistic_data_filename_postfix,
+                             add_period_to_connected_statistic_data_filename_postfix=False,
+                             delete_irrelevant=True,
+                             save_veto_masks=False,
+                             delete_full_stats=True,
+                             delete_periodic_interleaved=True,
+                             save_uncorrected_periodic=False,
+                             delete_non_marginalized=False,
+                             save_best_periodic_scores=True,
+                             delete_mes=True,
+                             best_periodic_scores_filename_postfix=Best_periodic_scores_filename_postfix,
+                             add_period_to_best_periodic_scores_filename_postfix=True,
+                             save_to_threshold_crossing_list=True,
+                             threshold_crossing_list_file=None,
+                             threshold_g_crossing_list_file=None,
+                             threshold_crossing_list_location=None,
+                             threshold_crossing_list_filename=Threshold_crossing_list_filename,
+                             threshold_g_crossing_list_filename=Threshold_g_crossing_list_filename,
+                             save_multiple_triggers=False,
+                             threshold_crossing_list_multiple_triggers_filename=Threshold_crossing_list_multiple_triggers_filename,
+                             threshold_g_crossing_list_multiple_triggers_filename=Threshold_g_crossing_list_multiple_triggers_filename,
+                             seeds_scrambling_run_file=None,
+                             scramble=False, seed_scramble=None, get_new_seed=True,
+                             print_no_trigger_found=False,
+                             report_exceptions=True):
+        """
+        This method is designed to focus on one period around which no KOI will be masked. Is good for
+        running on the actual KOIs.
+        :param save_connected_stats:
+        :type save_connected_stats:
+        :param connected_statistic_data_filename_postfix:
+        :type connected_statistic_data_filename_postfix:
+        :param add_period_to_connected_statistic_data_filename_postfix:
+        :type add_period_to_connected_statistic_data_filename_postfix:
+        :param avoid_masking_central_period:
+        :type avoid_masking_central_period:
+        :param add_period_to_best_periodic_scores_filename_postfix:
+        :type add_period_to_best_periodic_scores_filename_postfix:
+        :param delete_irrelevant:
+        :type delete_irrelevant:
+        :param period:
+        :type period:
+        :param overlap_period_bins: Extend each periods chunk from the two sides by
+            this number of bins for them to overlap. is needed for coherent score integral in order for
+            the maximum not to be on the edge
+        :type overlap_period_bins: int
+        :param min_required_nonzero_transits_number: Minimal required number of valid transits for a trigger. Will be used
+            in the pre-filtering before the periodicity search and in the veto_mes
+        :type min_required_nonzero_transits_number: int
+        :param min_required_nonzero_transits_fraction: Minimal required fraction of valid transits with respect to the total
+         number of transits for a trigger. Will be used in the pre-filtering before the periodicity search and in the veto_mes
+        :type min_required_nonzero_transits_fraction: float
+        :param baseline_rate_period:
+        :type baseline_rate_period:
+        :param saving_folder:
+        :type saving_folder:
+        :param allow_saving_folder_creation:
+        :type allow_saving_folder_creation:
+        :param add_saving_folder_prefix:
+        :type add_saving_folder_prefix:
+        :param candidate_threshold:
+        :type candidate_threshold:
+        :param mask_koi_planet:
+        :type mask_koi_planet:
+        :param best_periodic_scores_filename_postfix:
+        :type best_periodic_scores_filename_postfix:
+        :param save_to_threshold_crossing_list:
+        :type save_to_threshold_crossing_list:
+        :param threshold_crossing_list_file:
+        :type threshold_crossing_list_file:
+        :param threshold_g_crossing_list_file:
+        :type threshold_g_crossing_list_file:
+        :param threshold_crossing_list_location:
+        :type threshold_crossing_list_location:
+        :param threshold_crossing_list_filename:
+        :type threshold_crossing_list_filename:
+        :param threshold_g_crossing_list_filename:
+        :type threshold_g_crossing_list_filename:
+        :param save_multiple_triggers:
+        :type save_multiple_triggers:
+        :param threshold_crossing_list_multiple_triggers_filename:
+        :type threshold_crossing_list_multiple_triggers_filename:
+        :param threshold_g_crossing_list_multiple_triggers_filename:
+        :type threshold_g_crossing_list_multiple_triggers_filename:
+        :param seeds_scrambling_run_file:
+        :type seeds_scrambling_run_file:
+        :param scramble:
+        :type scramble:
+        :param seed_scramble:
+        :type seed_scramble: int or None
+        :param get_new_seed: Whether to get a new random seed for scrambling the data.
+        :type get_new_seed: bool
+        """
+        if saving_folder is not None:
+            saving_location = af.get_correct_tid_folder(self.target_id, saving_folder,
+                                                        allow_creation=allow_saving_folder_creation,
+                                                        with_prefix_folder=add_saving_folder_prefix)
+        else:
+            saving_location = self.output_location
+
+        self.klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
+                                         output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
+                                         simulated_red_star=False, simulated_white_star=False)
+
+        if self.periods_in_chunks is None:
+            self.set_periodicity_search_parameters(force_overwrite=False)
+            periods_in_chunks = self.klc.make_periods_chunks(p_min=self.p_min, p_max=self.p_max, duty_cycle=self.duty_cycle,
+                                                             per_phases_per_chunk=self.per_phases_per_chunk,
+                                                             dt=self.klc.dt_days, t_mission=self.klc.t_mission)
+        else:
+            periods_in_chunks = self.periods_in_chunks
+        closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, period, overlap_bins=0)
+        periods_to_search = closest_chunk
+
+        # We will not mask the planet around the period of search!
+        if self.is_koi and mask_koi_planet:  # Masking koi planets
+            if avoid_masking_central_period:
+                avoid_period = period
+            else:
+                avoid_period = None
+            self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
+                                 mask_candidates=mask_kepler_candidates,
+                                 mask_false_positives=mask_kepler_false_positives,
+                                 mask_bright_candidates=mask_kepler_bright_candidates,
+                                 bright_candidate_mes=Kepler_bright_candidate_mes,
+                                 bright_candidate_ses=Kepler_bright_candidate_ses,
+                                 avoid_period=avoid_period, avoid_time_first=None, dp_avoid=0.002, dt_avoid=0.04)
+
+        self.klc.condition_data()
+        self.klc.condition_templates()
+        self.klc.detect_single_transits(apply_veto=True, gaussianize=True, veto_tail_statistics=True)
+        self.klc.connect_quarters()
+
+        if add_period_to_connected_statistic_data_filename_postfix or avoid_masking_central_period:
+            insert_after_postfix_period = str(int(np.round(period)))
+        else:
+            insert_after_postfix_period = None
+
+        if save_connected_stats:
+            file_path_connected_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                               filename_postfix=connected_statistic_data_filename_postfix,
+                                                               insert_after_postfix=None,
+                                                               insert_integer_periods=insert_after_postfix_period,
+                                                               file_format='npy')
+            self.klc.save_connected_stats(file_path=file_path_connected_data)
+
+        if delete_irrelevant:
+            self.klc.delete_irrelevant()  # For memory
+        if scramble:
+            np.random.seed(seed_scramble)
+            if get_new_seed:
+                seed_scramble = np.random.randint(int(2 ** 30))
+            if seeds_scrambling_run_file is not None:
+                with open(seeds_scrambling_run_file, 'a') as fil:
+                    print(self.target_id, seed_scramble, time.strftime("%Y-%m-%d %H:%M:%S"), file=fil)
+            self.klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
+                                         min_piece=spip.Min_piece_scrambling, random_seed=seed_scramble,
+                                         regenerate_pieces=False)  # we run many jobs, they will have different pieces
+
+        self.klc.interleave_shifts(delete_fulls=delete_full_stats)
+
+        if self.log_baseline_int_score_rate is None:
+            self.calculate_baseline_integral_score_rate(baseline_rate_period=baseline_rate_period)
+
+        period_chunks = [periods_to_search]
+        best_candidates_concat, failures = self.search_periodicity_over_chunks(
+            period_chunks=period_chunks,
+            force_interleave_shifts=False,
+            delete_periodic_interleaved=delete_periodic_interleaved,
+            save_uncorrected_periodic=save_uncorrected_periodic,
+            delete_non_marginalized=delete_non_marginalized,
+            delete_mes=delete_mes,
+            min_required_nonzero_transits_number=min_required_nonzero_transits_number,
+            min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
+            overlap_period_bins=overlap_period_bins,
+            report_exceptions=report_exceptions, exception_info='',
+            problem_description='One-chunk search, period=' + str(period) + ': ',
+            return_failures=True, save_search_time=False, save_veto_masks=save_veto_masks,
+            print_no_trigger_found=print_no_trigger_found)
+
+        if save_best_periodic_scores:
+            if add_period_to_best_periodic_scores_filename_postfix:
+                insert_after_postfix_period = str(int(np.round(period)))
+            else:
+                insert_after_postfix_period = None
+            file_path = af.get_saving_file_path(output_location=saving_location, target_id=self.target_id,
+                                                filename_postfix=best_periodic_scores_filename_postfix,
+                                                insert_after_postfix=None,
+                                                insert_integer_periods=insert_after_postfix_period,
+                                                file_format='npy')
+            np.save(file_path, np.array(best_candidates_concat, dtype=object), allow_pickle=True)
+
+        self.save_best_candidate(candidate_threshold=candidate_threshold,
+                                 threshold_crossing_list_file=threshold_crossing_list_file,
+                                 threshold_g_crossing_list_file=threshold_g_crossing_list_file,
+                                 threshold_crossing_list_location=threshold_crossing_list_location,
+                                 threshold_crossing_list_filename=threshold_crossing_list_filename,
+                                 threshold_g_crossing_list_filename=threshold_g_crossing_list_filename,
+                                 save_to_threshold_crossing_list=save_to_threshold_crossing_list,
+                                 best_candidates_concat=best_candidates_concat)
+
+        if save_multiple_triggers:
+            self.save_all_triggers_from_per_chunks(
+                save_to_threshold_crossing_list=save_to_threshold_crossing_list,
+                threshold_crossing_list_multiple_triggers_filename=threshold_crossing_list_multiple_triggers_filename,
+                threshold_g_crossing_list_multiple_triggers_filename=threshold_g_crossing_list_multiple_triggers_filename,
+                threshold_crossing_list_location=threshold_crossing_list_location,
+                best_periodic_scores=best_candidates_concat)
+
     def run_timeslides(self, n_slides=N_slides_chunk, central_period=None, mask_koi_planet=True,
                        n_chunks_around_best=1, per_wing_slides=None,
                        per_wing_slides_relative=Per_wing_injection_and_slides_relative, use_period_chunks=False,
                        use_shuffling_pieces=True, only_if_threshold_crossing=False, overlap_period_bins=spip.P_bins_overlap,
                        slides_res_filename_postfix=Slides_res_filename_postfix,
-                       # assert_main_search_periods=True,
                        min_required_nonzero_transits_number=spip.Min_required_nonzero_transits_number,
                        min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction,
-                       clean_trigger=False, trigger_ftt=None, trigger_period=None):
+                       clean_trigger=False, trigger_ftt=None, trigger_period=None,
+                       allow_loading_data=True, avoid_masking_central_period=False,
+                       file_path_connected_stats=None,
+                       seed_scramble=None, get_new_seed=True):
         """
         Shuffles the full statistics (see inside the methods how it is done), running the periodicity search
         on the shuffled SES in the specified period range, and saving the best scores.
@@ -2212,6 +2625,12 @@ class KeplerTarget(object):
         - Split the grid into chunks
         - Select the corresponding chunks from the chunked grid of the main search
 
+        :param file_path_connected_stats:
+        :type file_path_connected_stats:
+        :param allow_loading_data:
+        :type allow_loading_data:
+        :param avoid_masking_central_period:
+        :type avoid_masking_central_period:
         :param n_slides: Number of times to shuffle and run the periodicity search
         :type n_slides: int
         :param central_period: The period in days around which the timeslides will run. If None, `self.best_per` will be used.
@@ -2259,6 +2678,10 @@ class KeplerTarget(object):
         :type trigger_ftt: float or None
         :param trigger_period: The period of the trigger to be masked if `clean_trigger` is True
         :type trigger_period: float or None
+        :param seed_scramble
+        :type seed_scramble: int or None
+        :param get_new_seed
+        :type get_new_seed: bool
         """
         if self.is_threshold_crossing or not only_if_threshold_crossing:
             if central_period is None:
@@ -2266,8 +2689,14 @@ class KeplerTarget(object):
             else:
                 period = central_period
 
-            self.get_connected_klc(reinitialize=True, mask_koi_planet=mask_koi_planet,
-                                   save_connected_stats=True, save_conditioned_data=True)
+            if avoid_masking_central_period:
+                period_avoid_masking = period
+            else:
+                period_avoid_masking = None
+            self.get_connected_klc(reinitialize=True, allow_loading=allow_loading_data,
+                                   file_path_connected_data=file_path_connected_stats,
+                                   mask_koi_planet=mask_koi_planet, period_avoid_masking=period_avoid_masking, ftt_avoid_masking=None,
+                                   save_connected_stats=False, save_conditioned_data=False)
             # -> if the file did not exist, the connected stats will be saved in order not to reconnect again
             # If we want to run the timeslides after masking the trigger:
             if clean_trigger:
@@ -2336,16 +2765,18 @@ class KeplerTarget(object):
             first_times_g = []
             gauss_stats_g = []
             int_scores_g = []
+            seeds = []
             for i_slides in range(n_slides):
-                np.random.seed(None)
-                new_seed = np.random.randint(int(2 ** 30))
+                np.random.seed(seed_scramble)
+                if get_new_seed:
+                    seed_scramble = np.random.randint(int(2 ** 30))
                 if not use_shuffling_pieces:
-                    self.klc.time_slides(random_seed=new_seed)
+                    self.klc.time_slides(random_seed=seed_scramble)
                     self.klc.connect_quarters()
                     self.klc.interleave_shifts(delete_fulls=True)
                 else:
                     self.klc.scramble_full_stats(max_hole=spip.Max_hole_pieces_scrampling, max_piece=spip.Max_piece_scrambling,
-                                                 min_piece=spip.Min_piece_scrambling, random_seed=new_seed,
+                                                 min_piece=spip.Min_piece_scrambling, random_seed=seed_scramble,
                                                  regenerate_pieces=False)  # we run many jobs, they will have different pieces
                     self.klc.interleave_shifts(delete_fulls=False)  # do not delete fulls to then make re-scrambling
 
@@ -2359,7 +2790,7 @@ class KeplerTarget(object):
                     min_required_nonzero_transits_number=min_required_nonzero_transits_number,
                     min_required_nonzero_transits_fraction=min_required_nonzero_transits_fraction,
                     overlap_period_bins=overlap_period_bins,
-                    report_exceptions=True, problem_description=prob_descr, exception_info='seed=' + str(new_seed),
+                    report_exceptions=True, problem_description=prob_descr, exception_info='seed=' + str(seed_scramble),
                     return_failures=True, save_search_time=False, save_veto_masks=False)
 
                 if len(best_candidates_concat) > 0:
@@ -2369,6 +2800,7 @@ class KeplerTarget(object):
                         self.find_best_trigger_from_per_chunks(best_candidates_concat=best_candidates_concat)
                         best_periodic_scores_data = best_candidates_concat[self.best_best_candidates_concat_index]
 
+                    seeds.append(seed_scramble)
                     for list_full, list_full_g, s_ind in [[stats, stats_g, spip.Best_per_results_index_stats],
                                                           [pers, pers_g, spip.Best_per_results_index_per],
                                                           [first_times, first_times_g, spip.Best_per_results_index_ftt],
@@ -2379,11 +2811,12 @@ class KeplerTarget(object):
                         list_full_g.append(best_periodic_scores_data[s_ind][1])
 
             new_res_array = np.vstack((stats, pers, first_times, gauss_stats, int_scores,
-                                       stats_g, pers_g, first_times_g, gauss_stats_g, int_scores_g)).transpose()
+                                       stats_g, pers_g, first_times_g, gauss_stats_g, int_scores_g, seeds)).transpose()
 
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
                                                 filename_postfix=slides_res_filename_postfix,
-                                                insert_after_postfix=str(int(np.round(central_period))),
+                                                insert_after_postfix=None,
+                                                insert_integer_periods=str(int(np.round(central_period))),
                                                 file_format='npy')
             try:
                 with Locker(file_path):
@@ -2408,18 +2841,22 @@ class KeplerTarget(object):
                     report_exception(exception=exc, file_to_append=self.problems_file_location,
                                      title='saving timeslides', info='')
 
-    def load_rel_wf_fds(self, conditioned_data_filename_postfix=spip.Conditioned_data_filename_postfix):
+    def load_rel_wf_fds(self, conditioned_data_file_path=None,
+                        conditioned_data_filename_postfix=spip.Conditioned_data_filename_postfix):
         """
         Load quarters-mean whitening filter in Fourier domain in units relative to the mean flux level.
         In other words, part of flux in time-domain that is taken by this or that component of noise.
+        :param conditioned_data_file_path:
+        :type conditioned_data_file_path:
         :param conditioned_data_filename_postfix: ext added to the target ID in the name of the file saving conditioned data.
             See naming notations.
         :type conditioned_data_filename_postfix: str
         """
         path = self.output_location
-        file = af.get_saving_file_path(output_location=path, target_id=self.target_id,
-                                       filename_postfix=conditioned_data_filename_postfix, file_format='npy')
-        conditioned_data = np.load(file, allow_pickle=True)
+        if conditioned_data_file_path is None:
+            conditioned_data_file_path = af.get_saving_file_path(output_location=path, target_id=self.target_id,
+                                                                 filename_postfix=conditioned_data_filename_postfix, file_format='npy')
+        conditioned_data = np.load(conditioned_data_file_path, allow_pickle=True)
         support = int(conditioned_data[0][10])
         n_quarters = int(np.round(len(conditioned_data[0]) / support))
         quarters = np.arange(n_quarters)
@@ -2437,6 +2874,7 @@ class KeplerTarget(object):
             central_period=None, use_special_per_wing=False, assert_main_search_periods=True,
             per_wing_injection_relative=Per_wing_injection_and_slides_relative,
             injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
+            conditioned_data_file_path=None,
             conditioned_data_filename_postfix=spip.Conditioned_data_filename_postfix,
             n_per=20,
             n_ecc=60,  # Probability to transit at a fixed eccentricity depends strongly on eccentricity
@@ -2462,9 +2900,9 @@ class KeplerTarget(object):
                 pass  # will delete the contents of the file
 
         if central_period is None:
-            period = self.best_per
+            focus_period = self.best_per
         else:
-            period = central_period
+            focus_period = central_period
 
         if assert_main_search_periods:
             assert (self.p_min is not None) and (self.p_max is not None), 'Minimal and maximal periods were not set in the class!'
@@ -2478,11 +2916,11 @@ class KeplerTarget(object):
                                                                  dt=self.klc.dt_days, t_mission=self.klc.t_mission)
             else:
                 periods_in_chunks = self.periods_in_chunks
-            closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, period, overlap_bins=0)
+            closest_chunk, closest_chunk_index = ut.find_closest_chunk(periods_in_chunks, focus_period, overlap_bins=0)
             p_min_inj, p_max_inj = closest_chunk[0], closest_chunk[-1]
         else:
-            p_max_inj = period * (1 + per_wing_injection_relative)
-            p_min_inj = period * (1 - per_wing_injection_relative)
+            p_max_inj = focus_period * (1 + per_wing_injection_relative)
+            p_min_inj = focus_period * (1 - per_wing_injection_relative)
 
         # ################################################################################################
         # OCCURRENCE RATES
@@ -2505,7 +2943,8 @@ class KeplerTarget(object):
 
         # ################################################################################################
         # GENERATING PLANET PARAMETERS, SEE WHO TRANSITS AND WHO HAS REASONABLE RADII
-        wf_fds = self.load_rel_wf_fds(conditioned_data_filename_postfix=conditioned_data_filename_postfix)
+        wf_fds = self.load_rel_wf_fds(conditioned_data_file_path=conditioned_data_file_path,
+                                      conditioned_data_filename_postfix=conditioned_data_filename_postfix)
         # -> relative wf_fd, mean flux already taken into account
         n_quarters = len(wf_fds)
         wf_fd = np.mean(np.array(wf_fds) ** 2, axis=0) ** 0.5
@@ -2519,15 +2958,20 @@ class KeplerTarget(object):
         cos_i_measure = 1. / n_cos_incl
         transit_prob_measure = ecc_measure * w_measure * cos_i_measure
 
-        injection_parameter_sets = []
+        overshoot_factor = 10.
+        n_min_size = n_ecc * n_w * n_rp * (n_cos_incl / 2)
+        size_overshoot_factor = max(2.1 * overshoot_factor * n_injections, n_min_size) / n_injections
+        # injection_parameter_sets = []
+        self.injection_par_list = np.zeros((int(np.ceil(n_injections * size_overshoot_factor)), 10), dtype=np.float64)
         count_orbit_simulations = 0
         count_orbit_transiting = 0
         count_orbit_transiting_relevant_radii = 0
-        for period in np.random.uniform(p_min_inj, p_max_inj, n_per):
+        n_per_actual = 0
+        for period in np.concatenate((np.array([focus_period]), np.random.uniform(p_min_inj, p_max_inj, n_per-1))):
             # Semi major axis of the orbit in units of R_star
             # a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * self.m_1_3_r_s * (M_sun ** (1 / 3) / R_sun)
             a = get_a_from_p(period=period, m_1_3_r_s=self.m_1_3_r_s)
-            e_max = min(1 - 2 / a, 0.97)
+            e_max = min(1 - 2 / a, E_crit)
             assert e_max > 0, 'Semi-major axis is too small or stellar radius is too large!'
             # The eccentricity distribution is normalized to unity in the allowed range.
             # There can be no planets that clash the star, so it is uniform in the allowed range.
@@ -2566,65 +3010,74 @@ class KeplerTarget(object):
                             rps = np.array(rps)
                             rps = rps[rps >= rp_rs_min]
                             rps = rps[rps <= rp_rs_max]
-                            count_orbit_transiting_relevant_radii += len(rps)  # will be divided by rp_numbers_total
+                            # count_orbit_transiting_relevant_radii += len(rps)  # will be divided by rp_numbers_total
                             for rp in rps:
-                                injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur])
+                                phase_inj = np.random.uniform(0, period)
+                                self.injection_par_list[count_orbit_transiting_relevant_radii
+                                                        ] = [period, a, inc, ecc, w, u[0], u[1], rp, dur, phase_inj]
+                                count_orbit_transiting_relevant_radii += 1
+                                # injection_parameter_sets.append([period, a, inc, ecc, w, u[0], u[1], rp, dur, phase_inj])
+            n_per_actual += 1
+            if count_orbit_transiting_relevant_radii > n_injections * overshoot_factor:
+                break
+
+        self.injection_par_list = self.injection_par_list[:count_orbit_transiting_relevant_radii]
         # Probability to transit given a planet of a given period:
-        self.transit_probability = count_orbit_transiting / n_per * transit_prob_measure
+        self.transit_probability = count_orbit_transiting / n_per_actual * transit_prob_measure
         # Number of planets per star in the considered period range with any radius:
         self.transiting_planets_of_radii_in_per_range_one_star = self.prior_planets_in_period_range_one_star * self.transit_probability
         # Probability to transit and be in the relevant snr range given a planet of a given period:
-        self.transit_and_range_probability = count_orbit_transiting_relevant_radii / rp_numbers_total / n_per * transit_prob_measure
+        self.transit_and_range_probability = count_orbit_transiting_relevant_radii / rp_numbers_total / n_per_actual * transit_prob_measure
         # Number of planets per star in the considered period range with radii that provide relevant SNR:
         self.transiting_planets_in_relevant_range = self.prior_planets_in_period_range_one_star * self.transit_and_range_probability
-        selection_indices = np.random.choice(np.arange(len(injection_parameter_sets)), n_injections,
-                                             replace=True if len(injection_parameter_sets) < n_injections else False)
-        self.injection_par_list = list(np.array(injection_parameter_sets, dtype=object)[selection_indices])
-
-        self.save_injection_parameters()
+        selection_indices = np.random.choice(np.arange(len(self.injection_par_list)), n_injections,
+                                             replace=True if len(self.injection_par_list) < n_injections else False)
+        # self.injection_par_list = list(np.array(injection_parameter_sets, dtype=object)[selection_indices])
+        self.injection_par_list = self.injection_par_list[selection_indices]
+        self.save_injection_parameters(file_path=file_path, injection_parameters_filename_postfix=None)
         self.pickle_small_attributes()
 
-    def save_injection_parameters(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
+    def save_injection_parameters(self, file_path=None,
+                                  injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
         """
         Saves the generated injection parameters to the specified file to then load them and use the injection-recovery.
+        :param file_path:
+        :type file_path:
         :param injection_parameters_filename_postfix: Text added to the target ID in the name of the file saving
             the injection parameters. See naming notations.
         :type injection_parameters_filename_postfix: str
         """
         # We wanted to just save parameters inside the generate_injection_parameters function because anyway we do not create attribute
         # of injection parameters sets because we will probably not use it simultaneously. But we decided that maybe we will.
-        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                            filename_postfix=injection_parameters_filename_postfix, file_format='txt')
+        if file_path is None:
+            file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                filename_postfix=injection_parameters_filename_postfix, file_format='txt')
         with open(file_path, 'w') as fil1:
             print('# period[days], a/R, inc[deg 90 or less], ecc, w[deg], u_0, u_1, rp/R, dur_hmax_days', file=fil1)
             for i in range(len(self.injection_par_list)):
                 print(*self.injection_par_list[i], file=fil1)
 
-    def delete_injection_parameters_file(self, injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
-        """
-        Removes the file with the generated injection parameters.
-        :param injection_parameters_filename_postfix: Text added to the target ID in the name of the file saving
-            the injection parameters. See naming notations.
-        :type injection_parameters_filename_postfix: str
-        """
-        file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                            filename_postfix=injection_parameters_filename_postfix, file_format='txt')
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
     def load_injection_parameters(self, injection_parameters_index=0,
-                                  injection_parameters_filename_postfix=Injection_parameters_filename_postfix):
+                                  injection_parameters_filename_postfix=Injection_parameters_filename_postfix,
+                                  central_period_for_file=None, insert_after_filename_postfix=None):
         """
         Loads a specific line of the list of the injection parameters previously generated with
         `self.generate_injection_parameters()` and saved with `self.save_injection_parameters()`.
+
         :param injection_parameters_index: Index of the line from the list to load
         :type injection_parameters_index: int
         :param injection_parameters_filename_postfix: Text added to the target ID in the name of the file saving
             the injection parameters. See naming notations.
         :type injection_parameters_filename_postfix: str
+        :param central_period_for_file: central period for injection parameters to indicate in the filename
+        :type central_period_for_file: float, str, int, or None
+        :param insert_after_filename_postfix: Text to insert after `injection_parameters_filename_postfix`, unrelated to period
+        :type insert_after_filename_postfix: str or None
         """
         file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                            filename_postfix=injection_parameters_filename_postfix, file_format='txt')
+                                            filename_postfix=injection_parameters_filename_postfix,
+                                            insert_integer_periods=central_period_for_file,
+                                            insert_after_postfix=insert_after_filename_postfix, file_format='txt')
 
         try:
             with open(file_path, 'r') as fil:
@@ -2645,17 +3098,23 @@ class KeplerTarget(object):
         u2_inj = float(injection_params[6])
         rp_inj = float(injection_params[7])
         dur_inj = float(injection_params[8])
+        phase_inj = float(injection_params[9])
         # ' a/R, inc[deg from 90 down], ecc, w[deg], u_0, u_1, rp/R, dur_hmax_days'
-        return per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj
+        return per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, phase_inj
 
     def run_injection_search(self, injection_load_parameters_index=0,
                              injections_filename_postfix=Injections_filename_postfix,
                              one_chunk_around_injection=True,
                              per_wing_detection=Per_wing_injection_detection,
                              overlap_period_bins=spip.P_bins_overlap,
+                             period_avoid_masking=None,
+                             mask_kepler_candidates=Mask_kepler_candidates,
+                             mask_kepler_false_positives=Mask_kepler_false_positives,
+                             mask_kepler_bright_candidates=Mask_kepler_bright_candidates,
                              min_required_nonzero_transits_number=spip.Min_required_nonzero_transits_number,
                              min_required_nonzero_transits_fraction=spip.Min_required_nonzero_transits_fraction,
                              baseline_rate_period=Baseline_rate_period):
+
         """
         Loads a specific line of the list of the injection parameters previously generated with
         `self.generate_injection_parameters()` and saved with `self.save_injection_parameters()`.
@@ -2664,6 +3123,8 @@ class KeplerTarget(object):
         In the periodicity search, uses the period grid piece around the trigger.
         The goal is just to check whether the phase is recovered and what is the SNR. The look-elsewhere effect
         etc. are not relevant.
+        :param period_avoid_masking:
+        :type period_avoid_masking:
         :param injections_filename_postfix: Text added to the target ID in the name of the file saving
             the injection-recovery results. See naming notations.
         :type injections_filename_postfix: str
@@ -2687,12 +3148,9 @@ class KeplerTarget(object):
         :param baseline_rate_period:
         :type baseline_rate_period:
         """
-
-        per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj = self.load_injection_parameters(
+        per_inj, a_inj, inc_inj, ecc_inj, w_inj, u1_inj, u2_inj, rp_inj, dur_inj, phase_inj = self.load_injection_parameters(
             injection_parameters_index=injection_load_parameters_index)
         # This period range is for injection, not for search:
-
-        phase_inj = np.random.uniform(0, per_inj)
 
         tms, flxs = af.get_data_fun(target_id=self.target_id, location=self.data_location)
         first_transit_time_inj = np.nanmin(tms[0]) + phase_inj
@@ -2702,7 +3160,9 @@ class KeplerTarget(object):
 
         self.klc = spip.KeplerLightCurve(target_id=self.target_id, times=tms, fluxes=flxs_inj, get_data=False,
                                          data_location=self.data_location, m_1_3_r_s=self.m_1_3_r_s,
-                                         output_location=self.output_location, simulated_star=self.simulated_star)
+                                         output_location=self.output_location,
+                                         simulated_red_star=(self.simulated_star == 'red'),
+                                         simulated_white_star=(self.simulated_star == 'white'))
 
         if one_chunk_around_injection:
             if self.periods_in_chunks is None:
@@ -2720,11 +3180,14 @@ class KeplerTarget(object):
 
         if self.is_koi:  # Masking koi planets
             self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
-                                 mask_candidates=Mask_kepler_candidates,
-                                 mask_false_positives=Mask_kepler_false_positives,
-                                 mask_bright_candidates=Mask_kepler_bright_candidates,
+                                 mask_candidates=mask_kepler_candidates,
+                                 mask_false_positives=mask_kepler_false_positives,
+                                 mask_bright_candidates=mask_kepler_bright_candidates,
                                  bright_candidate_mes=Kepler_bright_candidate_mes,
-                                 bright_candidate_ses=Kepler_bright_candidate_ses)
+                                 bright_candidate_ses=Kepler_bright_candidate_ses,
+                                 avoid_period=float(period_avoid_masking) if period_avoid_masking is not None else None,
+                                 avoid_time_first=None, dp_avoid=0.002, dt_avoid=0.04)
+
         masked_dur = 1.5 * tm.Durations[-1]
         self.klc.mask_ephemeris(period=self.best_per, durations=masked_dur, transit_times=self.best_ftt)
         # Mask the suspected real transit. Warning, can kill some of injected signal
@@ -2770,7 +3233,9 @@ class KeplerTarget(object):
             retrieved_g_temp = best_periodic_scores_data[spip.Best_per_results_index_template][1]
 
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                filename_postfix=injections_filename_postfix, file_format='txt')
+                                                filename_postfix=injections_filename_postfix,
+                                                insert_after_postfix=None,
+                                                insert_integer_periods=None, file_format='txt')
             try:
                 with Locker(file_path):
                     with open(file_path, 'a') as fil1:
@@ -2830,7 +3295,8 @@ class KeplerTarget(object):
             self.__dict__['retrieved_g_template_' + status] = []
         if file_path is None:
             file_path = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                filename_postfix=injections_filename_postfix, file_format='txt')
+                                                filename_postfix=injections_filename_postfix,
+                                                insert_integer_periods=None, file_format='txt')
         if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
             with open(file_path, 'r') as fil1:
                 inj_lines = fil1.readlines()
@@ -3164,7 +3630,8 @@ class KeplerTarget(object):
     def make_background_histogram(self, bins=None, bin_min=None, bin_max=None, bin_width=Histogram_mes_binwid, central_period=None,
                                   slides_res_filename_postfix=Slides_res_filename_postfix,
                                   slides_clean_res_filename_postfix=Slides_clean_res_filename_postfix,
-                                  use_integral=True):
+                                  use_integral=True, calculate_extrapolation=True,
+                                  extrapolation_start_score=Extrapolation_start_score):
         """
         Create a histogram of the background (from time-shuffled runs) distribution of the statistic scores.
         Saves bins and counts as attributes.
@@ -3184,6 +3651,10 @@ class KeplerTarget(object):
         :type slides_clean_res_filename_postfix: str
         :param use_integral: Whether to use integral score or statistic
         :type use_integral: bool
+        :param calculate_extrapolation:
+        :type calculate_extrapolation:
+        :param extrapolation_start_score:
+        :type extrapolation_start_score:
         """
         if self.int_scores_slides is None:
             self.retrieve_background(central_period=central_period, slides_res_filename_postfix=slides_res_filename_postfix)
@@ -3231,11 +3702,24 @@ class KeplerTarget(object):
                             bin_max = bin_ma
                         bins_scores_histogram_bg = np.arange(bin_min, bin_max, bin_width)
 
-                distr_score_h0 = np.histogram(scores_slides, bins=bins_scores_histogram_bg, density=False)[0]
-                distr_score_h0 = distr_score_h0 / n_slides
-                if self.transiting_planets_in_relevant_range is not None:
-                    distr_score_h0 = distr_score_h0 * (1 - self.transiting_planets_in_relevant_range)  # the rate of not having a planet
-                    # -> the rate of not having a planet
+                distr_score_h0 = np.histogram(scores_slides, bins=bins_scores_histogram_bg, density=True)[0]
+                # Correcting for the slides that had a too low score in order to make the full histogram integrate to unity
+                distr_score_h0 = distr_score_h0 * len(scores_slides) / self.n_slides
+
+                if self.transiting_planets_of_radii_in_per_range_one_star is not None:
+                    self.transiting_planets_of_radii_in_per_range_one_star_poisson = ut.get_poisson_at_least(
+                        rate=self.transiting_planets_of_radii_in_per_range_one_star, min_number=1)
+                    distr_score_h0 = distr_score_h0 * (1 - self.transiting_planets_of_radii_in_per_range_one_star_poisson)
+                    self.background_normalization_coef = len(self.stats_slides) / self.n_slides * (
+                            1 - self.transiting_planets_of_radii_in_per_range_one_star_poisson)
+                # # In this definition, the integral is one (\sum d score * count(score) = 1)
+                # if self.transiting_planets_in_relevant_range is not None:
+                #     distr_score_h0 = distr_score_h0 * (1 - self.transiting_planets_in_relevant_range)
+                #     # -> the rate of not having a planet
+                #     # -> This is to make the integral of the injections distribution equal to the number of planets in the
+                #     # relevant parameter range per star, and the slides distribution complementary of that.
+                #     # This is the expected number of scores from not-planet in one experiment. The sum of the scores from
+                #     # planets and from not-planets is unity
 
                 if in_integral:
                     if in_clean:
@@ -3259,6 +3743,18 @@ class KeplerTarget(object):
                         else:
                             self.distr_gauss_stat_h0 = distr_score_h0
                             self.bins_gauss_stat_histogram_bg = bins_scores_histogram_bg
+                # ---------------------------------------------------------------------------------------
+                # MAKE EXTRAPOLATION.
+                if calculate_extrapolation and (not in_clean) and (not in_gaussianized):
+                    coef, ampl = af.get_extrapolation_chi2_1_limited(stats2=scores_slides, stat2_limit=extrapolation_start_score)
+                    self.extrapolation_coef_int_score_h0_hist = coef
+                    self.extrapolation_amplitude_int_score_h0_hist = ampl
+                    self.extrapolation_limit_int_score_h0_hist = extrapolation_start_score
+                if calculate_extrapolation and in_clean and (not in_gaussianized):
+                    coef, ampl_clean = af.get_extrapolation_chi2_1_limited(stats2=scores_slides, stat2_limit=extrapolation_start_score)
+                    self.extrapolation_coef_int_score_clean_h0_hist = coef
+                    self.extrapolation_amplitude_int_score_clean_h0_hist = ampl_clean
+                    self.extrapolation_limit_int_score_clean_h0_hist = extrapolation_start_score
 
     def make_injections_histogram(self, bins=None, bin_min=None, bin_max=None, use_integral=True):
         if self.retrieved_int_score_success is None:
@@ -3290,13 +3786,24 @@ class KeplerTarget(object):
                 scores_all = np.array(retrieved_score_bad + retrieved_score_success, dtype=float)
                 n_injections = len(scores_all)
                 scores_all = scores_all[~np.isnan(scores_all)]
-                distr_score_inj_all = np.histogram(scores_all, bins=bins_score_histogram_inj, density=False)[0]
-                distr_score_inj_all = (distr_score_inj_all / n_injections * self.transiting_planets_in_relevant_range)
+                distr_score_inj_all = np.histogram(scores_all, bins=bins_score_histogram_inj, density=True)[0]
+                # Normalization to have integral one (\sum d score * n(score) = 1)
+
+                self.transiting_planets_in_relevant_range_poisson = ut.get_poisson_at_least(
+                    rate=self.transiting_planets_in_relevant_range, min_number=1)
+                distr_score_inj_all = (distr_score_inj_all * self.transiting_planets_in_relevant_range_poisson)
+                # -> This is to make the integral of the distribution equal to the number of planets in the
+                # relevant parameter range per star. This is the expected number of scores from planet in one experiment
+                # distr_score_inj_all = (distr_score_inj_all / n_injections * self.transiting_planets_in_relevant_range)
                 scores_success = np.array(retrieved_score_success, dtype=float)
+                n_success_injections = len(scores_success)
                 scores_success = scores_success[~np.isnan(scores_success)]
-                distr_score_inj_success = np.histogram(scores_success, bins=bins_score_histogram_inj)[0]
-                distr_score_inj_success = (distr_score_inj_success / n_injections * self.transiting_planets_in_relevant_range)
+                distr_score_inj_success = np.histogram(scores_success, bins=bins_score_histogram_inj, density=True)[0]
+                distr_score_inj_success = (distr_score_inj_success * self.transiting_planets_in_relevant_range_poisson)
                 self.n_injections = n_injections
+                self.n_success_injections = n_success_injections
+                distr_score_inj_success = distr_score_inj_success * n_success_injections / n_injections
+                # -> this is to match the total number of planets after we used density
 
                 if in_integral:
                     self.distr_int_score_inj_all = distr_score_inj_all
@@ -3319,27 +3826,48 @@ class KeplerTarget(object):
             self.make_background_histogram(bins=self.bins_int_score_histogram, use_integral=True)
         # ---------------------------------------------------------------------------------------
         # MAKE EXTRAPOLATION. Determine intersection with horizontal axis in log scale.
-        self.extrapolation_coefs_int_score_h0_hist = af.get_histogram_extrapolation_coefs_in_log(
-            self.distr_int_score_h0, self.bins_int_score_histogram)
-        self.prob_density_h0_trigger = np.exp(self.best_int_score * self.extrapolation_coefs_int_score_h0_hist[1]
-                                              + self.extrapolation_coefs_int_score_h0_hist[0])
-        false_alarm_prob_trigger = (1 / np.abs(self.extrapolation_coefs_int_score_h0_hist[1])
-                                    * np.exp(self.extrapolation_coefs_int_score_h0_hist[0]
-                                             + self.extrapolation_coefs_int_score_h0_hist[1] * self.best_int_score))
 
-        self.extrapolation_coefs_int_score_h0_clean_hist = af.get_histogram_extrapolation_coefs_in_log(
-            self.distr_int_score_h0_clean, self.bins_int_score_histogram)
-        self.prob_density_h0_clean_trigger = np.exp(self.best_int_score * self.extrapolation_coefs_int_score_h0_clean_hist[1]
-                                                    + self.extrapolation_coefs_int_score_h0_clean_hist[0])
-        false_alarm_prob_trigger_clean = (1 / np.abs(self.extrapolation_coefs_int_score_h0_clean_hist[1])
-                                          * np.exp(self.extrapolation_coefs_int_score_h0_clean_hist[0]
-                                                   + self.extrapolation_coefs_int_score_h0_clean_hist[1] * self.best_int_score))
+        self.prob_density_h0_trigger = (self.background_normalization_coef * self.extrapolation_amplitude_int_score_h0_hist
+                                        * af.chi2_1(x2=self.best_int_score, coef=self.extrapolation_coef_int_score_h0_hist))
+        #  stat2_limit=self.extrapolation_limit_int_score_h0_hist))
+        false_alarm_prob_trigger = (self.background_normalization_coef * self.extrapolation_amplitude_int_score_h0_hist
+                                    * af.sf_asymptotic_chi2_1(stat2=self.best_int_score,
+                                                              coef=self.extrapolation_coef_int_score_h0_hist))  # ,
+        # stat2_limit=self.extrapolation_limit_int_score_h0_hist))
+
+        # self.extrapolation_coefs_int_score_h0_hist = af.get_histogram_extrapolation_coefs_in_log(
+        #     self.distr_int_score_h0, self.bins_int_score_histogram)
+        # self.prob_density_h0_trigger = np.exp(self.best_int_score * self.extrapolation_coefs_int_score_h0_hist[1]
+        #                                       + self.extrapolation_coefs_int_score_h0_hist[0])
+        # false_alarm_prob_trigger = (1 / np.abs(self.extrapolation_coefs_int_score_h0_hist[1])
+        #                             * np.exp(self.extrapolation_coefs_int_score_h0_hist[0]
+        #                                      + self.extrapolation_coefs_int_score_h0_hist[1] * self.best_int_score))
+
+        self.prob_density_h0_clean_trigger = (self.background_normalization_coef * self.extrapolation_amplitude_int_score_clean_h0_hist
+                                              * af.chi2_1(x2=self.best_int_score,
+                                                          coef=self.extrapolation_coef_int_score_clean_h0_hist))
+        # stat2_limit=self.extrapolation_limit_int_score_clean_h0_hist))
+        false_alarm_prob_trigger_clean = (self.background_normalization_coef * self.extrapolation_amplitude_int_score_clean_h0_hist
+                                          * af.sf_asymptotic_chi2_1(stat2=self.best_int_score,
+                                                                    coef=self.extrapolation_coef_int_score_clean_h0_hist))
+        # stat2_limit=
+        # self.extrapolation_limit_int_score_clean_h0_hist))
+
+        # self.extrapolation_coefs_int_score_h0_clean_hist = af.get_histogram_extrapolation_coefs_in_log(
+        #     self.distr_int_score_h0_clean, self.bins_int_score_histogram)
+        # self.prob_density_h0_clean_trigger = np.exp(self.best_int_score * self.extrapolation_coefs_int_score_h0_clean_hist[1]
+        #                                             + self.extrapolation_coefs_int_score_h0_clean_hist[0])
+        # false_alarm_prob_trigger_clean = (1 / np.abs(self.extrapolation_coefs_int_score_h0_clean_hist[1])
+        #                                   * np.exp(self.extrapolation_coefs_int_score_h0_clean_hist[0]
+        #                                            + self.extrapolation_coefs_int_score_h0_clean_hist[1] * self.best_int_score))
         # Find edges of this bin:
         bin_ind_close_trigger = np.sort(np.argsort(np.abs(self.bins_int_score_histogram - self.best_int_score))[:2])[0]
-
-        self.prob_density_h1_trigger = np.nanmean(self.distr_int_score_inj_success[
-                                                  max(0, bin_ind_close_trigger - 1): min(len(self.distr_int_score_inj_success),
-                                                                                         bin_ind_close_trigger + 1)])
+        vals_select = self.distr_int_score_inj_success[max(0, bin_ind_close_trigger - 3): min(len(self.distr_int_score_inj_success),
+                                                                                              bin_ind_close_trigger + 3)]
+        vals_select = vals_select[vals_select != 0]  # remove zeros in case the bins are too narrow and there are holes
+        if len(vals_select) == 0:
+            vals_select = [0]
+        self.prob_density_h1_trigger = np.nanmean(vals_select)
         # use the left edge index to access the bin
         p_planet = ut.calculate_p_planet_statistical(f_p=self.prob_density_h1_trigger, f_s=self.prob_density_h0_trigger,
                                                      f_sc=self.prob_density_h0_clean_trigger, pi_p=None,  # We already multiplied by it

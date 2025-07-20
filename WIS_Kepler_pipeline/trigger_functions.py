@@ -53,10 +53,17 @@ def load_triggers_unique(file, sep=' '):
     target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates = load_triggers(file=file, sep=sep)
 
     inds_selection = []
-    for tid in list(set(target_ids)):
+    tids_unique = []
+    for tid in target_ids:
+        if tid not in tids_unique:
+            tids_unique.append(tid)
+    # Warning: it is important not to use set because it distorts the order!
+    for tid in tids_unique:
         inds = np.where(np.array(target_ids) == tid)[0]
         if len(inds) > 1:
             inds = [ind for ind in inds if (~np.isnan(integral_scores[ind])) and (~np.isnan(stats[ind]))]
+            if len(inds) == 0:
+                inds = np.where(np.array(target_ids) == tid)[0]  # if all are nan, we will just take tha last nan
         inds_selection.append(inds[-1])  # Take the last one because all the saved files are consistent with it
     target_ids = target_ids[inds_selection]
     integral_scores = integral_scores[inds_selection]

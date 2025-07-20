@@ -16,7 +16,8 @@ from pipeline_parameters import (Threshold_crossing_list_file, Triggers_prefilte
                                  Score_candidate_postprocess, Per_min_candidate)
 # from locations import Pickle_tce_small_attributes_filename_postfix
 import locations as locs
-from runfiles_parameters import Error_list_file
+from runfiles_parameters import Error_list_file, Jobs_monitor_folder
+from file_operations import report_job_done
 from trigger_functions import copy_trigger_between_files, Indices_dict, get_trigger_from_target_id
 from auxiliary_functions import get_saving_file_path
 import traceback
@@ -25,8 +26,10 @@ import datetime
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--target_id", type=str, nargs=1, help="KIC number", default="003097222")
+parser.add_argument("--job_name", type=str, nargs=1, help="name of the job to report", default="003097222")
 args = parser.parse_args()
 Target_id = args.target_id[0]
+job_name = args.job_name[0]
 
 # Taking the trigger values for the score and the period
 trigger_main_search = get_trigger_from_target_id(Target_id, trigger_list_file=Threshold_crossing_list_file)
@@ -91,3 +94,4 @@ if int_score_search >= Score_candidate_postprocess and per_search >= Per_min_can
             for str_exc in list_str_exc:
                 print(str_exc.strip(), file=err_list_fil)
             print('', file=err_list_fil)
+report_job_done(job_name=job_name, jobs_monitor_folder=Jobs_monitor_folder, str_to_add='')

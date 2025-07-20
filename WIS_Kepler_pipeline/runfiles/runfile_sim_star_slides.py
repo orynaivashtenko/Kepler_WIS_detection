@@ -3,6 +3,9 @@
 import time
 import numpy.random as npr
 import os
+
+from locations import Run_name
+
 os.environ["OMP_NUM_THREADS"] = "1"  #
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"  #
@@ -27,40 +30,21 @@ if isinstance(Period, list):
 Period = float(Period)
 
 targ = target_class.KeplerTarget(target_id=Target_id,
-                                 simulated_star=True,
+                                 simulated_red_star=True,  # Warning: in run_12, it was a saved white star
                                  load_pickled_attributes=False,
                                  data_location=None,
-                                 output_location='/home/labs/barakz/Collaboration-Kepler/orynai/simulated_star')
+                                 output_location='/home/projects/barakz/Collaboration-Kepler/orynai/simulated_star_' + Run_name)
 targ.unpickle_small_attributes()
 # The KeplerLightCurve object is created inside the method, no need in initialization.
 npr.seed(None)
 rt = npr.rand() * 10.  # make it sleep random number of seconds because maybe many jobs will want to access the same file...
 time.sleep(rt)
-targ.run_timeslides(central_period=Period, use_period_chunks=True, use_shuffling_pieces=True, assert_main_search_periods=False)
+targ.run_timeslides(central_period=Period, use_period_chunks=True, use_shuffling_pieces=True)
 
-# bsub -q medium -sp 100 -R "rusage[mem=3.9G]" -o /home/labs/barakz/Collarboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collarboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -o /home/labs/barakz/Collarboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collarboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -R "rusage[mem=3.9G]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q medium -R "rusage[mem=3.9G]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q short -R "rusage[mem=3.9G]" /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl41 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl42 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl43 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl44 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl45 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl46 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl47 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl48 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl49 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl410 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl411 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl412 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl413 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl414 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl415 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl416 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl417 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl418 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl419 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
-# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -J simsl420 -o /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/labs/barakz/Collaboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/labs/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
+# bsub -q medium -sp 100 -R "rusage[mem=3.9G]" -o /home/projects/barakz/Collarboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/projects/barakz/Collarboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
+# bsub -q risk -sp 100 -R "rusage[mem=3.9G]" -o /home/projects/barakz/Collarboration-Kepler/orynai/simulated_star/outputfile_slides.out -e /home/projects/barakz/Collarboration-Kepler/orynai/simulated_star/errorfile_slides.out /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
+# bsub -q risk -R "rusage[mem=3.9G]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
+# bsub -q medium -R "rusage[mem=3.9G]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
+# bsub -q short -R "rusage[mem=3.9G]" /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 260
+# bsub -q short -sp 100 -R "rusage[mem=3.9G]" -o /home/projects/barakz/Collaboration-Kepler/orynai/simulated_star_run_12/outputfile_slides.out -e /home/projects/barakz/Collaboration-Kepler/orynai/simulated_star_run_12/errorfile_slides.out /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/runfile_sim_star_slides.py --target_id 000000000 --period 200
 
