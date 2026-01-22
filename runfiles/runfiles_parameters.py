@@ -43,6 +43,7 @@ Main_search_runfile_filename = 'runfile_main_search.py'
 Main_search_scramble_runfile_filename = 'runfile_main_search_scramble.py'
 Short_periodicity_code_filename = 'runfile_short_periodicity_search.py'
 Plotting_runfile_filename = 'runfile_plotting_results.py'
+Efficiency_runfile_filename = 'runfile_efficiency_scramble_injection.py'
 Pre_slides_tce_veto_code_filename = 'runfile_pre_slides_tce_veto.py'
 Download_data_code_filename = 'runfile_download_target_pixels.py'
 
@@ -51,10 +52,7 @@ Star_full_output_filename_postfix = 'full_output.txt'
 
 Main_search_job_prefix = 'search'
 Main_search_scramble_job_prefix = 'search_scrambled'
-
-Short_periodicity_job_filename_prefix = 'short_periodicity'
-Short_periodicity_output_filename_prefix = 'output_short_periodicity'
-Short_periodicity_error_filename_prefix = 'error_short_periodicity'
+Short_periodicity_job_prefix = 'short_periodicity'
 
 Slides_job_prefix = 'slides'
 Slides_clean_job_prefix = 'slides_clean'
@@ -65,8 +63,7 @@ Plotting_job_filename_prefix = 'plotting'
 Plotting_output_filename_prefix = 'output_plotting'
 Plotting_error_filename_prefix = 'error_plotting'
 
-Pre_slides_tce_veto_job_filename_prefix = 'pre_slides_tce_veto'
-Pre_slides_tce_veto_output_filename_prefix = 'pre_slides_tce_veto'
-Pre_slides_tce_veto_error_filename_prefix = 'pre_slides_tce_veto'
+Pre_slides_tce_veto_job_prefix = 'pre_slides_tce_veto'
+Efficiency_job_prefix = 'efficiency'
 
 Download_data_job_prefix = 'download_data'

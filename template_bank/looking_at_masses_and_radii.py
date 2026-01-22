@@ -29,17 +29,17 @@ def get_masses_radii_densities_selection():
     all_radii = []
 
     for index in range(len(gaia_file[1].data['kepid'])):
-        b_r = (gaia_file[1].data['bp_rp'])[index]  # color
-        parallax = (gaia_file[1].data['parallax'])[index]  # parallaxes (needed for absolute magnitude)
-        phot_g_mag = (gaia_file[1].data['phot_g_mean_mag'])[index]  # photometric g magnitudes
-        teff = (gaia_file[1].data['teff'])[index]
+        b_r = (gaia_file[1].data[pp.Bp_rp_field_name_gaia])[index]  # color
+        parallax = (gaia_file[1].data[pp.Parallax_field_name_gaia])[index]  # parallaxes (needed for absolute magnitude)
+        phot_g_mag = (gaia_file[1].data[pp.Phot_g_mean_mag_field_name_gaia])[index]  # photometric g magnitudes
+        teff = (gaia_file[1].data[pp.Teff_field_name_gaia])[index]
         if parallax > 0:
             abs_gmag = phot_g_mag + 5. * (np.log10(parallax / 1.e3) + 1.)  # calculating absolute magnitude from Bailer-Jones distances
             all_b_r.append(b_r)
             all_abs_gmag.append(abs_gmag)
             all_teff.append(teff)
-            all_masses.append((gaia_file[1].data['mass'])[index])  # in sol masses
-            all_radii.append((gaia_file[1].data['radius'])[index])  # in sol radii
+            all_masses.append((gaia_file[1].data[pp.Mass_field_name_gaia])[index])  # in sol masses
+            all_radii.append((gaia_file[1].data[pp.Radius_field_name_gaia])[index])  # in sol radii
 
     all_b_r = np.array(all_b_r)
     all_abs_gmag = np.array(all_abs_gmag)

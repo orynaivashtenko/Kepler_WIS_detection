@@ -33,6 +33,16 @@ from plotting_parameters import *
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+
+def update_parameters():
+    plt.rcParams.update({'font.size': Fontsize, 'font.serif': 'Times New Roman',
+                         'lines.linewidth': Linewidth, 'lines.markersize': Markersize,
+                         'legend.fontsize': Fontsize_legend, 'legend.loc': 'upper right',
+                         'axes.titlesize': Fontsize_title, 'axes.labelsize': Fontsize_label,
+                         'xtick.labelsize': Fontsize_label, 'ytick.labelsize': Fontsize_label,
+                         'figure.titlesize': Fontsize_title, 'figure.dpi': Plots_dpi})
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 class PlotWrapper(object):
     def __init__(self, save_fig=Save_fig, no_show=No_show, ax=None, figsize=None, target_id=None,
@@ -1949,7 +1959,8 @@ def plot_neighbors_maps(tce, save_fig=Save_fig, no_show=No_show, plot_output_loc
                         filename_postfix=locs.Neighbors_maps_plot_filename_postfix,
                         ms_target=18, ms_neighbors=6, ms_kois=3,
                         neighbors_file_path=None, neighbors_file_name=None,
-                        neighbors_folder=locs.Neighbors_folder, gaia_trigger_table_file=locs.Gaia_trigger_table_file
+                        neighbors_folder=locs.Neighbors_folder, trigger_table_gaia=None,
+                        gaia_trigger_table_file=locs.Gaia_trigger_table_file
                         ):
     import warnings
     from catalog_functions import test_gaia_table
@@ -1959,14 +1970,18 @@ def plot_neighbors_maps(tce, save_fig=Save_fig, no_show=No_show, plot_output_loc
 
     # Mark in which quarters it had transits!
 
-    if tce.gaia_target_table is None:
-        tce.get_target_gaia_table(file_path=gaia_trigger_table_file)
+    if trigger_table_gaia is None:
+        if tce.gaia_target_table is None:
+            tce.get_target_gaia_table(file_path=gaia_trigger_table_file)
+        trigger_table_gaia = tce.gaia_target_table
+    else:
+        tce.trigger_table_gaia = trigger_table_gaia
     if tce.neighbors_table is None:
         tce.get_neighbors_info(neighbors_file_path=neighbors_file_path, neighbors_file_name=neighbors_file_name,
                                neighbors_folder=neighbors_folder)
     if tce.neighboring_kois is None:
         tce.check_neighboring_koi()
-    trigger_table_gaia = tce.gaia_target_table
+
     ra_tid, dec_tid = trigger_table_gaia['ra'][0], trigger_table_gaia['dec'][0]
     neighbors_table = tce.neighbors_table
 

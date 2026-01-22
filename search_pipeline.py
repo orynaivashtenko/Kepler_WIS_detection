@@ -24,26 +24,23 @@ from scipy.signal import sosfiltfilt
 # import numba
 from numba import njit
 from scipy.stats import chi2
-
 import template_bank.template_module as tm
 import auxiliary_functions as af
 import utils as ut
 from utils import rfft, irfft
 from search_pipeline_parameters import *
 from simulations.lightcurve_simulation import get_simulated_star, N_quarters_simulation
-    
 import ssl
 
 # noinspection PyUnresolvedReferences,PyProtectedMember
 ssl._create_default_https_context = ssl._create_unverified_context  # this is needed to make requests work
-
 ##############################################################################
 """
 
 Quick example of usage:
 ----------------------------
-klc = pip.KeplerLightCurve(target_id='000757280', get_data=True, data_location='/home/orynai/Kepler_Notebooks/Data_sample_gaia_1', 
-                           scramble=False, output_location='/SMALLDATA/orynai/trial_outputs')
+klc = pip.KeplerLightCurve(target_id='000757280', get_data=True, data_location='/home/KeplerDataLocal', 
+                           scramble=False, output_location='/home/trial_outputs')
 klc.condition_data()
 klc.condition_templates()
 klc.detect_single_transits()
@@ -52,9 +49,9 @@ klc.periodicity_search(pmin=50, pmax=52)
 
 If conditioned data is loaded:
 ----------------------------
-klc1 = pip.KeplerLightCurve(target_id='000757280', get_data=True, data_location='/home/orynai/Kepler_Notebooks/Data_sample_gaia_1', 
-                            scramble=False, output_location='/SMALLDATA/orynai/trial_outputs')
-klc1.load_conditioned_data('/SMALLDATA/orynai/trial_outputs/000757280_conditioned_data.npy')
+klc1 = pip.KeplerLightCurve(target_id='000757280', get_data=True, data_location='/home/KeplerDataLocal', 
+                            scramble=False, output_location='/home/trial_outputs')
+klc1.load_conditioned_data('/home/000757280_conditioned_data.npy')
 klc1.initialize_templates()
 klc1.detect_single_transits()
 

@@ -9,12 +9,40 @@ os.environ["VECLIB_MAXIMUM_THREADS"] = core_num
 os.environ["NUMEXPR_NUM_THREADS"] = core_num
 import numpy as np
 import locations as locs
-from utils import check_transit_overlap
 # from tce_parameters import (Neighbors_search_radius_pix, Pixel_scale, Gaia_fields)
 
 from astropy.table import Table, Column, vstack
 from astropy.io import fits
 
+Gaia_field_names_dict = {
+    'radius': 'radius_gspphot',
+    'mass': 'mass_flame',
+    'teff': 'teff_gspphot',
+    'metallicity': 'mh_gspphot',
+    'logg': 'logg_gspphot',
+    'phot_g_mean_mag': 'phot_g_mean_mag',
+    'kepmag': 'kepmag_kic',
+    'parallax': 'parallax',
+    'bp_rp': 'bp_rp',
+    'ra': 'ra',
+    'dec': 'dec',
+    'ruwe': 'ruwe',
+    'nconfp': 'nconfp_kic',
+    'non_single_star': 'non_single_star',
+    'phot_variable_flag': 'phot_variable_flag'
+}
+
+Berger_field_names_dict = {
+    'radius': 'Rad',
+    'mass': 'Mass',
+    'teff': 'Teff',
+    'metallicity': '[Fe/H]',
+    'logg': 'logg',
+    'distance': 'Dist',
+    'density': 'rho',
+    'luminosity': 'Lum',
+    'age': 'Age',
+}
 
 # #####################################################################################################################
 # TCE FUNCTIONS
@@ -63,6 +91,13 @@ def read_gaia_kepler_table(gaia_kepler_file_path=locs.Gaia_kepler_file):
     gaia_kepler_table = Table(gaia_hdu_list[1].data)
     gaia_hdu_list.close()
     return gaia_kepler_table
+
+
+def read_berger_table(berger_table_file=locs.Berger_table_file):
+    """
+    `target_id` field is already str and padded to 9 digits
+    """
+    return Table.read(berger_table_file, format='ascii.ecsv')
 
 
 def read_table(file_path, fill_values=None, table_format=None):
@@ -167,6 +202,7 @@ def match_koi(target_id, period, ftt, n_transits, min_overlap_fraction=0.5, matc
     min_overlap_fraction is not important because we already require period match, and the transit time wll match somehow. it can
     be small sometimes because we cut the first and the last semi-quarters
     """
+    from utils import check_transit_overlap
     period = float(period)
     ftt = float(ftt)
     res_dict = None

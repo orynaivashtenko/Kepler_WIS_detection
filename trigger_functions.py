@@ -162,8 +162,12 @@ def trigger_from_line(line, sep=' '):
                    gauss_stat=gauss_stat, template=template)
 
 
-def get_trigger_from_target_id(target_id, trigger_list_file):
-    target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates = load_triggers(file=trigger_list_file)
+def get_trigger_from_target_id(target_id, trigger_list_file=None,
+                               target_ids=None, integral_scores=None, stats=None, pers=None, ftts=None, gauss_stats=None, templates=None):
+    if ((target_ids is None) or (integral_scores is None) or (stats is None)
+            or (pers is None) or (ftts is None) or (gauss_stats is None) or (templates is None)):
+        assert trigger_list_file is not None, "Either trigger_list_file or all trigger fields arrays must be provided."
+        target_ids, integral_scores, stats, pers, ftts, gauss_stats, templates = load_triggers_unique(file=trigger_list_file)
     index = np.where(target_ids == target_id)[0][0]
     integral_score = integral_scores[index]
     stat = stats[index]

@@ -230,11 +230,13 @@ def read_csv_file(file, location=None, to_type=None):
 
 
 def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobname='job_noname',
-                   job_file=None, job_filename='job_test.bsub', job_file_dir=None, env_name='',
+                   job_file=None, job_filename='job_test.bsub', job_file_dir=None,
                    queue='"short"', mem_per_job_gb='3.9', array_indices=None,
                    output_file=None, output_filename=None, output_file_dir=None,
                    error_file=None, error_filename=None, error_file_dir=None,
                    output_error_overwrite=True,
+                   transfer_tmp_to_scratch=False,
+                   add_command_before_run=None,
                    arg_jobind=False, other_args=None):
     """Creates a job or job array file which can be submitted to WEXAC IBM bsub command.
 
@@ -282,10 +284,12 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     :type error_file_dir: str or None or LiteralString or bytes
     :param output_error_overwrite: whether to overwrite `error_file` and `output_file` or to append the new outputs to the end.
     :type output_error_overwrite: bool
+    :param transfer_tmp_to_scratch:
+    :type transfer_tmp_to_scratch:
+    :param add_command_before_run:
+    :type add_command_before_run:
     :param arg_jobind: whether to parse the job index as an argument of the code which will be run in the job.
     :type arg_jobind: bool
-    :param env_name: Name of the conda environment to use. The default is the empty string, which is to run in the base env.
-    :type env_name: str
     :param other_args: list of lists with pairs of argument name and argument value, all strings
     :type other_args: list[list[str]]  or None
     :return: 
@@ -303,14 +307,20 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
         job_file += '.bsub'
 
     # noinspection DuplicatedCode
-    if (output_file is None) and (output_filename is not None) and (output_file_dir is not None):
-        output_file = os.path.join(output_file_dir, output_filename)
+    if (output_file is None):
+        if (output_filename is not None) and (output_file_dir is not None):
+            output_file = os.path.join(output_file_dir, output_filename)
+        elif output_file_dir is not None:
+            output_file = os.path.join(output_file_dir, os.path.splitext(jobname)[0] + '.out')
     if output_file is not None:
         if (output_file[-4] != '.') and (output_file[-3] != '.') and (output_file[-5] != '.'):
             output_file += '.out'
     # noinspection DuplicatedCode
-    if (error_file is None) and (error_filename is not None) and (error_file_dir is not None):
-        error_file = os.path.join(error_file_dir, error_filename)
+    if (error_file is None) :
+        if (error_filename is not None) and (error_file_dir is not None):
+            error_file = os.path.join(error_file_dir, error_filename)
+        elif error_file_dir is not None:
+            error_file = os.path.join(error_file_dir, os.path.splitext(jobname)[0] + '.err')
     if error_file is not None:
         if (error_file[-4] != '.') and (error_file[-3] != '.') and (error_file[-5] != '.'):
             error_file += '.err'
@@ -362,6 +372,14 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
     text_to_write += '    exit 1\n'
     text_to_write += 'fi\n'
 
+    if transfer_tmp_to_scratch:
+        text_to_write += 'export TMPDIR="/scratch/$USER/tmp_$LSB_JOBID"\n'
+        text_to_write += 'mkdir -p "$TMPDIR"\n'
+        text_to_write += "trap " + "'rm -rf " + '"$TMPDIR"' + "'" + ' EXIT\n'
+
+    if add_command_before_run is not None:
+        text_to_write += str(add_command_before_run) + '\n'
+
     # === Run your Python code ===
     text_to_write += str(code_file)
     if arg_jobind:
@@ -376,7 +394,7 @@ def write_job_file(code_file=None, code_filename=None, code_file_dir=None, jobna
 
 
 def arrange_job_folders(job_type_prefix, jobs_folder, output_files_folder, error_files_folder, jobs_monitor_folder,
-                        use_last_digit=True, make_monitor_folder=True, use_last_digit_monitor=False):
+                        use_last_digit=True, make_monitor_folder=True, use_last_digit_monitor=False, return_folders=False):
     for fldr in [jobs_folder, output_files_folder, error_files_folder]:
         if not os.path.exists(fldr) or not os.path.isdir(fldr):
             os.mkdir(fldr, mode=0o777)
@@ -404,6 +422,13 @@ def arrange_job_folders(job_type_prefix, jobs_folder, output_files_folder, error
                 if not os.path.exists(dig_fol) or not os.path.isdir(dig_fol):
                     os.mkdir(dig_fol, mode=0o777)
                 # os.system('find ' + dig_fol + ' -maxdepth 1 -type f -delete')
+    if return_folders:
+        if make_monitor_folder:
+            return os.path.join(jobs_folder, job_type_prefix), os.path.join(output_files_folder, job_type_prefix), \
+                   os.path.join(error_files_folder, job_type_prefix), os.path.join(jobs_monitor_folder, job_type_prefix)
+        else:
+            return os.path.join(jobs_folder, job_type_prefix), os.path.join(output_files_folder, job_type_prefix), \
+                   os.path.join(error_files_folder, job_type_prefix)
 
 
 def compose_job_name(job_type_prefix, target_id, additional_params=()):

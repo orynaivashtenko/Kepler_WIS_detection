@@ -14,12 +14,6 @@ Linewidth = 1
 Markersize = 3
 Plots_dpi = 320
 
-plt.rcParams.update({'font.size': Fontsize, 'font.serif': 'Times New Roman',
-                     'lines.linewidth': Linewidth, 'lines.markersize': Markersize,
-                     'legend.fontsize': Fontsize_legend, 'legend.loc': 'upper right',
-                     'axes.titlesize': Fontsize_title, 'axes.labelsize': Fontsize_label,
-                     'xtick.labelsize': Fontsize_label, 'ytick.labelsize': Fontsize_label,
-                     'figure.titlesize': Fontsize_title, 'figure.dpi': Plots_dpi})
 # , 'figure.autolayout': True # 'figure.figsize': Figsize,
 
 def_cols = plt.rcParams['axes.prop_cycle'].by_key()['color']

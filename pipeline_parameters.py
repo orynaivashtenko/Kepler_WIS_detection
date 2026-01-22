@@ -4,6 +4,7 @@ import numpy as np
 import os
 from locations import *
 # from scipy.interpolate import RegularGridInterpolator
+from catalog_functions import Gaia_field_names_dict
 
 ######################################################################################################################################
 # PHYSICAL CONSTANTS AND RATES
@@ -18,7 +19,16 @@ R_sun_R_e = 109.076  # sun radii to Earth radii
 Default_limb_darkening_coefs = (0.47, 0.23)
 
 
-def get_a_from_p(period, m_1_3_r_s):
+def get_a_from_p(period, m_1_3_r_s=None, m_star=None, r_star=None):
+    """
+    Gets a in units of stellar radii.
+    if `m_1_3_r_s` is None, uses `m_star` and `r_star` to calculate it.
+    `m_star` is stellar mass in units of solar masses
+    `r_star` is stellar radius in units of solar radii
+    """
+    if m_1_3_r_s is None:
+        m_1_3_r_s = (m_star ** (1/3)) / r_star
+
     # a = (G * M /(4*np.pi**2) * (per*24*60*60)**2)**(1/3) / R #3rd Kepler law #in units of R
     a = (G / (4 * np.pi ** 2) * (period * 24 * 60 * 60) ** 2) ** (1 / 3) * m_1_3_r_s * (
             M_sun ** (1 / 3) / R_sun)  # 3rd Kepler law #in units of R
@@ -160,4 +170,21 @@ Location_attributes = ['output_location', 'data_location', 'gaia_kepler_file', '
 Star_attributes = ['stellar_radius', 'stellar_mass', 'kepmag', 'phot_g_mean_mag', 'parallax',
                    'gaia_abs_gmag', 'gaia_b_r', 'teff', 'ra', 'dec', 'm_1_3_r_s']
 
+# Properties used in the search with their corresponding names in the gaia table:
+
+Radius_field_name_gaia = Gaia_field_names_dict['radius']
+Mass_field_name_gaia = Gaia_field_names_dict['mass']
+Teff_field_name_gaia = Gaia_field_names_dict['teff']
+Metallicity_field_name_gaia = Gaia_field_names_dict['metallicity']
+Logg_field_name_gaia = Gaia_field_names_dict['logg']
+Phot_g_mean_mag_field_name_gaia = Gaia_field_names_dict['phot_g_mean_mag']
+Kepmag_field_name_gaia = Gaia_field_names_dict['kepmag']
+Parallax_field_name_gaia = Gaia_field_names_dict['parallax']
+Bp_rp_field_name_gaia = Gaia_field_names_dict['bp_rp']
+Ra_field_name_gaia = Gaia_field_names_dict['ra']
+Dec_field_name_gaia = Gaia_field_names_dict['dec']
+Ruwe_field_name_gaia = Gaia_field_names_dict['ruwe']
+Nconfp_field_name_gaia = Gaia_field_names_dict['nconfp']
+Non_single_star_field_name_gaia = Gaia_field_names_dict['non_single_star']
+Phot_variable_flag_field_name_gaia = Gaia_field_names_dict['phot_variable_flag']
 

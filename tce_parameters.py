@@ -18,6 +18,7 @@ from search_pipeline_parameters import Nperseg_psd
 
 Gaia_fields = [
     'SOURCE_ID',
+    'source_id',
     'ra',  # Barycentric right ascension of the source in ICRS at the reference epoch ref_epoch
     'ra_error',
     'dec',  # Barycentric declination of the source in ICRS at the reference epoch ref_epoch
@@ -300,7 +301,7 @@ Catalog_names_properties_dict = dict([  # name,
     ['ruwe',
      [float, float, 'deg', np.nan,
       'Ruwe of the target by Gaia']],
-    ['gaia_nconfp',
+    ['nconfp',
      [int, int, '', '',
       'Number of confirmed planets of this target by Gaia']],
     ['gaia_non_single_star_flag',

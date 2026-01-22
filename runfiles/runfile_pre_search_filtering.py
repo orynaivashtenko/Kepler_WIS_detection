@@ -162,65 +162,102 @@ gaia_indices = np.array([id_to_index.get(int(tid), -1) for tid in target_ids], d
 mask_in_gaia = (gaia_indices >= 0)
 gaia_indices_in_gaia = gaia_indices[mask_in_gaia]
 
-names_gaia = [
-    'radius',
-    'mass',
-    'kepmag',
-    'phot_g_mean_mag',
-    'parallax',
-    'phot_g_mean_mag',
-    'feh',
-    'logg',
-    'bp_rp',
-    'teff',
-    'ra',
-    'dec',
-    'ruwe',
-    'nconfp',
-    'non_single_star',
-    'phot_variable_flag']
+names_gaia_dict = [
+    ['radius', pp.Radius_field_name_gaia],
+    ['mass', pp.Mass_field_name_gaia],
+    ['teff', pp.Teff_field_name_gaia],
+    ['metallicity', pp.Metallicity_field_name_gaia],
+    ['logg', pp.Logg_field_name_gaia],
+    ['gaia_phot_g_mean_mag', pp.Phot_g_mean_mag_field_name_gaia],
+    ['kepmag', pp.Kepmag_field_name_gaia],
+    ['gaia_parallax', pp.Parallax_field_name_gaia],
+    ['gaia_bp_rp', pp.Bp_rp_field_name_gaia],
+    ['gaia_ra', pp.Ra_field_name_gaia],
+    ['gaia_dec', pp.Dec_field_name_gaia],
+    ['gaia_ruwe', pp.Ruwe_field_name_gaia],
+    ['nconfp', pp.Nconfp_field_name_gaia],
+    ['gaia_non_single_star', pp.Non_single_star_field_name_gaia],
+    ['gaia_phot_variable_flag', pp.Phot_variable_flag_field_name_gaia]]
 
-for name in names_gaia:
-    name_dict = 'gaia_' + name
+for name_dict, name_table in names_gaia_dict:
     dtype = float
-    if (name == 'nconfp') or (name == 'non_single_star'):
+    if (name_table == pp.Nconfp_field_name_gaia) or (name_table == pp.Non_single_star_field_name_gaia):
         dtype = int
-    elif name == 'phot_variable_flag':
-        dtype = gaia_file[1].data[name].dtype
+    elif name_table == pp.Phot_variable_flag_field_name_gaia:
+        dtype = gaia_file[1].data[name_table].dtype
     if (dtype == float) or (dtype == np.float64) or (dtype == np.float32):
         vals = np.ones(len(target_ids), dtype=dtype) * np.nan
     else:
         vals = np.zeros(len(target_ids), dtype=dtype)
-    vals[mask_in_gaia] = (gaia_file[1].data[name][gaia_indices_in_gaia].astype(dtype))
+    vals[mask_in_gaia] = (gaia_file[1].data[name_table][gaia_indices_in_gaia].astype(dtype))
     dict_results[name_dict] = vals
 gaia_file.close()
 
+dict_results['provenance'] = np.array([''] * len(target_ids), dtype="<U10")
+dict_results['provenance'][mask_in_gaia] = 'gaia'
+
+# ----------------------------------------------------------------------
+# Berger 2020 stellar properties. Using if there are no gaia values
+from catalog_functions import read_berger_table, Berger_field_names_dict
+from locations import Berger_table_file
+names_berger_dict = [
+    ['radius', Berger_field_names_dict['radius']],
+    ['mass', Berger_field_names_dict['mass']],
+    ['teff', Berger_field_names_dict['teff']],
+    ['metallicity', Berger_field_names_dict['metallicity']],
+    ['logg', Berger_field_names_dict['logg']]]
+
+berger_table = read_berger_table(berger_table_file=Berger_table_file)
+kepid_array = berger_table['target_id']
+id_to_index = {k: i for i, k in enumerate(kepid_array)}
+berger_indices = np.array([id_to_index.get(tid, -1) for tid in target_ids], dtype=int)
+mask_in_berger = (berger_indices >= 0)
+mask_no_properties_and_in_berger = ((np.isnan(dict_results['radius'])
+                                    | np.isnan(dict_results['mass'])
+                                    | np.isnan(dict_results['logg'])
+                                    | np.isnan(dict_results['teff'])
+                                    | np.isnan(dict_results['metallicity']))
+                                    & mask_in_berger)
+indices_for_tids_replace_by_berger = berger_indices[mask_no_properties_and_in_berger]
+
+for name_dict, name_table in names_berger_dict:
+    dict_results[name_dict][mask_no_properties_and_in_berger] = ((berger_table[name_table][
+        indices_for_tids_replace_by_berger]).data).astype(float)
+
+dict_results['provenance'][mask_no_properties_and_in_berger] = 'berger'
+
+# ----------------------------------------------------------------------
+dict_results['is_in_catalog'] = np.zeros(len(target_ids), dtype=bool)
 dict_results['is_in_gaia'] = np.zeros(len(target_ids), dtype=bool)
 dict_results['is_in_gaia'][mask_in_gaia] = True
-dict_results['is_bad_gaia'] = np.ones(len(target_ids), dtype=bool)
-dict_results['is_bad_gaia'][mask_in_gaia] = False
-dict_results['is_bad_gaia'][np.isnan(dict_results['gaia_mass'])] = True
-dict_results['is_bad_gaia'][dict_results['gaia_parallax'] < 0] = True
+dict_results['is_in_catalog'][mask_in_gaia] = True
+dict_results['is_in_catalog'][mask_in_berger] = True
+dict_results['is_bad_properties'] = np.zeros(len(target_ids), dtype=bool)
+dict_results['is_bad_properties'][np.isnan(dict_results['mass'])] = True
+dict_results['is_bad_properties'][dict_results['gaia_parallax'] < 0] = True
+dict_results['has_gaia_properties'] = np.ones(len(target_ids), dtype=bool)
+dict_results['has_gaia_properties'][~mask_in_gaia] = False
+dict_results['has_gaia_properties'][mask_no_properties_and_in_berger] = False
 dict_results['is_single_gaia'] = np.ones(len(target_ids), dtype=bool)
 dict_results['is_single_gaia'][dict_results['gaia_ruwe'] > 1.4] = False  # ATTENTION: NEW in Run_13!
 dict_results['is_single_gaia'][dict_results['gaia_non_single_star'] > 0] = False
 dict_results['is_single_gaia'][dict_results['gaia_phot_variable_flag'] == 'VARIABLE'] = False
 dict_results['is_good_selection'] = np.ones(len(target_ids), dtype=bool)
-dict_results['is_good_selection'] &= ((dict_results['gaia_radius'] <= Max_stellar_radius_in_solar_radii)
-                                      & (dict_results['gaia_radius'] >= Min_stellar_radius_in_solar_radii)
-                                      & (dict_results['gaia_mass'] <= Max_stellar_mass_in_solar_masses)
-                                      & (dict_results['gaia_mass'] >= Min_stellar_mass_in_solar_masses)
-                                      & (dict_results['gaia_logg'] <= Max_logg)
-                                      & (dict_results['gaia_logg'] >= Min_logg)
-                                      & (dict_results['gaia_teff'] <= Max_teff)
-                                      & (dict_results['gaia_teff'] >= Min_teff))
+dict_results['is_good_selection'] &= ((dict_results['radius'] <= Max_stellar_radius_in_solar_radii)
+                                      & (dict_results['radius'] >= Min_stellar_radius_in_solar_radii)
+                                      & (dict_results['mass'] <= Max_stellar_mass_in_solar_masses)
+                                      & (dict_results['mass'] >= Min_stellar_mass_in_solar_masses)
+                                      & (dict_results['logg'] <= Max_logg)
+                                      & (dict_results['logg'] >= Min_logg)
+                                      & (dict_results['teff'] <= Max_teff)
+                                      & (dict_results['teff'] >= Min_teff))
 
 msk = dict_results['gaia_parallax'] >= 0
 dict_results['gaia_abs_gmag'] = np.ones(len(target_ids), dtype=float) * np.nan
 dict_results['gaia_abs_gmag'][msk] = (dict_results['gaia_phot_g_mean_mag'][msk] + 5. * (
         np.log10(dict_results['gaia_parallax'][msk] / 1.e3) + 1.))
 
-dict_results['gaia_m_1_3_r_s'] = dict_results['gaia_mass'] ** (1 / 3) / dict_results['gaia_radius']
+dict_results['m_1_3_r_s'] = dict_results['mass'] ** (1 / 3) / dict_results['radius']
 
 # ----------------------------------------------------------------------
 # Rotators
@@ -307,7 +344,7 @@ for i_target_id, target_id in enumerate(target_ids):
     n_data_files = len([f for f in os.listdir(data_location) if 'fits' in f])
     if n_data_files >= 2:
         snr_max, is_good_fft, n_quarters, mean_flux = check_detectability_local(target_id,
-                                                                                stellar_radius=dict_results['gaia_radius'][i_target_id],
+                                                                                stellar_radius=dict_results['radius'][i_target_id],
                                                                                 data_location=data_location,
                                                                                 output_location=None, rp_re_max=pp.Rp_re_max,
                                                                                 rp_rs_max=pp.Rp_rs_max,
@@ -326,17 +363,19 @@ dict_results['is_good_for_search'] = ((np.abs(dict_results['snr_max_detectable_r
                                       & (~dict_results['is_villanova_binary'])
                                       & (~dict_results['is_bad_fft'])
                                       & (~dict_results['is_too_short'])
-                                      & (dict_results['is_in_gaia'])
-                                      & (~dict_results['is_bad_gaia'])
+                                      & (dict_results['is_in_gaia'])  # we want the target to be in gaia, although
+                                      # not necessarily have all the properties inferred: those we can supplement from berger
+                                      & (~dict_results['is_bad_properties'])
                                       & (dict_results['is_good_selection']))
 
 dict_results['is_good_for_candidates'] = ((np.abs(dict_results['snr_max_detectable_radius']) >= snr_thresh)
                                           & (~dict_results['is_villanova_binary'])
                                           & (~dict_results['is_bad_fft'])
                                           & (~dict_results['is_too_short'])
-                                          & (dict_results['is_in_gaia'])
+                                          & (dict_results['is_in_gaia'])  # we want the target to be in gaia, although
+                                          # not necessarily have all the properties inferred: those we can supplement from berger
                                           & (dict_results['is_single_gaia'])
-                                          & (~dict_results['is_bad_gaia'])
+                                          & (~dict_results['is_bad_properties'])
                                           & (dict_results['is_good_selection']))
 
 # --------------------------------------------------------------------------

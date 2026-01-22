@@ -61,6 +61,8 @@ from tce_parameters import (Pixel_scale, Neighbors_search_radius_pix, Gaia_field
 
 from astropy import units
 from astropy.coordinates import SkyCoord
+from astropy.time import Time
+import astropy.units as u
 from astropy.table import Table
 import warnings
 from astroquery.simbad import Simbad
@@ -70,6 +72,9 @@ Gaia.MAIN_GAIA_TABLE = "gaiadr3.gaia_source"  # Select Data Release 3
 
 from catalog_functions import (ensure_list_str, read_gaia_kepler_crossmatch_table_for_target_id,
                                get_neighbors_file_name)
+
+
+# TODO put here how I built the gaia table for all tids
 
 
 def query_gaia_id_for_kepler_id(tid_list):
@@ -90,8 +95,9 @@ def query_gaia_id_for_kepler_id(tid_list):
             try:
                 result_table = Simbad.query_objectids("KID " + tid)  # ("KIC " + tid)
                 res_gaia = [e[0] for e in result_table if gaia_text in e[0]]
-                if len(result_table.errors) > 0:
-                    failed_tids_info.append(tid + ' : Search failed')  # failed_tids.append(result_table.errors)
+                if hasattr(result_table, 'errors'):
+                    if len(result_table.errors) > 0:
+                        failed_tids_info.append(tid + ' : Search failed')  # failed_tids.append(result_table.errors)
                 elif len(res_gaia) > 0:
                     if len(res_gaia) > 1:
                         failed_tids_info.append(tid + ' : More than one Gaia result!')
@@ -105,9 +111,12 @@ def query_gaia_id_for_kepler_id(tid_list):
     return gaia_id_list, failed_tids_info
 
 
-def query_gaia_id(gaia_id_list):
+def query_gaia_id(gaia_id_list, get_astrophysical_parameters=True):
     gaia_id_list = ensure_list_str(gaia_id_list)
-    query = "SELECT * FROM gaiadr3.gaia_source gs WHERE gs.source_id in (" + ", ".join(gaia_id_list) + ");"
+    if get_astrophysical_parameters:
+        query = "SELECT gs.*, ap.* FROM gaiadr3.gaia_source AS gs JOIN gaiadr3.astrophysical_parameters AS ap ON gs.source_id = ap.source_id WHERE gs.source_id IN (" + ", ".join(gaia_id_list) + ");"
+    else:
+        query = "SELECT * FROM gaiadr3.gaia_source gs WHERE gs.source_id in (" + ", ".join(gaia_id_list) + ");"
     # job = Gaia.launch_job_async(query, verbose=False)
     job = Gaia.launch_job(query, verbose=False)
     table_gaia = job.get_results()
@@ -145,7 +154,8 @@ def get_gaia_table_for_kepler_id(tid_list, write_to_file=False,
 
     # Querying to get the full gaia info for those IDs:
     table_gaia = query_gaia_id(gaia_id_list)
-    inds = [np.where(table_gaia['SOURCE_ID'] == int(gaia_id))[0][0] for gaia_id in gaia_id_list]
+    source_id_name = 'SOURCE_ID' if 'SOURCE_ID' in table_gaia.keys() else 'source_id'
+    inds = [np.where(table_gaia[source_id_name] == int(gaia_id))[0][0] for gaia_id in gaia_id_list]
     table_gaia = table_gaia[inds]
     table_gaia.add_column(tid_list, name='kepid', index=0)
 
@@ -200,7 +210,7 @@ def query_neighbors(tids_table_gaia=None, target_id_list=None, search_radius_pix
         # Do the cone search for the neighbors:
         job = Gaia.cone_search_async(coordinate=coords, radius=search_radius_arcsec, table_name='gaiadr3.gaia_source')
         gaia_result = job.get_results()
-        gaia_result_relevant = Table([gaia_result.columns[nam] for nam in gaia_fields])
+        gaia_result_relevant = Table([gaia_result.columns[nam] for nam in gaia_fields if nam in gaia_result.colnames],)
         # Writing the file for every target neighbors:
         gaia_result_relevant.write(get_neighbors_file_name(target_id=tid, neighbors_folder=neighbors_folder,
                                                            search_radius_pix=search_radius_pix), format='ascii.ecsv', overwrite=True)
@@ -210,3 +220,35 @@ def query_kid_in_vizier(target_id, radius_arcsec=1, catalog='I/355/gaiadr3'):
     from astroquery.vizier import Vizier
     res = Vizier.query_object("KID " + target_id.rjust(9, '0'), radius=radius_arcsec * units.arcsec)[catalog]
     return res
+
+
+def apply_proper_motion(gaia_table, target_year=2010.0):
+    """
+
+    :param gaia_table:
+    :type gaia_table: astropy.table
+    :param target_year: year when we want the coordinates. For Kepler, it is 2010.0
+    :type target_year: float
+    :return:
+    :rtype:
+    """
+    # Define epochs as Time objects
+    gaia_epoch = Time(2016.0, format='jyear')  # Gaia DR3 reference epoch
+    target_epoch = Time(target_year, format='jyear')  # Kepler reference epoch
+
+    # Create SkyCoord object with proper motion
+    gaia_coords = SkyCoord(ra=gaia_table['ra'].data[0] * u.deg,
+                           dec=gaia_table['dec'].data[0] * u.deg,
+                           pm_ra_cosdec=gaia_table['pmra'].data[0] * u.mas / u.yr,
+                           pm_dec=gaia_table['pmdec'].data[0] * u.mas / u.yr,
+                           frame='icrs',
+                           distance=1.0 / (gaia_table['parallax'].data[0] * u.mas).to(u.arcsec),
+                           obstime=gaia_epoch)
+
+    # Propagate positions to Kepler epoch
+    target_coords = gaia_coords.apply_space_motion(new_obstime=target_epoch)
+
+    # Save new positions
+    ra_target = target_coords.ra.deg
+    dec_target = target_coords.dec.deg
+    return ra_target, dec_target

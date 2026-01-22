@@ -56,9 +56,8 @@ import time
 from pipeline_parameters import *  # all the parameters, physical constants, occurrence table
 from file_operations import report_exception, Locker, print_problem
 import trigger_functions as tc
-from catalog_functions import get_koi_ttv_dicts
+from catalog_functions import get_koi_ttv_dicts, read_berger_table, Berger_field_names_dict
 np.set_printoptions(threshold=1000, linewidth=10000)
-
 ######################################################################################################################################
 
 
@@ -204,7 +203,7 @@ class KeplerTarget(object):
         """Stellar declination coordinate. Should be obtained from GAIA if exists"""
         self.ruwe = None
         """GAIA re-normalised unit weight error (RUWE). Should be obtained from GAIA if exists"""
-        self.gaia_nconfp = None
+        self.nconfp = None
         """GAIA number of confirmed planets. Should be obtained from GAIA if exists"""
         self.gaia_non_single_star_flag = None
         """GAIA flag of non-single star. Should be obtained from GAIA if exists"""
@@ -632,7 +631,7 @@ class KeplerTarget(object):
                 self.is_good_for_processing = True
                 self.stellar_radius = 1.
                 self.stellar_mass = 1.
-                self.gaia_nconfp = 0.
+                self.nconfp = 0.
                 self.m_1_3_r_s = 1.
                 self.limb_darkening_coefs = Default_limb_darkening_coefs
                 self.is_koi = False
@@ -718,12 +717,16 @@ class KeplerTarget(object):
                 # self.villanova_dict_file = old_villanova_dict_file
                 # self.limb_darkening_array_file = old_limb_darkening_array_file
 
-    def get_fields_from_gaia(self, gaia_file_path=None):
+    def get_fields_from_gaia(self, gaia_file_path=None, use_berger=True, berger_file_path=Berger_table_file):
         """
         Opens the GAIA-Kepler cross-match info file and gets some target parameters
         :param gaia_file_path: Local path to the file
         :type gaia_file_path: str
+        :param use_berger: Whether to use Berger et al. 2020 stellar parameters if there is no gaia data.
+            We for now only process targets which are present in gaia. Sometimes, they do not have radii
+            or masses, then we supplement them with Berger et al. 2020
         """
+
         if gaia_file_path is None:
             gaia_file_path = self.gaia_kepler_file
         gaia_file = fits.open(gaia_file_path)
@@ -733,50 +736,69 @@ class KeplerTarget(object):
             self.is_good_for_processing = False
         else:
             index = indices[0]  # inefficient search of target_id
-            self.stellar_radius = gaia_file[1].data['radius'][index]  # in solar radii
-            self.stellar_mass = gaia_file[1].data['mass'][index]  # in solar masses
-            self.kepmag = gaia_file[1].data['kepmag'][index]  # kepler magnitude
-            self.phot_g_mean_mag = gaia_file[1].data['phot_g_mean_mag'][index]
-            self.parallax = (gaia_file[1].data['parallax'])[index]  # mas # parallaxes (needed for absolute magnitude)
-            self.phot_g_mean_mag = (gaia_file[1].data['phot_g_mean_mag'])[index]  # photometric g magnitudes
-            self.metallicity = (gaia_file[1].data['feh'])[index]  # stellar metallicity, [Fe/H]
-            self.logg = (gaia_file[1].data['logg'])[index]  # stellar log gravity
+            self.stellar_radius = gaia_file[1].data[Radius_field_name_gaia][index]  # in solar radii
+            self.stellar_mass = gaia_file[1].data[Mass_field_name_gaia][index]  # in solar masses
+            self.kepmag = gaia_file[1].data[Kepmag_field_name_gaia][index]  # kepler magnitude
+            self.parallax = (gaia_file[1].data[Parallax_field_name_gaia])[index]  # mas # parallaxes (needed for absolute magnitude)
+            self.phot_g_mean_mag = (gaia_file[1].data[Phot_g_mean_mag_field_name_gaia])[index]  # photometric g magnitudes
+            self.metallicity = (gaia_file[1].data[Metallicity_field_name_gaia])[index]  # stellar metallicity, [Fe/H]
+            self.logg = (gaia_file[1].data[Logg_field_name_gaia])[index]  # stellar log gravity
             if self.parallax < 0:
                 self.failures += ' Parallax value negative; '
+                self.is_good_for_processing = False
                 self.gaia_abs_gmag = None
             else:
                 self.gaia_abs_gmag = self.phot_g_mean_mag + 5. * (
                         np.log10(self.parallax / 1.e3) + 1.)  # calculating absolute magnitude from Bailer-Jones distances
-            self.gaia_b_r = (gaia_file[1].data['bp_rp'])[index]  # color
-            self.teff = (gaia_file[1].data['teff'])[index]  # temperature in Kelvin
-            self.ra = gaia_file[1].data['ra'][index]  # right ascension, degrees
-            self.dec = gaia_file[1].data['dec'][index]  # declination, degrees
+            self.gaia_b_r = (gaia_file[1].data[Bp_rp_field_name_gaia])[index]  # color
+            self.teff = (gaia_file[1].data[Teff_field_name_gaia])[index]  # temperature in Kelvin
+            self.ra = gaia_file[1].data[Ra_field_name_gaia][index]  # right ascension, degrees
+            self.dec = gaia_file[1].data[Dec_field_name_gaia][index]  # declination, degrees
 
-            self.ruwe = gaia_file[1].data['ruwe'][index]  # renormalized unit weight error.
-            self.gaia_nconfp = gaia_file[1].data['nconfp'][index]  # number of confirmed planets
+            self.ruwe = gaia_file[1].data[Ruwe_field_name_gaia][index]  # renormalized unit weight error.
+            self.nconfp = gaia_file[1].data[Nconfp_field_name_gaia][index]  # number of confirmed planets
             # In DR2 ruwe<1.2 were formally considered as single stars
             # if_planet = gaia_file[1].data['planet?'][index]
-            self.gaia_non_single_star_flag = gaia_file[1].data['non_single_star'][index]
-            self.gaia_variable_star_flag = gaia_file[1].data['phot_variable_flag'][index]
+            self.gaia_non_single_star_flag = gaia_file[1].data[Non_single_star_field_name_gaia][index]
+            self.gaia_variable_star_flag = gaia_file[1].data[Phot_variable_flag_field_name_gaia][index]
 
-            if self.stellar_mass is None or self.stellar_radius is None or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius):
-                self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass; '
-                m_1_3_r_s = 1.
-            else:
-                m_1_3_r_s = self.stellar_mass ** (1 / 3) / self.stellar_radius
-            self.m_1_3_r_s = m_1_3_r_s  # M**(1/3)*R[in M_sun and R_sun]
+        gaia_file.close()
+
+        if use_berger and os.path.exists(berger_file_path) and (
+                self.stellar_radius is None or np.isnan(self.stellar_radius)
+                or self.stellar_mass is None or np.isnan(self.stellar_mass)):
+            berger_table = read_berger_table(berger_table_file=berger_file_path)
+            berger_indices = np.where(berger_table['target_id'].data == self.target_id)[0]
+            if len(berger_indices) > 0:
+                self.stellar_mass = berger_table[Berger_field_names_dict['mass']].data[berger_indices[0]]
+                self.stellar_radius = berger_table[Berger_field_names_dict['radius']].data[berger_indices[0]]
+                self.teff = berger_table[Berger_field_names_dict['teff']].data[berger_indices[0]]
+                self.logg = berger_table[Berger_field_names_dict['logg']].data[berger_indices[0]]
+                self.metallicity = berger_table[Berger_field_names_dict['metallicity']].data[berger_indices[0]]
+
+        for key in self.star_attributes:
+            try:
+                if self.__dict__[key] is not None:
+                    self.__dict__[key] = float(self.__dict__[key])
+            except Exception as e:
+                report_exception(exception=e, file_to_append=self.problems_file_location, title='', info='')
+                self.failures += key + ' error ' + str(e) + '; '
+                self.__dict__[key] = None
+
+        if (self.stellar_mass is None or self.stellar_radius is None
+                or np.isnan(self.stellar_mass) or np.isnan(self.stellar_radius)
+                or self.teff is None or np.isnan(self.teff)
+                or self.metallicity is None or np.isnan(self.metallicity)):
+            self.is_good_for_processing = False
+            self.failures += 'Unable to generate correct injections because of invalid stellar radius or mass; '
+            self.m_1_3_r_s = 1.
+            # M**(1/3)*R[in M_sun and R_sun]
+            self.limb_darkening_coefs = Default_limb_darkening_coefs
+        else:
+            self.m_1_3_r_s = self.stellar_mass ** (1 / 3) / self.stellar_radius
+            # M**(1/3)*R[in M_sun and R_sun]
             self.limb_darkening_coefs = tm.get_limb_darkening_coefs(teff=self.teff, logg=self.logg, metallicity=self.metallicity,
                                                                     limb_darkening_array_file=self.limb_darkening_array_file)
-
-            for key in self.star_attributes:
-                try:
-                    if self.__dict__[key] is not None:
-                        self.__dict__[key] = float(self.__dict__[key])
-                except Exception as e:
-                    report_exception(exception=e, file_to_append=self.problems_file_location, title='', info='')
-                    self.failures += key + ' error ' + str(e) + '; '
-                    self.__dict__[key] = None
-        gaia_file.close()
 
     def get_koi_and_ttv_fields(self, koi_dict_file=None, ttv_dict_file=None):
         """
@@ -1544,6 +1566,11 @@ class KeplerTarget(object):
                           connected_stats_filename_postfix=Connected_statistic_data_filename_postfix,
                           file_path_conditioned_data=None,
                           mask_koi_planet=True, period_avoid_masking=None, ftt_avoid_masking=None,
+                          mask_candidates=Mask_kepler_candidates,
+                          mask_false_positives=Mask_kepler_false_positives,
+                          mask_bright_candidates=Mask_kepler_bright_candidates,
+                          bright_candidate_mes=Kepler_bright_candidate_mes,
+                          bright_candidate_ses=Kepler_bright_candidate_ses,
                           save_connected_stats=True, save_conditioned_data=True,
                           use_locker=True):
         """
@@ -1590,54 +1617,58 @@ class KeplerTarget(object):
                 # the latter is from the pickled attributes, meaning
                 # that the saved connected data is probably also with the masked koi planet
                 self.mask_koi_planet(modify_self_klc=True, return_durations_transit_times=False,
-                                     mask_candidates=Mask_kepler_candidates,
-                                     mask_false_positives=Mask_kepler_false_positives,
-                                     mask_bright_candidates=Mask_kepler_bright_candidates,
-                                     bright_candidate_mes=Kepler_bright_candidate_mes,
-                                     bright_candidate_ses=Kepler_bright_candidate_ses,
+                                     mask_candidates=mask_candidates,
+                                     mask_false_positives=mask_false_positives,
+                                     mask_bright_candidates=mask_bright_candidates,
+                                     bright_candidate_mes=bright_candidate_mes,
+                                     bright_candidate_ses=bright_candidate_ses,
                                      avoid_period=period_avoid_masking, avoid_time_first=ftt_avoid_masking)
                 # # if there are only candidates, it will not mask
         if period_avoid_masking is not None:
             insert_after_postfix_period = str(int(np.round(period_avoid_masking)))
         else:
             insert_after_postfix_period = None
-        if file_path_connected_data is None:
-            file_path_connected_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                               filename_postfix=connected_stats_filename_postfix,
-                                                               insert_after_postfix=None,
-                                                               insert_integer_periods=insert_after_postfix_period,
-                                                               file_format='npy')
-        if file_path_conditioned_data is None:
-            file_path_conditioned_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
-                                                                 filename_postfix=conditioned_data_filename_postfix,
-                                                                 insert_after_postfix=None,
-                                                                 insert_integer_periods=insert_after_postfix_period,
-                                                                 file_format='npy')
+
         if self.klc.statistics_full is None or not hasattr(self.klc, 'statistics_full'):
             success = False
-            if allow_loading and os.path.exists(file_path_connected_data) and os.path.getsize(file_path_connected_data) > 0:
-                try:
-                    if use_locker:
-                        with Locker(file_path_connected_data):
+            if allow_loading and (self.output_location is not None):
+                if file_path_connected_data is None:
+                    file_path_connected_data = af.get_saving_file_path(output_location=self.output_location, target_id=self.target_id,
+                                                                       filename_postfix=connected_stats_filename_postfix,
+                                                                       insert_after_postfix=None,
+                                                                       insert_integer_periods=insert_after_postfix_period,
+                                                                       file_format='npy')
+                if os.path.exists(file_path_connected_data) and os.path.getsize(file_path_connected_data) > 0:
+                    try:
+                        if use_locker:
+                            with Locker(file_path_connected_data):
+                                self.klc.load_connected_stats(file_path=file_path_connected_data)
+                                success = True
+                        else:
                             self.klc.load_connected_stats(file_path=file_path_connected_data)
                             success = True
-                    else:
-                        self.klc.load_connected_stats(file_path=file_path_connected_data)
-                        success = True
-                except Exception as exc:
-                    success = False
-                    report_exception(exception=exc, file_to_append=self.problems_file_location,
-                                     title='statistics_full file', info='')
+                    except Exception as exc:
+                        success = False
+                        report_exception(exception=exc, file_to_append=self.problems_file_location,
+                                         title='statistics_full file', info='')
             if not success:
                 if self.klc.statistics_raw is None:
                     # Try to load conditioned data if the file exists and is not empty:
-                    if allow_loading and os.path.exists(file_path_conditioned_data) and os.path.getsize(file_path_conditioned_data) > 0:
-                        try:
-                            self.klc.load_conditioned_data(file=file_path_conditioned_data)
-                            self.klc.initialize_templates()
-                            success = True
-                        except (EOFError, pickle.UnpicklingError):
-                            success = False
+                    if allow_loading and (self.output_location is not None):
+                        if file_path_conditioned_data is None:
+                            file_path_conditioned_data = af.get_saving_file_path(output_location=self.output_location,
+                                                                                 target_id=self.target_id,
+                                                                                 filename_postfix=conditioned_data_filename_postfix,
+                                                                                 insert_after_postfix=None,
+                                                                                 insert_integer_periods=insert_after_postfix_period,
+                                                                                 file_format='npy')
+                        if os.path.exists(file_path_conditioned_data) and os.path.getsize(file_path_conditioned_data) > 0:
+                            try:
+                                self.klc.load_conditioned_data(file=file_path_conditioned_data)
+                                self.klc.initialize_templates()
+                                success = True
+                            except (EOFError, pickle.UnpicklingError):
+                                success = False
                     if not success:
                         self.klc.condition_data()
                         self.was_notched = self.klc.was_notched

@@ -119,14 +119,14 @@ if tids_list_file == '':
             output_folder_tid = os.path.join(Output_folder, prefix, tid)
             if not there_is_output(output_folder_tid):
                 add_to_list = True
-                # Maybe the thing was bad for processing, need to check it:
-                if pp.Dict_target_txt_filename_postfix not in Keyword_output:
-                    dict_file = os.path.join(output_folder_tid, tid + '_' + pp.Dict_target_txt_filename_postfix)
-                    if os.path.exists(dict_file):
-                        is_good_for_processing = check_dict_keyword(target_id=tid, output_folder=output_folder_tid,
-                                                                    keyword='is_good_for_processing')
-                        if is_good_for_processing == 'False':
-                            add_to_list = False
+                # # Maybe the thing was bad for processing, need to check it:
+                # if pp.Dict_target_txt_filename_postfix not in Keyword_output:
+                #     dict_file = os.path.join(output_folder_tid, tid + '_' + pp.Dict_target_txt_filename_postfix)
+                #     if os.path.exists(dict_file):
+                #         is_good_for_processing = check_dict_keyword(target_id=tid, output_folder=output_folder_tid,
+                #                                                     keyword='is_good_for_processing')
+                #         if is_good_for_processing == 'False':
+                #             add_to_list = False
                 if add_to_list:
                     not_run_tids.append(tid)
                     if Create_job_files:
@@ -146,13 +146,13 @@ else:
         if not there_is_output(output_folder_tid):
             add_to_list = True
             # Maybe the thing was bad for processing, need to check it:
-            if pp.Dict_target_txt_filename_postfix not in Keyword_output:
-                dict_file = os.path.join(output_folder_tid, tid + '_' + pp.Dict_target_txt_filename_postfix)
-                if os.path.exists(dict_file):
-                    is_good_for_processing = check_dict_keyword(target_id=tid, output_folder=output_folder_tid,
-                                                                keyword='is_good_for_processing')
-                    if is_good_for_processing == 'False':
-                        add_to_list = False
+            # if pp.Dict_target_txt_filename_postfix not in Keyword_output:
+            #     dict_file = os.path.join(output_folder_tid, tid + '_' + pp.Dict_target_txt_filename_postfix)
+            #     if os.path.exists(dict_file):
+            #         is_good_for_processing = check_dict_keyword(target_id=tid, output_folder=output_folder_tid,
+            #                                                     keyword='is_good_for_processing')
+            #         if is_good_for_processing == 'False':
+            #             add_to_list = False
             if add_to_list:
                 not_run_tids.append(tid)
                 if Create_job_files:
@@ -168,5 +168,6 @@ with open(not_run_tids_file, 'w') as fil:
         print(tid, file=fil)
 
 # bsub -q short -R "rusage[mem=2GB]" -sp 100 source ~/.bashrc; conda activate planets_env_amd_epyc;  /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py
+# bsub -q short -R "rusage[mem=2GB]" -sp 100 source ~/.bashrc; conda activate planets_env_amd_epyc;  /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --keyword_output _best_scrambled_periodic_scores_all_p
 # bsub -q short -R "rusage[mem=2GB]" source ~/.bashrc; conda activate planets_env_amd_epyc;  /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --tids_list_file /home/projects/barakz/orynai/run_11/selected_tids_run_11_rerun_main_search.txt --not_run_tids_file /home/projects/barakz/orynai/run_11/not_run_tids.txt --output_folder /home/projects/barakz/Collaboration-Kepler/orynai/output_run_11_alternative
-# bsub -q short -R "rusage[mem=2GB]" source ~/.bashrc; conda activate planets_env_amd_epyc;  /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --not_run_tids_file /home/projects/barakz/orynai/run_11/not_run_tids_scrambled_run.txt --output_folder /home/projects/barakz/Collaboration-Kepler/orynai/output_run_11 --keyword_output _best_scrambled_periodic_scores_all_p
+# bsub -q short -R "rusage[mem=2GB]" source ~/.bashrc; conda activate planets_env_amd_epyc;  /home/projects/barakz/orynai/Kepler_Earths/WIS_Kepler_pipeline/runfiles/serial_check_who_did_not_run.py --not_run_tids_file /home/projects/barakz/orynai/run_11/not_run_tids_scrambled_run.txt  --keyword_output _best_scrambled_periodic_scores_all_p

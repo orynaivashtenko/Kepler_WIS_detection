@@ -4,7 +4,7 @@ import os
 
 Pipeline_folder = os.path.dirname(__file__)
 # --------------------------------------------------------------------------------------------
-Run_name = 'run_13'
+Run_name = 'run_15'
 # --------------------------------------------------------------------------------------------
 Working_place = None  # On which machine it is running: my office Mac ('Home'), Marvin or WEXAC
 # Working_place = 'Home' # 'Marvin'  # 'WEXAC'
@@ -61,7 +61,9 @@ Pre_search_filtering_folder = os.path.join(Run_outputs_folder, 'pre_search_filte
 # Kepler, Gaia and other files
 Koi_dict_filename = 'KOI_catalog_dict.pickle'
 Ttv_dict_filename = 'TTV_catalog_dict.pickle'
-Gaia_kepler_filename = 'kepler_dr3_good.fits'
+# Gaia_kepler_filename = 'kepler_dr3_good.fits'
+Gaia_kepler_filename = 'gaia_kepler_table_dr3.fits'
+Berger_table_filename = 'kepler_stellar_properties_berger_2020.ecsv'
 Villanova_dict_filename = 'villanova_catalog_dict.pickle'
 Limb_darkening_array_filename = 'limb_darkening_kepler_array.npy'
 Flares_filename = 'Flares_Kepler.txt'
@@ -70,6 +72,7 @@ Kepler_tce_table_filename = 'q1_q17_dr25_tce_2024.csv'
 Koi_dict_file = os.path.join(Kepler_files_folder, Koi_dict_filename)
 Ttv_dict_file = os.path.join(Kepler_files_folder, Ttv_dict_filename)
 Gaia_kepler_file = os.path.join(Kepler_files_folder, Gaia_kepler_filename)
+Berger_table_file = os.path.join(Kepler_files_folder, Berger_table_filename)
 Villanova_dict_file = os.path.join(Kepler_files_folder, Villanova_dict_filename)
 Limb_darkening_array_file = os.path.join(Kepler_files_folder, Limb_darkening_array_filename)
 Flares_file = os.path.join(Kepler_files_folder, Flares_filename)
@@ -158,6 +161,10 @@ Suspicious_frequency_reasons_triggers_filename = 'suspicious_frequency_reasons_t
 Suspicious_frequency_filtered_triggers_filename = 'suspicious_frequency_filtered_triggers.npy'
 Suspicious_frequency_reasons_triggers_file = os.path.join(Trigger_lists_folder, Suspicious_frequency_reasons_triggers_filename)
 Suspicious_frequency_filtered_triggers_file = os.path.join(Trigger_lists_folder, Suspicious_frequency_filtered_triggers_filename)
+
+# ----------------------------------------------------------------------
+# Efficiency evaluation:
+Efficiency_output_folder = os.path.join(Run_outputs_folder, 'efficiency_outputs_' + Run_name)
 
 # ----------------------------------------------------------------------
 # Catalog files

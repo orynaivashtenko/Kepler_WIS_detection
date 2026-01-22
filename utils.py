@@ -13,13 +13,16 @@ import warnings
 import numpy as np
 from numba import njit
 from scipy.optimize import minimize
-from scipy.stats import chi2, norm, binom, poisson
+from scipy.stats import chi2, norm, binom, poisson, uniform, skewnorm
 from scipy.special import erfc, erfinv, ndtr, gammaincc, gammainccinv
 from scipy.interpolate import interp1d
 from scipy.signal import iirnotch, tf2sos, tf2zpk
 from scipy.signal.windows import tukey
 
-from search_pipeline_parameters import *
+from search_pipeline_parameters import Use_pyfftw, Nsig_outliers_0, Detr_length_outliers, \
+    Nsig_outliers_psd, Nsig_outliers_0_pos, Nsig_outliers_0_neg, Max_small_hole, \
+    Nperseg_psd, Min_piece_scrambling, Max_piece_scrambling, Max_hole_pieces_scrampling,\
+    Duty_cycle, P_bins_overlap
 # from numba import float32
 # -> I forgot why I did this, and there may be implications...
 
@@ -235,14 +238,40 @@ def get_unique_indices(data_list):
     return inds_unique, data_list_unique
 
 
-def get_uniform_random_sequence(low, high, n):
-    res = np.linspace(low, high, n, endpoint=False)
-    if n > 1:
-        dx = res[1] - res[0]
+def get_uniform_random_sequence(low, high, n=None, dx=None):
+    """
+    Gets a stratified sample from a uniform distribution
+    If you want to code this in multi-D, google Sobol sequence"""
+    if dx is None:
+        res = np.linspace(low, high, n, endpoint=False)
+        if n > 1:
+            dx = res[1] - res[0]
+        else:
+            dx = high - low
     else:
-        dx = high - low
+        res = np.arange(low, high, dx)
+        n = len(res)
     res = res + np.random.uniform(low=0, high=dx, size=n)
     return res
+
+
+def get_stratified_skewnorm_rvs(n, loc=0., scale=1., a=0.):
+    """
+    Returns a sample of length n distributied according to skewnorm with
+    parameters loc, scale, a, but which is more uniform in its spread, low-discrepancy.
+    This means that there will not be case when all the points are suddenly in one place,
+    which could happen if we just sample from this distribution.
+    This is achieved by generating a stratified sample from a uniform
+    distribution and then applying a transformation.
+    """
+    low = -1
+    high = 1
+    xx = get_uniform_random_sequence(low=low, high=high, n=n)
+    f_xx = uniform(loc=low, scale=high - low).cdf(xx)
+    yy = skewnorm(a=a, loc=loc, scale=scale).ppf(f_xx)
+    yy = yy[~np.isinf(yy)]
+    yy = yy[~np.isnan(yy)]
+    return yy
 
 
 def cos_vec(h1, h2, wf_fd=None, freqmask=None):
@@ -1083,14 +1112,42 @@ def outlier_free_std(data, nsig=3, n_iterations=1, mask=None, detrend=False, det
     else:
         expected_power = 1.
 
-    if np.isnan(data1[mask]).any() or (not np.all(np.isfinite(data1[mask]))) or len(data1[mask]) < 3:
+    data1_in_mask = data1[mask]
+    if np.isnan(data1_in_mask).any() or (not np.all(np.isfinite(data1_in_mask))) or len(data1_in_mask) < 3:
         raise ValueError('Not enough data to calculate the std!')
 
-    var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
+    if len(data1_in_mask) == 1:
+        return 0.0
+    var_calc = np.nanvar(data1_in_mask) * len(data1_in_mask) / (len(data1_in_mask) - 1)
+    if var_calc == 0.0:
+        if not return_mask:
+            if not return_var:
+                return 0.0
+            else:
+                return 0.0
+        else:
+            if not return_var:
+                return 0.0, mask
+            else:
+                return 0.0, mask
     for i in range(n_iterations):
-        outlier_mask = np.abs(data1 - np.nanmean(data1[mask])) < nsig * var_calc ** 0.5
+        outlier_mask = np.abs(data1 - np.nanmean(data1_in_mask)) <= nsig * var_calc ** 0.5
         mask = outlier_mask * mask
-        var_calc = np.nanvar(data1[mask]) * len(data1[mask]) / (len(data1[mask]) - 1)
+        if np.sum(mask.astype(float)) < 3:
+            raise ValueError('Not enough data to calculate the std after outlier removal!\n'+str(data1[mask]) + '\n' + str(data1))
+        data1_in_mask = data1[mask]
+        var_calc = np.nanvar(data1_in_mask) * len(data1_in_mask) / (len(data1_in_mask) - 1)
+        if var_calc == 0.0:
+            if not return_mask:
+                if not return_var:
+                    return 0.0
+                else:
+                    return 0.0
+            else:
+                if not return_var:
+                    return 0.0, mask
+                else:
+                    return 0.0, mask
         if renormalize:
             var_calc = var_calc / expected_power
     if not return_mask:
@@ -1577,13 +1634,25 @@ def psd2wf(psd, support=None, use_rfft=True, tukey_steps_len=0,
     return wf_tds, wf_fds
 
 
-def whiten_vector(vector, wf_fd):
+def whiten_vector(vector, wf_fd, no_rolling=False, unpad=False):
     support = 2 * (len(wf_fd) - 1)
-    vector = np.roll(vector, -np.argmax(vector))
-    vector = np.concatenate((vector[:len(vector) // 2], np.zeros(support - len(vector)),
-                             vector[len(vector) // 2:]))
-    vector = irfft(rfft(vector) * wf_fd)
-    return vector
+    if no_rolling:
+        zerlen_1 = (support - len(vector)) // 2
+        zerlen_2 = (support - len(vector) + 1) // 2
+        vector = np.concatenate((np.zeros(zerlen_1), vector, np.zeros(zerlen_2)))
+        vector = irfft(rfft(vector) * wf_fd)
+        if unpad:
+            return vector[zerlen_1: -zerlen_2]
+        else:
+            return vector
+    else:
+        vector = np.roll(vector, -np.argmax(vector))
+        vector = np.concatenate((vector[:len(vector) // 2], np.zeros(support - len(vector)),
+                                 vector[len(vector) // 2:]))
+        vector = irfft(rfft(vector) * wf_fd)
+        if unpad:
+            raise ValueError('unpad not implemented yet for no_rolling=False')
+        return vector
 
 
 def filter2cov_matrix(vec, pad_by_zeros=False, trim_zeros=True):
@@ -3634,7 +3703,7 @@ def get_pieces_indices(mask, max_hole=Max_hole_pieces_scrampling, max_piece=Max_
     return np.array(inds_pieces)
 
 
-def gen_uniform_piece_lengths(tot_len, n_pieces):
+def gen_uniform_piece_lengths(tot_len, n_pieces, seed=np.nan):
     """
     Splits `tot_len` into `n_pieces` parts so that the distribution of parts length is uniform
     :param tot_len: total length which needs to be split into parts
@@ -3643,16 +3712,29 @@ def gen_uniform_piece_lengths(tot_len, n_pieces):
     :type n_pieces: int
     :return: `lens`, the lengths
     :rtype: List[int]
+    :param seed:
+    :type seed: int or None or numpy.nan
     """
-    lens_0 = np.random.uniform(0, tot_len, n_pieces)
-    lens_0 = lens_0 / np.sum(lens_0) * tot_len
-    lens = np.round(lens_0).astype(int)
-    # make sure somehow that the total length is correct
-    while np.sum(lens) != tot_len:
-        if np.sum(lens) > tot_len:
-            lens[np.nanargmax(lens - lens_0)] -= 1
-        elif np.sum(lens) < tot_len:
-            lens[np.nanargmin(lens - lens_0)] += 1
+    if ~np.isnan(seed):
+        np.random.seed(int(seed))
+    assert not np.isnan(tot_len) and not np.isnan(n_pieces), "tot_len and n_pieces must not be NaN!"
+    assert n_pieces > 0, "n_pieces must be positive!"
+    if tot_len == 0:
+        lens = [0] * n_pieces
+
+    else:
+        sum_lens_0 = 0
+        while sum_lens_0 == 0:
+            lens_0 = np.random.uniform(0, tot_len, n_pieces)
+            sum_lens_0 = np.sum(lens_0)
+        lens_0 = lens_0 / sum_lens_0 * tot_len
+        lens = np.round(lens_0).astype(int)
+        # make sure somehow that the total length is correct
+        while np.sum(lens) != tot_len:
+            if np.sum(lens) > tot_len:
+                lens[np.nanargmax(lens - lens_0)] -= 1
+            elif np.sum(lens) < tot_len:
+                lens[np.nanargmin(lens - lens_0)] += 1
     return lens
 
 

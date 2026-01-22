@@ -11,6 +11,7 @@ import batman
 import copy
 import os
 import sys
+import warnings
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from file_operations import read_quarters_from_file  # , write_quarters_to_txt
@@ -647,7 +648,7 @@ def time(t_tot=T_ban, dt=dt_lc, t_bins=None, parity='odd', fromzero=False):
     Parameters
     ----------
     t_tot : float
-        The full duratin of the time sample in some units (the same as `dt`).
+        The full duration of the time sample in some units (the same as `dt`).
         The default is 2*`T_ban`.
     dt : float
         The time step in the same units as T. The default is `dt_lc`.
@@ -962,6 +963,61 @@ def get_occurrence_rate_per_chunk(period_min, period_max):
     return planets_of_radii_in_per_range_one_star, log2_rp_re_edges
 
 
+def get_occurrence_rate_per_rp_chunk(period_min, period_max, rp_re_min, rp_re_max):
+    # Number of planets of all radii in this period range:
+    planets_of_radii_in_per_range_one_star, log2_rp_re_edges = get_occurrence_rate_per_chunk(period_min, period_max)
+
+    log2_rp_re_low = np.log2(rp_re_min)
+    log2_rp_re_up = np.log2(rp_re_max)
+
+    # FINDING ROWS IN THE OCCURRENCE TABLE THAT SPAN OUR PERIOD RANGE:
+    # We do not know occurrence priors for periods > 400 days, so just use the same ones as for 400 days
+
+    # If we are outside the table, just assume the same densities as inside the table
+    if log2_rp_re_up <= log2_rp_re_edges[0]:
+        up_edge = log2_rp_re_up
+        low_edge = log2_rp_re_low
+        row_density = planets_of_radii_in_per_range_one_star[0] / (log2_rp_re_edges[1] - log2_rp_re_edges[0])
+        planets_in_per_rp_re_range_one_star = row_density * (up_edge - low_edge)
+    elif log2_rp_re_low > log2_rp_re_edges[-1]:
+        up_edge = log2_rp_re_up
+        low_edge = log2_rp_re_low
+        row_density = planets_of_radii_in_per_range_one_star[-1] / (log2_rp_re_edges[-1] - log2_rp_re_edges[-2])
+        planets_in_per_rp_re_range_one_star = row_density * (up_edge - low_edge)
+
+    else:
+        # For other periods, it will be checked right now:
+        row_upper = len(planets_of_radii_in_per_range_one_star) - 1
+        for i in range(len(log2_rp_re_edges) - 1):
+            if (log2_rp_re_up > log2_rp_re_edges[i]) and (log2_rp_re_up <= log2_rp_re_edges[i + 1]):
+                row_upper = i
+                break
+        row_lower = len(planets_of_radii_in_per_range_one_star) - 1
+        for i in range(len(log2_rp_re_edges) - 1):
+            if (log2_rp_re_low > log2_rp_re_edges[i]) and (log2_rp_re_low <= log2_rp_re_edges[i + 1]):
+                row_lower = i
+                break
+        if log2_rp_re_low <= log2_rp_re_edges[0]:
+            row_lower = 0
+        # CALCULATING EXPECTED NUMBER OF PLANETS IN OUR PERIOD RANGE:
+        # planets per one star in this period range for different radii bins:
+        # (if the period range covered several bins), we take weighted sum. we do not do any smoothing for now, just take bins
+        # to be uniform (they are log bins)
+        planets_in_per_rp_re_range_one_star = 0.
+        for i in range(row_lower, row_upper + 1):
+            row_density = planets_of_radii_in_per_range_one_star[i] / (log2_rp_re_edges[i + 1] - log2_rp_re_edges[i])
+            if i == len(planets_of_radii_in_per_range_one_star) - 1 and log2_rp_re_up > log2_rp_re_edges[len(log2_rp_re_edges) - 1]:
+                up_edge = log2_rp_re_up
+            else:
+                up_edge = min(log2_rp_re_up, log2_rp_re_edges[i + 1])
+            if i == len(planets_of_radii_in_per_range_one_star) - 1 and log2_rp_re_low > log2_rp_re_edges[len(log2_rp_re_edges) - 1]:
+                low_edge = log2_rp_re_low
+            else:
+                low_edge = max(log2_rp_re_low, log2_rp_re_edges[i])
+            planets_in_per_rp_re_range_one_star += row_density * (up_edge - low_edge)
+    return planets_in_per_rp_re_range_one_star
+
+
 def get_occurrence_rate_density_per_dp(period, dp=1.):
     period_min = period - dp / 2
     period_max = period + dp / 2
@@ -1094,29 +1150,97 @@ def get_rp_inj(snr_req, wf_fd, n_transits, per_inj=300., m_1_3_r_s=1, inc_inj=90
 
 
 def get_limb_darkening_coefs(teff, logg, metallicity, limb_darkening_array_file=Limb_darkening_array_file,
-                             default=Default_limb_darkening_coefs):
+                             default=Default_limb_darkening_coefs, interp=False):
+    """
+    If interp is used, it is better to supply teff, logg, metallicity as arrays of multiple points, otherwise it is slow.
+    """
     if (teff is None) or (logg is None) or (metallicity is None):
         return default
     if np.isnan(np.array([teff, logg, metallicity])).any():
         return default
 
     teff_s, logg_s, meh_s, a_s, b_s = np.load(limb_darkening_array_file, allow_pickle=True).T
+    min_teff_s = np.min(teff_s)
+    max_teff_s = np.max(teff_s)
+    min_logg_s = np.min(logg_s)
+    max_logg_s = np.max(logg_s)
+    min_meh_s = np.min(meh_s)
+    max_meh_s = np.max(meh_s)
+    if hasattr(teff, '__len__'):
+        teff = np.array(teff)
+        mask_too_low = teff < min_teff_s
+        mask_too_high = teff > max_teff_s
+        if np.sum(mask_too_low) > 0:
+            warnings.warn("Some teff values are lower than the lowest table value", UserWarning)
+        if np.sum(mask_too_high) > 0:
+            warnings.warn("Some teff values are higher than the highest table value", UserWarning)
+        teff[mask_too_low] = min_teff_s
+        teff[mask_too_high] = max_teff_s
+    elif teff < min_teff_s:
+        warnings.warn("teff is lower than the lowest table value", UserWarning)
+        teff = min_teff_s
 
-    meh_set = np.array([-5.0, -4.5, -4.0, -3.5, -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.5, 1.0])
-    logg_set = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
-    teff_set = np.array([3500.0, 3750.0, 4000.0, 4250.0, 4500.0, 4750.0, 5000.0, 5250.0, 5500.0, 5750.0, 6000.0, 6250.0, 6500.0, 6750.0,
-                         7000.0, 7250.0, 7500.0, 7750.0, 8000.0, 8500.0, 8750.0, 9000.0, 9500.0, 9750.0, 10000.0, 10500.0, 11000.0, 11500.0,
-                         12000.0, 12500.0, 13000.0, 14000.0, 15000.0, 16000.0, 17000.0, 18000.0, 19000.0, 20000.0, 21000.0, 22000.0,
-                         23000.0,
-                         24000.0, 25000.0, 26000.0, 27000.0, 28000.0, 29000.0, 30000.0, 31000.0, 32000.0, 33000.0, 34000.0, 35000.0,
-                         37500.0,
-                         40000.0, 42500.0, 45000.0, 47500.0, 50000.0])
-    metallicity_table = meh_set[np.argmin(np.abs(meh_set - metallicity))]
-    logg_table = logg_set[np.argmin(np.abs(logg_set - logg))]
-    teff_table = teff_set[np.argmin(np.abs(teff_set - teff))]
-    index = np.where((teff_s == teff_table) & (logg_s == logg_table) & (meh_s == metallicity_table))[0]
-    index = index[0]
-    return a_s[index], b_s[index]
+    if hasattr(logg, '__len__'):
+        logg = np.array(logg)
+        mask_too_low = logg < min_logg_s
+        mask_too_high = logg > max_logg_s
+        if np.sum(mask_too_low) > 0:
+            warnings.warn("Some logg values are lower than the lowest table value", UserWarning)
+        if np.sum(mask_too_high) > 0:
+            warnings.warn("Some logg values are higher than the highest table value", UserWarning)
+        logg[mask_too_low] = min_logg_s
+        logg[mask_too_high] = max_logg_s
+    elif logg < min_logg_s:
+        warnings.warn("logg is lower than the lowest table value", UserWarning)
+        logg = min_logg_s
+
+    if hasattr(metallicity, '__len__'):
+        metallicity = np.array(metallicity)
+        mask_too_low = metallicity < min_meh_s
+        mask_too_high = metallicity > max_meh_s
+        if np.sum(mask_too_low) > 0:
+            warnings.warn("Some metallicity values are lower than the lowest table value", UserWarning)
+        if np.sum(mask_too_high) > 0:
+            warnings.warn("Some metallicity values are higher than the highest table value", UserWarning)
+        metallicity[mask_too_low] = min_meh_s
+        metallicity[mask_too_high] = max_meh_s
+    elif metallicity < min_meh_s:
+        warnings.warn("metallicity is lower than the lowest table value", UserWarning)
+        metallicity = min_meh_s
+
+    if not interp:
+        meh_set = np.array([-5.0, -4.5, -4.0, -3.5, -3.0, -2.5, -2.0, -1.5, -1.0, -0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.3, 0.5, 1.0])
+        logg_set = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
+        teff_set = np.array([3500.0, 3750.0, 4000.0, 4250.0, 4500.0, 4750.0, 5000.0, 5250.0, 5500.0, 5750.0, 6000.0, 6250.0, 6500.0, 6750.0,
+                             7000.0, 7250.0, 7500.0, 7750.0, 8000.0, 8500.0, 8750.0, 9000.0, 9500.0, 9750.0, 10000.0, 10500.0, 11000.0,
+                             11500.0,
+                             12000.0, 12500.0, 13000.0, 14000.0, 15000.0, 16000.0, 17000.0, 18000.0, 19000.0, 20000.0, 21000.0, 22000.0,
+                             23000.0,
+                             24000.0, 25000.0, 26000.0, 27000.0, 28000.0, 29000.0, 30000.0, 31000.0, 32000.0, 33000.0, 34000.0, 35000.0,
+                             37500.0,
+                             40000.0, 42500.0, 45000.0, 47500.0, 50000.0])
+
+        metallicity_table = meh_set[np.argmin(np.abs(meh_set - metallicity))]
+        logg_table = logg_set[np.argmin(np.abs(logg_set - logg))]
+        teff_table = teff_set[np.argmin(np.abs(teff_set - teff))]
+        index = np.where((teff_s == teff_table) & (logg_s == logg_table) & (meh_s == metallicity_table))[0]
+        index = index[0]
+        return a_s[index], b_s[index]
+    else:
+        from scipy.interpolate import LinearNDInterpolator
+
+        points = np.column_stack((logg_s, meh_s, teff_s))
+        interp_a = LinearNDInterpolator(points, a_s)
+        interp_b = LinearNDInterpolator(points, b_s)
+        pts = np.column_stack((np.ravel(logg), np.ravel(metallicity), np.ravel(teff)))
+        a_vals = interp_a(pts)
+        a_vals = a_vals.reshape(np.shape(logg))
+        b_vals = interp_b(pts)
+        b_vals = b_vals.reshape(np.shape(logg))
+
+        return a_vals, b_vals
+
+
 
 
 """

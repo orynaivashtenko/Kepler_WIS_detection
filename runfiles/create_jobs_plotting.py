@@ -10,16 +10,23 @@ from pipeline_parameters import np, Triggers_for_slides_injections_file, N_injec
 from runfiles_parameters import *
 from trigger_functions import Index_tid
 
-import argparse
-parser = argparse.ArgumentParser()
-parser.add_argument("--trigger_list_file", type=str, nargs=1, help="path to file where to take triggers",
-                    default=Triggers_for_slides_injections_file)
-args = parser.parse_args()
-trigger_list_file = args.trigger_list_file[0]
+# import argparse
+# parser = argparse.ArgumentParser()
+# parser.add_argument("--trigger_list_file", type=str, nargs=1, help="path to file where to take triggers",
+#                     default=Triggers_for_slides_injections_file)
+# args = parser.parse_args()
+# trigger_list_file = args.trigger_list_file[0]
+#
+# with open(trigger_list_file, 'r') as tlf:
+#     trig_ids = tlf.readlines()
+# trig_ids = [tid.split()[Index_tid] for tid in trig_ids]
+# trig_ids = [tid for tid in trig_ids if (tid.isnumeric() and len(tid) == 9)]  # select only valid target ids
 
-with open(trigger_list_file, 'r') as tlf:
-    trig_ids = tlf.readlines()
-trig_ids = [tid.split()[Index_tid] for tid in trig_ids]
+
+# !!!!!!!!!!!!
+trig_ids = ['006934045']
+periods = [265.69904252160535]
+ftts = [167.1284713144964]
 
 for tid in trig_ids:
     # noinspection DuplicatedCode

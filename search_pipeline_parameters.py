@@ -79,7 +79,8 @@ Template_ind_detection = 'all'
 
 # Veto single-event:
 Margin_snr_veto = 2.
-Max_abs_stat_veto = 6.5  # something more than this will not be considered
+# Max_abs_stat_veto = 6.5  # something more than this will not be considered # RUN_13 VALUE IS 6.5!
+Max_abs_stat_veto = 7.5  # something more than this will not be considered  # 8 is better in not killing injections....
 Fn_fit_veto = 0.01
 N_parts_veto_snr = 4
 Min_bins_veto_part_time = 4  # Minimal size of one part in veto_parts_time

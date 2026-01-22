@@ -22,7 +22,6 @@ if isinstance(runfile, list):
 if runfile == 'main':
     search_runfile_filename = Main_search_runfile_filename
     job_type_prefix = Main_search_job_prefix
-
 else:
     search_runfile_filename = Main_search_scramble_runfile_filename
     job_type_prefix = Main_search_scramble_job_prefix

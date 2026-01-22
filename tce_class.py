@@ -49,9 +49,12 @@ class WisTCE(object):
                  plots_location=None,
                  allow_plots_folder_creation=True):
 
-        data_location = af.get_correct_tid_folder(target_id, data_location, allow_creation=allow_data_folder_creation)
-        output_location = af.get_correct_tid_folder(target_id, output_location, allow_creation=allow_output_folder_creation)
-        target_pixels_location = af.get_correct_tid_folder(target_id, target_pixels_location, allow_creation=allow_data_folder_creation)
+        if data_location is not None:
+            data_location = af.get_correct_tid_folder(target_id, data_location, allow_creation=allow_data_folder_creation)
+        if output_location is not None:
+            output_location = af.get_correct_tid_folder(target_id, output_location, allow_creation=allow_output_folder_creation)
+        if target_pixels_location is not None:
+            target_pixels_location = af.get_correct_tid_folder(target_id, target_pixels_location, allow_creation=allow_data_folder_creation)
 
         # Basic attributes:
         self.target_id = str(target_id).rjust(9, '0')
@@ -84,10 +87,11 @@ class WisTCE(object):
                     and os.path.basename(problems_folder) != self.target_id):
                 if self.target_id[:4] in os.listdir(problems_folder):
                     problems_folder = os.path.join(problems_folder, target_id[:4])
-        self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_tce_txt_filename_postfix)
-        if clean_problems_file:
-            if os.path.exists(self.problems_file_location):
-                os.remove(self.problems_file_location)
+        if problems_folder is not None:
+            self.problems_file_location = os.path.join(problems_folder, target_id + '_' + Problems_tce_txt_filename_postfix)
+            if clean_problems_file:
+                if os.path.exists(self.problems_file_location):
+                    os.remove(self.problems_file_location)
         self.gaia_trigger_file = None
         self.neighbors_folder = None
 
@@ -269,6 +273,8 @@ class WisTCE(object):
         if from_real_klc:
             if data_location is None:
                 data_location = self.data_location
+            if data_location is None:
+                raise ValueError("data_location is None!")
             if output_location is None:
                 output_location = self.output_location
             if template is None:
@@ -538,6 +544,8 @@ class WisTCE(object):
                                  nsig_outliers_0_pos=Nsig_outliers_0_pos_tests,
                                  save_klcs=False, save_data_to_file=False):
         if target_pixels_folder is None:
+            if self.target_pixels_location is None:
+                raise ValueError("target_pixels_location is None!")
             target_pixels_folder = self.target_pixels_location
         if period is None:
             period = self.best_per
@@ -655,6 +663,8 @@ class WisTCE(object):
                                       part_of_light=Part_of_light, save_byproducts_to_file=False):
         if (self.star_pixels_ppms is None or self.star_pixels_stds_of_ppms is None
                 or self.bg_pixels_ppms is None or self.bg_pixels_stds_of_ppms is None):
+            if self.target_pixels_location is None:
+                raise ValueError("target_pixels_location is None!")
             self.get_trigger_star_bg_ppms(
                 target_pixels_folder=self.target_pixels_location,
                 part_of_flux_peak_threshold=part_of_flux_peak_threshold,
@@ -739,6 +749,8 @@ class WisTCE(object):
         if ftt is None:
             ftt = self.best_ftt
         # times, target_pixel_fluxes = af.get_target_pixel_data_fun(self.target_id, data_folder=self.target_pixels_location)
+        if self.target_pixels_location is None:
+            raise ValueError("target_pixels_location is None!")
         times, target_pixel_fluxes, sky_coords, time_masks, aperture_masks = af.get_target_pixel_sky_coords_fun(
             target_id=self.target_id, data_location=self.target_pixels_location,
             remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
@@ -817,6 +829,9 @@ class WisTCE(object):
         for i in range(len(snr2_devs_periodic_max_over_temps)):
             snr2_devs_periodic_max_over_temps[i][snr2_devs_periodic_max_over_temps[i] == -np.inf] = np.nan
         snr2_devs_max_tot = snr2_devs_periodic_max_over_temps[0] + snr2_devs_periodic_max_over_temps[1]
+        snr2_devs_max_tot[np.isnan(snr2_devs_max_tot)] = -np.inf
+        if np.nanmax(np.nanmax(snr2_devs_max_tot, axis=-1)) == - np.inf:
+            raise ValueError("All values are nan in the selected periodic stats!")
         p_ind_max = np.nanargmax(np.nanmax(snr2_devs_max_tot, axis=-1))
         ph_ind_max = np.nanargmax(snr2_devs_max_tot[p_ind_max], axis=-1)
         snr_dev_tot_max = np.nanmax(snr2_devs_max_tot)
@@ -874,15 +889,16 @@ class WisTCE(object):
             snr2_piece = np.zeros(len(time_total))
             for i_coor in (0, 1):
                 time_piece = centr_coords_times_near_transit_pieces[i_coor][i_trans]
-                snr_piece = centr_coords_snr_near_transit_pieces[i_coor][i_trans]
-                mask_piece = (centr_coords_masks_near_transit_pieces[i_coor][i_trans]).astype(bool)
-                time_start_ind = np.nanargmin(np.abs(time_total - (time_piece[0] - transit_time)))
-                len_add = min(len(time_piece), len(time_total) - time_start_ind)
-                snr2_addition = (snr_piece[:len_add]) ** 2
-                mask_addition = mask_piece[:len_add]
-                snr2_addition[np.isnan(snr2_addition)] = 0.
-                snr2_addition[~mask_addition] = 0.
-                snr2_piece[time_start_ind: time_start_ind + len_add] += snr2_addition
+                if len(time_piece) > 0:
+                    snr_piece = centr_coords_snr_near_transit_pieces[i_coor][i_trans]
+                    mask_piece = (centr_coords_masks_near_transit_pieces[i_coor][i_trans]).astype(bool)
+                    time_start_ind = np.nanargmin(np.abs(time_total - (time_piece[0] - transit_time)))
+                    len_add = min(len(time_piece), len(time_total) - time_start_ind)
+                    snr2_addition = (snr_piece[:len_add]) ** 2
+                    mask_addition = mask_piece[:len_add]
+                    snr2_addition[np.isnan(snr2_addition)] = 0.
+                    snr2_addition[~mask_addition] = 0.
+                    snr2_piece[time_start_ind: time_start_ind + len_add] += snr2_addition
             centr_snr2_near_transit_pieces.append(snr2_piece)
         return (centr_coords_snr_peaks, centr_coords_snr_near_transit_pieces, centr_coords_times_near_transit_pieces,
                 centr_snr2_near_transit_pieces, time_total, seasons)
@@ -931,10 +947,14 @@ class WisTCE(object):
         :return:
         :rtype:
         """
+        if self.data_location is None:
+            raise ValueError('data_location is None')
         self.get_transit_times_info(from_real_klc=True, data_location=self.data_location, output_location=self.output_location)
         # times, _, _, kepler_quality_masks, _ = af.get_target_pixel_sky_coords_fun(
         #     target_id=self.target_id, data_location=self.target_pixels_location,
         #     remove_zeroth_quarter=True, remove_quarter_17=True, cut_edge_nans=True)
+        if self.target_pixels_location is None:
+            raise ValueError("target_pixels_location is None!")
         times, kepler_quality_masks = af.get_kepler_quality_masks_from_tpf(target_id=self.target_id,
                                                                            data_location=self.target_pixels_location,
                                                                            remove_zeroth_quarter=True, remove_quarter_17=True,
@@ -1375,6 +1395,8 @@ class WisTCE(object):
     def veto_fold_residuals(self, fn_fold_veto=Fn_fold_veto, ignore_moving_template_shape=True,
                             save_byproducts_to_file=False):
         self.is_bad_fold_residuals = False
+        if self.data_location is None:
+            raise ValueError('data_location is None')
         klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                     output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
                                     cut_edge_nans=True, remove_zeroth_quarter=True, remove_quarter_17=True,
@@ -1585,6 +1607,8 @@ class WisTCE(object):
         self.veto_fold_parts_fourier(fn_parts_veto=Fn_fold_veto)
         if self.is_bad_fold_parts_time or self.is_bad_fold_residuals_fft:
             self.is_bad_fold_residuals_parts = True
+        else:
+            self.is_bad_fold_residuals_parts = False
 
     def veto_fold_parts_time(self, fn_parts_veto=Fn_parts_veto, min_part_bins=Min_len_part_bins_veto_parts_fold):
         file_path = af.get_saving_file_path(target_id=self.target_id, output_location=self.output_location,
@@ -1763,6 +1787,8 @@ class WisTCE(object):
             self.is_bad_fold_parts_fourier = p_value_renorm < fn_parts_veto
 
     def veto_even_odd(self, fn=Fn_fold_veto, save_byproducts_to_file=False):
+        if self.data_location is None:
+            raise ValueError('data_location is None')
         klc = spip.KeplerLightCurve(target_id=self.target_id, get_data=True, data_location=self.data_location,
                                     output_location=self.output_location, m_1_3_r_s=self.m_1_3_r_s,
                                     cut_edge_nans=True, remove_zeroth_quarter=True, remove_quarter_17=True,
