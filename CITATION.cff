@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: >
+  If you use, copy, modify, or adapt this software in scientific research,
+  please cite the associated publication listed below.
+title: "Kepler_WIS_detection"
+type: software
+authors:
+  - family-names: "Ivashtenko"
+    given-names: "Oryna"
+    orcid: "https://orcid.org/0000-0002-2805-9405"
+repository-code: "https://github.com/orynaivashtenko/Kepler_WIS_detection"
+license: MIT
+preferred-citation:
+  type: article
+  title: "An Independent Search for Small Long-period Planets in Kepler Data. I. Detection Pipeline"
+  authors:
+    - family-names: "Ivashtenko"
+      given-names: "Oryna"
+    - family-names: "Zackay"
+      given-names: "Barak"
+  journal: "The Astronomical Journal"
+  volume: 170
+  issue: 6
+  year: 2025
+  doi: "10.3847/1538-3881/adfc50"
